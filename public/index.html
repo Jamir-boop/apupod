@@ -1,0 +1,1476 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Podcast Builder</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --surface-0: #000000;
+      --surface-1: #050505;
+      --surface-2: #080808;
+      --surface-3: #101010;
+      --text: #FFFFFF;
+      --muted: #A0A0A0;
+      --disabled: #555555;
+      --accent: #FFB900;
+      --success: #35C46A;
+      --danger: #EF5B5B;
+      --text-on-accent: #000000;
+      --line: #332500;
+      --line-strong: #664A00;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--surface-0); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+    ::selection { color: #000000; background: var(--accent); }
+    button, input, select, textarea { font: inherit; }
+    button { border: 1px solid var(--line-strong); border-radius: 2px; padding: 9px 13px; color: var(--text); background: var(--surface-3); cursor: pointer; font-weight: 700; }
+    button:hover:not(:disabled), button.active { color: #000000; background: var(--accent); border-color: var(--accent); }
+    button.primary { color: #000000; background: var(--accent); border-color: var(--accent); }
+    button.primary:hover:not(:disabled) { color: var(--text-on-accent); background: #CC9500; border-color: #CC9500; }
+    button.danger { color: var(--text); border-color: #8F3434; background: #220B0B; }
+    button.danger:hover:not(:disabled) { color: #FFFFFF; background: #7A1F1F; border-color: #B53C3C; }
+    button:disabled { color: var(--disabled); border-color: var(--line); cursor: not-allowed; }
+    input, select, textarea { width: 100%; color: var(--text); background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: 2px; padding: 9px 10px; }
+    input[type="checkbox"] { width: auto; justify-self: start; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    textarea { min-height: 90px; resize: vertical; line-height: 1.45; }
+    textarea.transcript { min-height: 520px; font: 14px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    label { display: grid; gap: 6px; color: var(--muted); font-weight: 650; }
+    h1, h2, h3 { margin: 0 0 12px; line-height: 1.2; }
+    h1 { font-size: 22px; }
+    h2 { font-size: 21px; }
+    h3 { font-size: 16px; }
+    p { margin: 8px 0; }
+    code { color: var(--accent); background: var(--surface-1); border: 1px solid var(--line); padding: 1px 5px; border-radius: 2px; }
+    legend { color: var(--accent); }
+    .muted, small { color: var(--muted); }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 320px minmax(0, 1fr); }
+    aside { position: sticky; top: 0; min-width: 0; height: 100vh; padding: 22px 18px; background: var(--surface-1); border-right: 1px solid var(--line); overflow-x: hidden; overflow-y: auto; }
+    aside p { margin-bottom: 22px; }
+    nav { display: grid; gap: 7px; }
+    nav button { min-width: 0; width: 100%; overflow-wrap: anywhere; text-align: left; background: transparent; border-color: transparent; color: var(--muted); }
+    nav button.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
+    main { width: min(1120px, calc(100% - 36px)); margin: 24px auto 60px; }
+    .view { display: grid; gap: 18px; }
+    .view[hidden] { display: none; }
+    .panel { padding: 20px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .full { grid-column: 1 / -1; }
+    .actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 14px; }
+    .toolbar { display: grid; grid-template-columns: 1fr auto auto auto; gap: 9px; align-items: end; margin-bottom: 16px; }
+    .subnav { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 16px; }
+    .subnav button { min-width: 160px; }
+    .view-header, .provider-head, .connection-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+    .profile-pills, .active-model-pills, .modality-pills, .model-status { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 16px; }
+    .profile-pill, .model-pill, .modality-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 9px; overflow-wrap: anywhere; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: var(--surface-1); font-size: 12px; }
+    .profile-pill.active, .model-pill.used, .modality-pill.active { color: #000; background: var(--accent); border-color: var(--accent); }
+    .model-pill.tts { color: var(--accent); }
+    .model-pill.tts.used { color: #000; }
+    .status-pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px; border: 1px solid var(--disabled); border-radius: 999px; color: var(--muted); background: var(--surface-1); font-size: 12px; }
+    .status-pill::before { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--disabled); content: ""; }
+    .status-pill.ready { color: var(--success); border-color: var(--success); }
+    .status-pill.ready::before { background: var(--success); }
+    .status-pill.error { color: var(--danger); border-color: var(--danger); }
+    .status-pill.error::before { background: var(--danger); }
+    .status-pill.loading { color: var(--accent); border-color: var(--accent); }
+    .status-pill.loading::before { background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+    @keyframes pulse { to { opacity: .25; } }
+    .profile-section[hidden] { display: none; }
+    .status { display: none; margin-bottom: 18px; padding: 11px 13px; border-radius: 2px; border: 1px solid var(--line-strong); background: var(--surface-3); }
+    .status.show { display: block; }
+    .status.error { border-style: double; border-color: var(--accent); }
+    .status.ok { border-color: var(--accent); }
+    fieldset { margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 2px; }
+    legend { font-weight: 750; padding: 0 6px; }
+    .speaker-list { display: grid; gap: 12px; margin-top: 14px; }
+    .speaker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .badge { display: inline-block; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--muted); font-size: 12px; }
+    .warning { color: var(--accent); }
+    .separator { border-top: 1px solid var(--line); margin: 20px 0; }
+    .speaker-summary { display: grid; gap: 8px; margin-top: 12px; }
+    .speaker-summary > div { padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 2px; }
+    .provider-card { padding: 16px; border: 1px solid var(--line); background: var(--surface-1); }
+    .provider-card + .provider-card { margin-top: 14px; }
+    .provider-card[data-configured="false"] { opacity: .82; }
+    .connection-row { margin-top: 12px; border: 1px solid var(--line); background: var(--surface-0); }
+    .connection-row > summary { padding: 14px; cursor: pointer; }
+    .connection-row > summary:hover { background: var(--surface-3); }
+    .connection-row > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .connection-body { padding: 0 14px 14px; }
+    .connection-head strong { overflow-wrap: anywhere; }
+    .connection-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+    .config-status { color: var(--muted); font-size: 12px; }
+    dialog { width: min(720px, calc(100% - 32px)); max-height: 86vh; padding: 0; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); }
+    dialog::backdrop { background: rgba(0, 0, 0, .78); }
+    .dialog-body { display: grid; gap: 14px; padding: 20px; }
+    .model-list { display: grid; gap: 6px; max-height: 45vh; overflow-y: auto; }
+    .model-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 130px; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--line); }
+    .model-row[hidden] { display: none; }
+    audio { width: min(100%, 700px); margin-top: 12px; }
+    progress { width: min(100%, 700px); height: 14px; accent-color: var(--accent); }
+    .server-activity { min-width: 0; max-width: 100%; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .server-activity h2 { margin-bottom: 8px; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    .activity-list { display: grid; min-width: 0; max-width: 100%; gap: 7px; }
+    .job-item { min-width: 0; max-width: 100%; padding: 8px; overflow: hidden; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--surface-0); font-size: 12px; }
+    .job-item strong { display: block; color: var(--text); overflow-wrap: anywhere; }
+    .job-item[data-status="running"], .job-item[data-status="queued"] { border-color: var(--accent); }
+    .loading-line { display: flex; align-items: center; gap: 9px; margin-top: 12px; color: var(--accent); }
+    .loading-line[hidden] { display: none; }
+    .spinner { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid var(--disabled); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 820px) {
+      .app { display: block; }
+      aside { position: sticky; z-index: 10; height: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+      aside h1, aside p { display: none; }
+      nav { display: flex; overflow-x: auto; }
+      nav button { width: auto; white-space: nowrap; }
+      .server-activity { margin-top: 10px; padding-top: 10px; }
+      main { width: min(100% - 24px, 1120px); margin-top: 14px; }
+      .grid, .grid.three { grid-template-columns: 1fr; }
+      .full { grid-column: auto; }
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .model-row { grid-template-columns: auto minmax(0, 1fr); }
+      .model-row select { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <h1>Podcast Builder</h1>
+      <p class="muted">Local UI · cloud generation</p>
+      <nav aria-label="Builder views">
+        <button data-view="profiles">Profiles</button>
+        <button data-view="knowledge">Knowledge Base</button>
+        <button data-view="transcript">Transcript Generator</button>
+        <button data-view="tts">TTS Generator</button>
+        <button data-view="config">Config</button>
+      </nav>
+      <section class="server-activity" aria-live="polite">
+        <h2>Server Activity</h2>
+        <div id="serverActivity" class="activity-list"><span class="muted">Loading…</span></div>
+      </section>
+    </aside>
+
+    <main>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+
+      <div id="view-profiles" class="view">
+        <div class="view-header">
+          <div><h2>Profiles</h2><p class="muted">Speaker and episode profiles are saved together.</p></div>
+          <button id="saveProfiles" class="primary">Save all profiles</button>
+        </div>
+        <div class="actions">
+          <button id="refreshModels">Refresh models</button>
+          <div id="modelStatus" class="model-status" role="status" aria-live="polite"></div>
+        </div>
+        <div class="subnav" aria-label="Profile sections">
+          <button id="profilesSpeakersTab" type="button">Speaker Profiles</button>
+          <button id="profilesEpisodesTab" type="button">Episode Profiles</button>
+        </div>
+        <section id="profiles-speakers" class="panel">
+          <h2>Speaker Profiles</h2>
+          <p class="muted">Each profile supports 1–4 speakers. MiMo stays default; ElevenLabs models can be selected globally or per speaker.</p>
+          <div class="toolbar">
+            <label>Profile<select id="speakerProfileSelect"></select></label>
+            <button id="newSpeakerProfile">New</button>
+            <button id="duplicateSpeakerProfile">Duplicate</button>
+            <button id="deleteSpeakerProfile" class="danger">Delete</button>
+          </div>
+          <div id="speakerProfilePills" class="profile-pills" aria-label="Selected speaker profile details"></div>
+          <div class="grid">
+            <label class="full">Name<input id="spName"></label>
+            <label class="full">Description<textarea id="spDescription"></textarea></label>
+            <label>Default TTS model<select id="spVoiceModel"></select></label>
+            <label class="full">Profile rules<textarea id="spInstructions"></textarea></label>
+          </div>
+          <div id="speakerCards" class="speaker-list"></div>
+          <div class="actions"><button id="addSpeaker">Add speaker</button></div>
+        </section>
+
+        <section id="profiles-episodes" class="panel" hidden>
+          <h2>Episode Profiles</h2>
+          <div class="toolbar">
+            <label>Profile<select id="episodeProfileSelect"></select></label>
+            <button id="newEpisodeProfile">New</button>
+            <button id="duplicateEpisodeProfile">Duplicate</button>
+            <button id="deleteEpisodeProfile" class="danger">Delete</button>
+          </div>
+          <div id="episodeProfilePills" class="profile-pills" aria-label="Selected episode profile details"></div>
+          <div class="grid">
+            <label class="full">Name<input id="epName"></label>
+            <label class="full">Description<textarea id="epDescription"></textarea></label>
+            <label>Speaker Profile<select id="epSpeakerProfile"></select></label>
+            <label>Segments<input id="epSegments" type="number" min="3" max="20"></label>
+            <label>Outline model<select id="epOutlineModel"></select></label>
+            <label>Transcript model<select id="epTranscriptModel"></select></label>
+            <label>Language<select id="epLanguage"></select></label>
+            <label>Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
+            <label class="full">Default briefing<textarea id="epBriefing" style="min-height:320px"></textarea></label>
+          </div>
+        </section>
+      </div>
+
+      <div id="view-knowledge" class="view" hidden>
+        <section class="panel">
+          <h2>Knowledge Base</h2>
+          <p class="muted">Upload Markdown used as full context for transcript generation.</p>
+          <div class="grid">
+            <label>Markdown file<input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain"></label>
+            <div class="actions"><button id="uploadKnowledge" class="primary">Upload knowledge base</button></div>
+          </div>
+          <div class="separator"></div>
+          <h3>Available files</h3>
+          <div id="knowledgeSummary" class="speaker-summary"><p class="muted">No knowledge base loaded.</p></div>
+        </section>
+      </div>
+
+      <div id="view-transcript" class="view" hidden>
+        <section class="panel">
+          <h2>Transcript Generator</h2>
+          <div class="toolbar">
+            <label>Saved episode<select id="savedEpisodeSelect"><option value="">New episode</option></select></label>
+            <button id="newEpisode">New</button>
+            <span></span><span></span>
+          </div>
+          <div class="grid three">
+            <label>Episode Profile<select id="buildEpisodeProfile"></select></label>
+            <label>Suggested episode<select id="episodeSeed"><option value="">Choose title…</option></select></label>
+            <label class="full">Knowledge Base<select id="buildKnowledge"></select></label>
+            <label class="full">Episode name<input id="episodeName" placeholder="Ep. 01 — Title"></label>
+            <label class="full">Additional instructions<textarea id="additionalInstructions" style="min-height:190px"></textarea></label>
+          </div>
+          <div class="actions">
+            <button id="saveEpisode">Save draft</button>
+            <button id="generateTranscript" class="primary">Generate transcript</button>
+          </div>
+          <div id="transcriptJob" class="loading-line" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="transcriptJobStatus"></span></div>
+          <div class="separator"></div>
+          <p class="muted">Format: <code>## Segmento</code>, then <code>Speaker [optional delivery cue]: spoken text</code>. One turn per line.</p>
+          <div class="actions">
+            <label style="display:inline-grid">Import transcript<input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
+            <span id="wordCount" class="muted">0 words</span>
+          </div>
+          <textarea id="transcript" class="transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
+          <div class="actions"><button id="saveTranscript" class="primary">Save transcript</button></div>
+        </section>
+      </div>
+
+      <div id="view-tts" class="view" hidden>
+        <section class="panel">
+          <h2>TTS Generator</h2>
+          <label>Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
+          <label>TTS language override<select id="ttsLanguageOverride"><option value="">Use episode profile language</option></select></label>
+          <div id="ttsSummary" class="speaker-summary"><p class="muted">Select a saved episode with a transcript.</p></div>
+          <div id="previewButtons" class="actions"></div>
+          <p class="warning">Preview every voice before rendering. MiMo preset TTS is blocked outside English/Chinese; other languages require a compatible ElevenLabs model and <code>ELEVENLABS_API_KEY</code>.</p>
+          <audio id="previewAudio" controls hidden></audio>
+          <div class="separator"></div>
+          <div class="actions"><button id="applyLatestProfiles">Apply latest profiles</button><button id="renderAudio" class="primary">Render MP3</button></div>
+          <progress id="renderProgress" value="0" max="1" hidden></progress>
+          <p id="renderStatus" class="muted"></p>
+          <audio id="episodeAudio" controls hidden></audio>
+        </section>
+      </div>
+
+      <div id="view-config" class="view" hidden>
+        <section class="panel">
+          <div class="view-header">
+            <div><h2>Model Connections</h2><p class="muted">Configure connections, then activate only models needed by profiles and generators.</p></div>
+            <button id="saveConfig" class="primary">Save config</button>
+          </div>
+          <div id="configModelStatus" class="model-status" role="status" aria-live="polite"></div>
+          <div id="configProviders"></div>
+          <div class="actions"><button id="addCompatibleConnection">Add OpenAI compatible connection</button></div>
+        </section>
+      </div>
+
+      <dialog id="modelDialog">
+        <div class="dialog-body">
+          <div class="view-header"><div><h2 id="modelDialogTitle">Active models</h2><p id="modelDialogStatus" class="muted"></p></div><button id="closeModelDialog" type="button">Close</button></div>
+          <label>Search models<input id="modelSearch" type="search" placeholder="Search discovered models"></label>
+          <div class="actions"><button id="toggleFilteredModels" type="button">Select all filtered</button><span id="modelSelectionCount" class="muted"></span></div>
+          <div id="modelSelectionList" class="model-list"></div>
+          <div class="grid">
+            <label>Custom model ID<input id="customModelId" placeholder="Model ID not returned by /models"></label>
+            <label>Custom model type<select id="customModelType"><option value="text">LLM</option><option value="tts">TTS</option><option value="both">Both</option></select></label>
+          </div>
+          <div class="actions"><button id="addCustomModel" type="button">Add custom model</button><button id="applyModelSelection" type="button" class="primary">Apply model selection</button></div>
+        </div>
+      </dialog>
+    </main>
+  </div>
+
+  <script type="module">
+    const mimoVoices = ["mimo_default", "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean"];
+    const openaiVoices = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"];
+    const openaiLegacyVoices = new Set(["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]);
+    const $ = (id) => document.getElementById(id);
+    let state;
+    let modelCatalog = { status: "loading", languages: [], providers: { mimo: { textModels: [], ttsModels: [], discoveredModels: [] }, elevenlabs: { ttsModels: [], discoveredModels: [] }, openai: { textModels: [], ttsModels: [], discoveredModels: [] }, chatterbox: { textModels: [], ttsModels: [], discoveredModels: [] }, compatible: [] } };
+    let jobsState = { activeJobId: null, jobs: [] };
+    let currentEpisode = null;
+    let configState = null;
+    let activeSpeakerProfileId = "";
+    let activeEpisodeProfileId = "";
+    let activeProfileSection = "speakers";
+    let previewUrl = "";
+    let elevenVoices = [];
+    let chatterboxVoices = [];
+    const voiceRequests = {};
+    let configDirty = false;
+    let profilesDirty = false;
+    let episodeDraftDirty = false;
+    let transcriptDirty = false;
+    let modelDialogTarget = null;
+    let jobPollTimer = null;
+    let modelPollTimer = null;
+    let hadActiveJobs = false;
+
+    function notify(message, type = "") {
+      $("status").textContent = message;
+      $("status").className = `status show ${type}`;
+    }
+
+    function clearNotice() { $("status").className = "status"; }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: options.body ? { "Content-Type": "application/json", ...(options.headers || {}) } : options.headers,
+      });
+      const type = response.headers.get("content-type") || "";
+      const value = type.includes("application/json") ? await response.json() : await response.text();
+      if (!response.ok) throw new Error(value?.error || value || `${response.status} ${response.statusText}`);
+      return value;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    }
+
+    function option(value, label, selected = false, disabled = false) {
+      return `<option value="${escapeHtml(value)}"${selected ? " selected" : ""}${disabled ? " disabled" : ""}>${escapeHtml(label)}</option>`;
+    }
+
+    function discoveredModels(kind) {
+      const providers = modelCatalog.providers || {};
+      const compatibleItems = kind === "text"
+        ? (providers.compatible || []).flatMap((provider) => provider.textModels || [])
+        : (providers.compatible || []).flatMap((provider) => provider.ttsModels || []);
+      const items = kind === "text"
+        ? [...(providers.mimo?.textModels || []), ...(providers.openai?.textModels || []), ...(providers.chatterbox?.textModels || []), ...compatibleItems]
+        : [...(providers.mimo?.ttsModels || []), ...(providers.elevenlabs?.ttsModels || []), ...(providers.openai?.ttsModels || []), ...(providers.chatterbox?.ttsModels || []), ...compatibleItems];
+      return [...new Map(items.map((model) => [model.id, {
+        ...model,
+        label: ["compatible", "openai", "chatterbox"].includes(model.provider)
+          ? `${model.connectionName} - ${model.name || model.rawId || model.id}`
+          : `${model.provider === "elevenlabs" ? "ElevenLabs" : "MiMo"} - ${model.name || model.id}${model.requiresAlphaAccess ? " - alpha access" : ""}`,
+      }])).values()];
+    }
+
+    function selectModelOptions(kind, selected, includeDefault = false) {
+      const models = discoveredModels(kind);
+      let html = includeDefault ? option("", "Use profile default", !selected) : "";
+      html += models.map((model) => option(model.id, model.label, model.id === selected)).join("");
+      if (selected && !models.some((model) => model.id === selected)) html += option(selected, `${selected} · saved/unavailable`, true, true);
+      if (!html) html = option("", modelCatalog.status === "loading" ? "Loading models…" : "No available models", true, true);
+      return html;
+    }
+
+    function modelOptions(selected, includeDefault = false) {
+      return selectModelOptions("tts", selected, includeDefault);
+    }
+
+    function textModelOptions(selected) { return selectModelOptions("text", selected); }
+
+    function modelLabel(modelId) { return discoveredModels("tts").find((model) => model.id === modelId)?.label || modelId; }
+
+    function textModelLabel(modelId) { return discoveredModels("text").find((model) => model.id === modelId)?.label || modelId; }
+
+    function languageById(id) { return (modelCatalog.languages || []).find((language) => language.id === id); }
+
+    function languageOptions(selected) {
+      const languages = modelCatalog.languages || [];
+      let html = languages.map((language) => option(language.id, `${language.name} · ${language.id}`, language.id === selected)).join("");
+      if (selected && !languages.some((language) => language.id === selected)) html += option(selected, `${selected} · saved/unavailable`, true, true);
+      return html || option("", "Loading languages…", true, true);
+    }
+
+    function modelLanguageError(modelId, language) {
+      if (!language) return "Episode language is unavailable.";
+      if (modelId === "mimo-v2.5-tts") return ["en", "zh"].includes(language.apiCode) ? "" : `MiMo preset TTS does not support ${language.name}; choose ElevenLabs.`;
+      const model = discoveredModels("tts").find((item) => item.id === modelId);
+      if (model?.provider === "compatible") return "";
+      if (model?.provider === "elevenlabs" && model.languages?.length && !model.languages.some((item) => item.id === language.apiCode)) return `${model.name} does not support ${language.name}.`;
+      return "";
+    }
+
+    function ttsCompatibilityErrors() {
+      if (!state || !currentEpisode) return ["Select a saved episode."];
+      const { episodeProfile, speakerProfile } = currentEpisodeProfiles();
+      const language = selectedTtsLanguage();
+      if (!speakerProfile) return ["Speaker profile is unavailable."];
+      return speakerProfile.speakers.map((speaker) => {
+        const error = modelLanguageError(speaker.ttsModelOverride || speakerProfile.voiceModel, language);
+        return error ? `${speaker.name}: ${error}` : "";
+      }).filter(Boolean);
+    }
+
+    function setView(view) {
+      const selected = ["profiles", "knowledge", "transcript", "tts", "config"].includes(view) ? view : "profiles";
+      document.querySelectorAll(".view").forEach((node) => { node.hidden = node.id !== `view-${selected}`; });
+      document.querySelectorAll("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === selected));
+      if (location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
+      if (selected === "tts") renderTtsView();
+      if (selected === "config") renderConfigView();
+    }
+
+    function modelProviders() {
+      return [
+        ["MiMo", modelCatalog.providers?.mimo],
+        ["ElevenLabs", modelCatalog.providers?.elevenlabs],
+        ["OpenAI", modelCatalog.providers?.openai],
+        ["Chatterbox", modelCatalog.providers?.chatterbox],
+        ...((modelCatalog.providers?.compatible || []).map((provider) => [provider.name, provider])),
+      ].filter(([, provider]) => provider);
+    }
+
+    function providerStatusPill(name, provider) {
+      const status = ["ready", "error", "loading"].includes(provider?.status) ? provider.status : "unconfigured";
+      const label = status === "ready" ? "Ready" : status === "error" ? "Error" : status === "loading" ? "Loading" : "Not configured";
+      return `<span class="status-pill ${status}" title="${escapeHtml(providerStatus(provider))}">${escapeHtml(name)} · ${label}</span>`;
+    }
+
+    function renderModelStatus() {
+      const summary = modelProviders().map(([name, provider]) => providerStatusPill(name, provider)).join("");
+      for (const id of ["modelStatus", "configModelStatus"]) $(id).innerHTML = summary;
+      $("refreshModels").disabled = modelCatalog.status === "loading";
+    }
+
+    async function loadModelCatalog() {
+      clearTimeout(modelPollTimer);
+      modelCatalog = await api("/api/models");
+      renderModelStatus();
+      if (state) {
+        syncSpeakerForm();
+        syncEpisodeProfileForm();
+        syncConfigForm();
+        renderProfileOptions();
+        renderProfileSections();
+        renderConfigView();
+        renderTtsView();
+        renderJobIndicators();
+      }
+      if (modelCatalog.status === "loading") modelPollTimer = setTimeout(() => loadModelCatalog().catch((error) => notify(error.message, "error")), 700);
+    }
+
+    async function refreshModels() {
+      await api("/api/models/refresh", { method: "POST" });
+      modelCatalog.status = "loading";
+      renderModelStatus();
+      await loadModelCatalog();
+    }
+
+    function activeJobs() { return jobsState.jobs.filter((job) => ["queued", "running"].includes(job.status)); }
+
+    function renderServerActivity() {
+      const jobs = [...activeJobs(), ...jobsState.jobs.filter((job) => !["queued", "running"].includes(job.status))]
+        .filter((job, index, all) => all.findIndex((item) => item.id === job.id) === index)
+        .slice(0, 4);
+      $("serverActivity").innerHTML = jobs.length ? jobs.map((job) => `<div class="job-item" data-status="${escapeHtml(job.status)}">
+        <strong>${escapeHtml(job.episodeName || job.episodeId)}</strong>
+        <span class="muted">${escapeHtml(job.type.toUpperCase())} · ${escapeHtml(job.status)}</span><br>
+        <span>${escapeHtml(job.message || job.phase)}</span>
+      </div>`).join("") : '<span class="muted">Idle</span>';
+    }
+
+    function currentJob(type) {
+      return jobsState.jobs.find((job) => job.episodeId === currentEpisode?.id && job.type === type);
+    }
+
+    function renderJobIndicators() {
+      const transcriptJob = currentJob("transcript");
+      const ttsJob = currentJob("tts");
+      const episodeBusy = jobsState.jobs.some((job) => job.episodeId === currentEpisode?.id && ["queued", "running"].includes(job.status));
+      const transcriptBusy = transcriptJob && ["queued", "running"].includes(transcriptJob.status);
+      $("transcriptJob").hidden = !transcriptBusy;
+      $("transcriptJobStatus").textContent = transcriptBusy ? transcriptJob.message : "";
+      $("generateTranscript").disabled = episodeBusy;
+      $("saveEpisode").disabled = episodeBusy;
+      $("saveTranscript").disabled = episodeBusy;
+      $("applyLatestProfiles").disabled = episodeBusy || !currentEpisode || episodeProfilesAreCurrent();
+      $("renderAudio").disabled = episodeBusy || ttsCompatibilityErrors().length > 0;
+
+      if (ttsJob) {
+        $("renderProgress").hidden = false;
+        $("renderProgress").max = Math.max(1, ttsJob.total || 1);
+        $("renderProgress").value = ttsJob.completed || 0;
+        $("renderStatus").textContent = ttsJob.message || ttsJob.phase;
+      } else {
+        $("renderProgress").hidden = true;
+        $("renderStatus").textContent = "";
+      }
+    }
+
+    async function refreshJobs() {
+      clearTimeout(jobPollTimer);
+      jobsState = await api("/api/jobs");
+      const running = activeJobs().length > 0;
+      renderServerActivity();
+      renderJobIndicators();
+      if (hadActiveJobs && !running) {
+        const latest = jobsState.jobs[0];
+        if (currentEpisode) await refreshState(currentEpisode.id);
+        if (latest?.status === "completed") notify(latest.type === "transcript" ? "Transcript ready." : "MP3 render complete.", "ok");
+        if (["failed", "interrupted"].includes(latest?.status)) notify(latest.error || latest.message, "error");
+      }
+      hadActiveJobs = running;
+      if (running) jobPollTimer = setTimeout(() => refreshJobs().catch((error) => notify(error.message, "error")), 1000);
+    }
+
+    function trackJob(job) {
+      jobsState.jobs = [job, ...jobsState.jobs.filter((item) => item.id !== job.id)];
+      hadActiveJobs = true;
+      renderServerActivity();
+      renderJobIndicators();
+      clearTimeout(jobPollTimer);
+      jobPollTimer = setTimeout(() => refreshJobs().catch((error) => notify(error.message, "error")), 250);
+    }
+
+    async function refreshState(preferredEpisodeId = currentEpisode?.id) {
+      if (profilesDirty) {
+        syncSpeakerForm();
+        syncEpisodeProfileForm();
+      }
+      if (configDirty) syncConfigForm();
+      const pendingProfiles = profilesDirty ? state?.profiles : null;
+      const pendingConfig = configState;
+      const pendingDraft = episodeDraftDirty || transcriptDirty ? captureEpisodeDraft() : null;
+      state = await api("/api/state");
+      if (pendingProfiles) state.profiles = pendingProfiles;
+      configState = configDirty ? pendingConfig : structuredClone(state.config || { providers: { mimo: {}, elevenlabs: {}, openai: {}, chatterbox: {} }, compatibleConnections: [] });
+      renderProfileOptions();
+      renderProfileSections();
+      renderBuildOptions();
+      renderConfigView();
+      if (preferredEpisodeId && state.episodes.some((episode) => episode.id === preferredEpisodeId && !episode.corrupt)) await selectEpisode(preferredEpisodeId, pendingDraft);
+      else {
+        resetEpisodeForm(Boolean(pendingDraft));
+        if (pendingDraft) restoreEpisodeDraft(pendingDraft);
+      }
+      renderJobIndicators();
+    }
+
+    function renderProfileOptions() {
+      const speakers = state.profiles.speakerProfiles;
+      const episodes = state.profiles.episodeProfiles;
+      activeSpeakerProfileId = speakers.some((item) => item.id === activeSpeakerProfileId) ? activeSpeakerProfileId : speakers[0]?.id || "";
+      activeEpisodeProfileId = episodes.some((item) => item.id === activeEpisodeProfileId) ? activeEpisodeProfileId : episodes[0]?.id || "";
+      $("speakerProfileSelect").innerHTML = speakers.map((item) => option(item.id, item.name, item.id === activeSpeakerProfileId)).join("");
+      $("episodeProfileSelect").innerHTML = episodes.map((item) => option(item.id, item.name, item.id === activeEpisodeProfileId)).join("");
+      const selectedSpeaker = speakers.find((item) => item.id === activeSpeakerProfileId);
+      const selectedEpisode = episodes.find((item) => item.id === activeEpisodeProfileId);
+      const selectedEpisodeSpeaker = speakers.find((item) => item.id === selectedEpisode?.speakerProfileId);
+      $("speakerProfilePills").innerHTML = selectedSpeaker ? `<span class="profile-pill active">${selectedSpeaker.speakers.length} speaker${selectedSpeaker.speakers.length === 1 ? "" : "s"}</span><span class="profile-pill">${escapeHtml(modelLabel(selectedSpeaker.voiceModel))}</span>` : "";
+      $("episodeProfilePills").innerHTML = selectedEpisode ? [
+        `<span class="profile-pill active">${escapeHtml(languageById(selectedEpisode.language)?.name || selectedEpisode.language)}</span>`,
+        `<span class="profile-pill">${selectedEpisode.numSegments} segments</span>`,
+        `<span class="profile-pill">${selectedEpisode.targetMinutes} min</span>`,
+        `<span class="profile-pill">${escapeHtml(selectedEpisodeSpeaker?.name || "Speaker profile unavailable")}</span>`,
+        `<span class="profile-pill">Outline: ${escapeHtml(textModelLabel(selectedEpisode.outlineModel))}</span>`,
+        `<span class="profile-pill">Transcript: ${escapeHtml(textModelLabel(selectedEpisode.transcriptModel))}</span>`,
+      ].join("") : "";
+      loadSpeakerForm(activeSpeakerProfileId);
+      loadEpisodeProfileForm(activeEpisodeProfileId);
+    }
+
+    function renderBuildOptions() {
+      $("buildEpisodeProfile").innerHTML = state.profiles.episodeProfiles.map((item) => option(item.id, item.name)).join("");
+      $("buildKnowledge").innerHTML = state.knowledgeBases.length
+        ? state.knowledgeBases.map((item) => option(item.id, `${item.name} (${item.characters.toLocaleString()} chars)`)).join("")
+        : '<option value="">Upload Markdown first</option>';
+      $("episodeSeed").innerHTML = '<option value="">Choose title…</option>' + state.profiles.episodeSeeds.map((item, index) => option(String(index), item.name)).join("");
+      const episodeOptions = state.episodes.map((item) => option(item.id, item.corrupt ? `${item.name} — ${item.lastError}` : `${item.name} — ${item.status}`, currentEpisode?.id === item.id, item.corrupt)).join("");
+      $("savedEpisodeSelect").innerHTML = '<option value="">New episode</option>' + episodeOptions;
+      $("ttsEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
+      $("knowledgeSummary").innerHTML = state.knowledgeBases.length
+        ? state.knowledgeBases.map((item) => `<div><strong>${escapeHtml(item.name)}</strong><br><span class="muted">${item.characters.toLocaleString()} characters</span></div>`).join("")
+        : '<p class="muted">No knowledge base loaded.</p>';
+    }
+
+    function renderProfileSections() {
+      $("profiles-speakers").hidden = activeProfileSection !== "speakers";
+      $("profiles-episodes").hidden = activeProfileSection !== "episodes";
+      $("profilesSpeakersTab").classList.toggle("active", activeProfileSection === "speakers");
+      $("profilesEpisodesTab").classList.toggle("active", activeProfileSection === "episodes");
+      $("saveProfiles").textContent = activeProfileSection === "episodes" ? "Save episode profiles" : "Save speaker profiles";
+    }
+
+    function ttsLanguageOptions(selected) {
+      return option("", "Use episode profile language", !selected) + languageOptions(selected);
+    }
+
+    function selectedTtsLanguage() {
+      if (!state || !currentEpisode) return null;
+      const { episodeProfile } = currentEpisodeProfiles();
+      return languageById($("ttsLanguageOverride").value || episodeProfile?.language);
+    }
+
+    function currentEpisodeProfiles() {
+      const episodeProfile = currentEpisode?.episodeProfile || state?.profiles.episodeProfiles.find((item) => item.id === currentEpisode?.episodeProfileId);
+      const speakerProfile = currentEpisode?.speakerProfile || state?.profiles.speakerProfiles.find((item) => item.id === episodeProfile?.speakerProfileId);
+      return { episodeProfile, speakerProfile };
+    }
+
+    function episodeProfilesAreCurrent() {
+      if (!state || !currentEpisode) return false;
+      const episodeProfile = state.profiles.episodeProfiles.find((item) => item.id === currentEpisode.episodeProfileId);
+      const speakerProfile = state.profiles.speakerProfiles.find((item) => item.id === episodeProfile?.speakerProfileId);
+      return JSON.stringify(currentEpisode.episodeProfile) === JSON.stringify(episodeProfile)
+        && JSON.stringify(currentEpisode.speakerProfile) === JSON.stringify(speakerProfile);
+    }
+
+    function syncConfigForm() {
+      if (!configState) return;
+      for (const id of ["mimo", "elevenlabs", "openai", "chatterbox"]) {
+        const row = document.querySelector(`[data-provider-id="${id}"]`);
+        if (!row) continue;
+        const provider = configState.providers[id];
+        provider.enabled = row.querySelector('[data-field="enabled"]').checked;
+        for (const field of ["baseUrl", "llmBaseUrl", "ttsBaseUrl", "modelsUrl", "apiKey"]) {
+          const input = row.querySelector(`[data-field="${field}"]`);
+          if (input) provider[field] = input.value;
+        }
+      }
+      configState.compatibleConnections = [...document.querySelectorAll("[data-compatible-id]")].map((row) => {
+        return {
+          ...configState.compatibleConnections.find((connection) => connection.id === row.dataset.compatibleId),
+          id: row.dataset.compatibleId,
+          name: row.querySelector('[data-field="name"]').value,
+          baseUrl: row.querySelector('[data-field="baseUrl"]').value,
+          llmBaseUrl: row.querySelector('[data-field="llmBaseUrl"]').value,
+          ttsBaseUrl: row.querySelector('[data-field="ttsBaseUrl"]').value,
+          modelsUrl: row.querySelector('[data-field="modelsUrl"]').value,
+          apiKey: row.querySelector('[data-field="apiKey"]').value,
+          enabled: row.querySelector('[data-field="enabled"]').checked,
+        };
+      });
+    }
+
+    function compatibleProvider(id) {
+      return (modelCatalog.providers?.compatible || []).find((provider) => provider.id === id);
+    }
+
+    function modelMode(value) {
+      if (!value) return "text";
+      if (value.text && value.tts) return "both";
+      if (value.text) return "text";
+      if (value.tts) return "tts";
+      return "text";
+    }
+
+    function modalityPills(types, activeModels) {
+      const active = Object.values(activeModels || {});
+      return `<div class="modality-pills">${types.map((type) => `<span class="modality-pill${active.some((model) => model[type]) ? " active" : ""}">${type === "text" ? "LLM" : "TTS"}</span>`).join("")}</div>`;
+    }
+
+    function usedProfileModels() {
+      const used = { text: new Set(), tts: new Set() };
+      for (const profile of state?.profiles.speakerProfiles || []) {
+        used.tts.add(profile.voiceModel);
+        for (const speaker of profile.speakers || []) if (speaker.ttsModelOverride) used.tts.add(speaker.ttsModelOverride);
+      }
+      for (const profile of state?.profiles.episodeProfiles || []) {
+        used.text.add(profile.outlineModel);
+        used.text.add(profile.transcriptModel);
+      }
+      return used;
+    }
+
+    function activeModelPills(activeModels, connectionId) {
+      const pills = [];
+      const used = usedProfileModels();
+      for (const [id, capability] of Object.entries(activeModels || {})) {
+        const profileId = ["mimo", "elevenlabs"].includes(connectionId) ? id : `compat:${connectionId}:${id}`;
+        if (capability.text) pills.push(`<span class="model-pill llm${used.text.has(profileId) ? " used" : ""}">LLM · ${escapeHtml(id)}</span>`);
+        if (capability.tts) pills.push(`<span class="model-pill tts${used.tts.has(profileId) ? " used" : ""}">TTS · ${escapeHtml(id)}</span>`);
+      }
+      return pills.join("") || '<span class="muted">No active models.</span>';
+    }
+
+    function providerStatus(provider) {
+      return provider ? `${provider.status}${provider.error ? ` · ${provider.error}` : ""}` : "Save config to discover models.";
+    }
+
+    function keyClearControl(kind, id, connection) {
+      if (connection.clearApiKey) return `<button type="button" data-undo-clear-key="${kind}:${escapeHtml(id)}">Undo key clear</button><span class="warning" data-key-clear-status>Key will be cleared on save.</span>`;
+      return connection.hasApiKey ? `<button type="button" class="danger" data-clear-key="${kind}:${escapeHtml(id)}">Clear saved key</button>` : "";
+    }
+
+    function providerCard(id, name, types, fields, openConnections) {
+      const connection = configState.providers[id] || {};
+      const provider = modelCatalog.providers?.[id];
+      return `<section class="provider-card" data-configured="${Boolean(provider?.configured)}">
+        <div class="provider-head"><div><h3>${name}</h3>${modalityPills(types, connection.activeModels)}</div></div>
+        <details class="connection-row" data-provider-id="${id}"${openConnections.has(`provider:${id}`) ? " open" : ""}>
+          <summary><span class="connection-head"><strong>${name} connection</strong>${providerStatusPill(name, provider)}</span></summary>
+          <div class="connection-body"><div class="connection-actions"><button type="button" data-model-provider="${id}">Models</button>${keyClearControl("provider", id, connection)}</div>
+            <p class="config-status">${escapeHtml(providerStatus(provider))}</p>
+            <div class="grid">${fields}</div>
+            <div class="active-model-pills">${activeModelPills(connection.activeModels, id)}</div>
+          </div>
+        </details>
+      </section>`;
+    }
+
+    function compatibleRows(openConnections) {
+      return configState.compatibleConnections.map((connection) => {
+        const provider = compatibleProvider(connection.id);
+        const name = connection.name || "OpenAI compatible";
+        return `<details class="connection-row" data-compatible-id="${escapeHtml(connection.id)}"${openConnections.has(`compatible:${connection.id}`) ? " open" : ""}>
+          <summary><span class="connection-head"><strong>${escapeHtml(name)}</strong>${providerStatusPill(name, provider)}</span></summary>
+          <div class="connection-body"><div class="connection-actions"><button type="button" data-model-connection="${escapeHtml(connection.id)}">Models</button><button type="button" class="danger" data-remove-connection="${escapeHtml(connection.id)}">Remove</button>${keyClearControl("compatible", connection.id, connection)}</div>
+            <p class="config-status">${escapeHtml(providerStatus(provider))}</p>
+            <div class="grid">
+            <label>Name<input data-field="name" value="${escapeHtml(connection.name || "")}"></label>
+            <label>Enabled<input data-field="enabled" type="checkbox"${connection.enabled !== false ? " checked" : ""}></label>
+            <label>Base URL<input data-field="baseUrl" value="${escapeHtml(connection.baseUrl || "")}" placeholder="http://127.0.0.1:8000/v1"></label>
+            <label>LLM base URL override<input data-field="llmBaseUrl" value="${escapeHtml(connection.llmBaseUrl || "")}" placeholder="Optional"></label>
+            <label>TTS base URL override<input data-field="ttsBaseUrl" value="${escapeHtml(connection.ttsBaseUrl || "")}" placeholder="Optional"></label>
+            <label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(connection.modelsUrl || "")}" placeholder="Optional"></label>
+            <label>API key, optional<input data-field="apiKey" type="password" value="${escapeHtml(connection.apiKey || "")}" placeholder="${connection.hasApiKey ? "Key saved on server" : "Optional"}"></label>
+            </div>
+            <div class="active-model-pills">${activeModelPills(connection.activeModels, connection.id)}</div>
+          </div>
+        </details>`;
+      }).join("") || '<p class="muted">No custom connections.</p>';
+    }
+
+    function compatibleActiveSummary() {
+      const capabilities = configState.compatibleConnections.flatMap((connection) => Object.values(connection.activeModels || {}));
+      return { active: { text: capabilities.some((item) => item.text), tts: capabilities.some((item) => item.tts) } };
+    }
+
+    function renderConfigView() {
+      if (!configState) return;
+      const openConnections = new Set([...document.querySelectorAll("#configProviders .connection-row[open]")].map((row) => row.dataset.providerId ? `provider:${row.dataset.providerId}` : `compatible:${row.dataset.compatibleId}`));
+      const p = configState.providers;
+      $("configProviders").innerHTML = [
+        providerCard("openai", "OpenAI", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.openai.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.openai.apiKey || "")}" placeholder="${p.openai.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.openai.baseUrl || "https://api.openai.com/v1")}"></label><label>LLM base URL override<input data-field="llmBaseUrl" value="${escapeHtml(p.openai.llmBaseUrl || "")}" placeholder="Optional"></label><label>TTS base URL override<input data-field="ttsBaseUrl" value="${escapeHtml(p.openai.ttsBaseUrl || "")}" placeholder="Optional"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.openai.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
+        providerCard("elevenlabs", "ElevenLabs", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.elevenlabs.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.elevenlabs.apiKey || "")}" placeholder="${p.elevenlabs.hasApiKey ? "Key saved on server" : "Paste key"}"></label>`, openConnections),
+        providerCard("chatterbox", "Chatterbox", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.chatterbox.enabled === true ? " checked" : ""}></label><label>API key, optional<input data-field="apiKey" type="password" value="${escapeHtml(p.chatterbox.apiKey || "")}" placeholder="${p.chatterbox.hasApiKey ? "Key saved on server" : "Optional"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.chatterbox.baseUrl || "")}" placeholder="http://127.0.0.1:8000/v1"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.chatterbox.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
+        providerCard("mimo", "MiMo", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.mimo.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.mimo.apiKey || "")}" placeholder="${p.mimo.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.mimo.baseUrl || "")}"></label>`, openConnections),
+        `<section class="provider-card"><div class="provider-head"><div><h3>OpenAI Compatible</h3>${modalityPills(["text", "tts"], compatibleActiveSummary())}</div><span class="badge">${configState.compatibleConnections.length} connection${configState.compatibleConnections.length === 1 ? "" : "s"}</span></div>${compatibleRows(openConnections)}</section>`,
+      ].join("");
+      renderModelStatus();
+    }
+
+    function selectedModelTarget() {
+      if (!modelDialogTarget) return null;
+      if (modelDialogTarget.kind === "provider") return {
+        connection: configState.providers[modelDialogTarget.id],
+        provider: modelCatalog.providers?.[modelDialogTarget.id],
+        name: modelDialogTarget.id === "mimo" ? "MiMo" : modelDialogTarget.id === "elevenlabs" ? "ElevenLabs" : modelDialogTarget.id === "openai" ? "OpenAI" : "Chatterbox",
+        onlyTts: ["elevenlabs", "chatterbox"].includes(modelDialogTarget.id),
+      };
+      const connection = configState.compatibleConnections.find((item) => item.id === modelDialogTarget.id);
+      return { connection, provider: compatibleProvider(modelDialogTarget.id), name: connection?.name || "OpenAI compatible", onlyTts: false };
+    }
+
+    function modelTypeOptions(selected, onlyTts) {
+      if (onlyTts) return option("tts", "TTS", true);
+      return [option("text", "LLM", selected === "text"), option("tts", "TTS", selected === "tts"), option("both", "Both", selected === "both")].join("");
+    }
+
+    function modelSelectionRow(id, suggested, active, onlyTts) {
+      const mode = onlyTts ? "tts" : modelMode(active || suggested);
+      return `<label class="model-row" data-model-id="${escapeHtml(id)}" data-search="${escapeHtml(id.toLowerCase())}"><input type="checkbox" data-model-active${active?.text || active?.tts ? " checked" : ""}><span>${escapeHtml(id)}</span><select data-model-type>${modelTypeOptions(mode, onlyTts)}</select></label>`;
+    }
+
+    function openModelDialog(kind, id) {
+      syncConfigForm();
+      modelDialogTarget = { kind, id };
+      const target = selectedModelTarget();
+      if (!target?.connection) return;
+      const active = target.connection.activeModels || {};
+      const discovered = target.provider?.discoveredModels || [];
+      const byId = new Map(discovered.map((model) => [model.rawId || model.id, model]));
+      for (const rawId of Object.keys(active)) if (!byId.has(rawId)) byId.set(rawId, { rawId, suggested: active[rawId] });
+      $("modelDialogTitle").textContent = `${target.name} active models`;
+      $("modelDialogStatus").textContent = providerStatus(target.provider);
+      $("modelSearch").value = "";
+      $("customModelId").value = "";
+      $("customModelType").innerHTML = modelTypeOptions(target.onlyTts ? "tts" : "text", target.onlyTts);
+      $("modelSelectionList").innerHTML = [...byId.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([rawId, model]) => modelSelectionRow(rawId, model.suggested, active[rawId], target.onlyTts)).join("") || '<p class="muted">No models discovered. Add a custom model ID below.</p>';
+      updateModelSelectionCount();
+      $("modelDialog").showModal();
+    }
+
+    function updateModelSelectionCount() {
+      const rows = [...$("modelSelectionList").querySelectorAll(".model-row")];
+      $("modelSelectionCount").textContent = `${rows.filter((row) => row.querySelector('[data-model-active]').checked).length} active · ${rows.length} available`;
+    }
+
+    function filterModelSelection() {
+      const query = $("modelSearch").value.trim().toLowerCase();
+      $("modelSelectionList").querySelectorAll(".model-row").forEach((row) => { row.hidden = Boolean(query && !row.dataset.search.includes(query)); });
+    }
+
+    function toggleFilteredModels() {
+      const boxes = [...$("modelSelectionList").querySelectorAll(".model-row:not([hidden]) [data-model-active]")];
+      const checked = boxes.length > 0 && boxes.every((box) => box.checked);
+      boxes.forEach((box) => { box.checked = !checked; });
+      updateModelSelectionCount();
+    }
+
+    function addCustomModelRow() {
+      const id = $("customModelId").value.trim();
+      if (!id) throw new Error("Enter a custom model ID.");
+      if ([...$("modelSelectionList").querySelectorAll(".model-row")].some((row) => row.dataset.modelId === id)) throw new Error("Model already exists in this connection.");
+      const target = selectedModelTarget();
+      const mode = $("customModelType").value;
+      $("modelSelectionList").insertAdjacentHTML("beforeend", modelSelectionRow(id, { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) }, { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) }, target.onlyTts));
+      $("customModelId").value = "";
+      updateModelSelectionCount();
+    }
+
+    function applyModelSelection() {
+      const target = selectedModelTarget();
+      const activeModels = {};
+      $("modelSelectionList").querySelectorAll(".model-row").forEach((row) => {
+        if (!row.querySelector('[data-model-active]').checked) return;
+        const mode = row.querySelector('[data-model-type]').value;
+        activeModels[row.dataset.modelId] = { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) };
+      });
+      target.connection.activeModels = activeModels;
+      configDirty = true;
+      $("modelDialog").close();
+      renderConfigView();
+    }
+
+    function loadSpeakerForm(id) {
+      const profile = state.profiles.speakerProfiles.find((item) => item.id === id);
+      if (!profile) return;
+      activeSpeakerProfileId = id;
+      $("spName").value = profile.name;
+      $("spDescription").value = profile.description || "";
+      $("spVoiceModel").innerHTML = modelOptions(profile.voiceModel);
+      $("spInstructions").value = profile.instructions || "";
+      renderSpeakerCards(profile);
+    }
+
+    function voiceProvider(model) {
+      return discoveredModels("tts").find((item) => item.id === model)?.provider || "";
+    }
+
+    function providerVoices(model) {
+      if (model === "mimo-v2.5-tts") return mimoVoices.map((id) => ({ id, label: id }));
+      if (model.startsWith("compat:openai:")) {
+        const voices = ["tts-1", "tts-1-hd"].includes(model.slice("compat:openai:".length)) ? openaiVoices.filter((voice) => openaiLegacyVoices.has(voice)) : openaiVoices;
+        return voices.map((id) => ({ id, label: id }));
+      }
+      if (voiceProvider(model) === "elevenlabs") {
+        return elevenVoices.map((voice) => ({ id: voice.id, label: `${voice.id} · ${voiceDescription(voice)}` }));
+      }
+      if (voiceProvider(model) === "chatterbox") {
+        return chatterboxVoices.map((voice) => ({
+          id: voice.id,
+          label: [voice.id, voice.name !== voice.id ? voice.name : "", voice.builtin ? "built-in" : "custom"].filter(Boolean).join(" · "),
+        }));
+      }
+      return [];
+    }
+
+    function ensureProviderVoices(model) {
+      const provider = voiceProvider(model);
+      if (!["elevenlabs", "chatterbox"].includes(provider) || voiceRequests[provider]) return;
+      voiceRequests[provider] = api(`/api/tts/${provider}/voices`).then((value) => {
+        if (provider === "elevenlabs") elevenVoices = value.voices;
+        else chatterboxVoices = value.voices;
+        syncSpeakerForm();
+        const profile = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
+        if (profile) renderSpeakerCards(profile);
+        renderTtsView();
+      }).catch((error) => {
+        delete voiceRequests[provider];
+        notify(error.message || String(error), "error");
+      });
+    }
+
+    function voiceSelector(model, selected) {
+      const voices = providerVoices(model);
+      if (!voices.length) return `<input data-field="voiceId" value="${escapeHtml(selected)}" placeholder="Enter voice ID">`;
+      let options = voices.map((voice) => option(voice.id, voice.label, voice.id === selected)).join("");
+      if (selected && !voices.some((voice) => voice.id === selected)) options += option(selected, `${selected} · saved/unavailable`, true);
+      return `<select data-field="voiceId">${options}</select>`;
+    }
+
+    function voiceDescription(voice) {
+      const verified = (voice.verifiedLanguages || []).map((item) => [item.locale || item.language, item.accent].filter(Boolean).join(" / ")).filter(Boolean);
+      const labels = [voice.labels?.language, voice.labels?.accent].filter(Boolean);
+      return [voice.name, ...new Set([...verified, ...labels])].join(" · ");
+    }
+
+    function accentOptions() {
+      const accents = new Set((modelCatalog.languages || []).map((language) => language.defaultAccent).filter(Boolean));
+      for (const voice of elevenVoices) {
+        if (voice.labels?.accent) accents.add(voice.labels.accent);
+        for (const item of voice.verifiedLanguages || []) if (item.accent) accents.add(item.accent);
+      }
+      return [...accents].sort().map((accent) => `<option value="${escapeHtml(accent)}"></option>`).join("");
+    }
+
+    function renderSpeakerCards(profile) {
+      $("speakerCards").innerHTML = profile.speakers.map((speaker, index) => {
+        const resolvedModel = speaker.ttsModelOverride || profile.voiceModel;
+        return `<fieldset data-speaker-index="${index}">
+          <legend>Speaker ${index + 1}</legend>
+          <div class="speaker-head"><span class="badge">${escapeHtml(modelLabel(resolvedModel))}</span><button type="button" class="danger remove-speaker" data-index="${index}"${profile.speakers.length === 1 ? " disabled" : ""}>Remove</button></div>
+          <div class="grid">
+            <label>Name<input data-field="name" value="${escapeHtml(speaker.name)}"></label>
+            <label>Model override<select data-field="ttsModelOverride">${modelOptions(speaker.ttsModelOverride || "", true)}</select></label>
+            <label class="full">Voice ID${voiceSelector(resolvedModel, speaker.voiceId)}</label>
+            <label class="full">Accent override<input data-field="accent" list="accent-list-${index}" value="${escapeHtml(speaker.accent || "")}" placeholder="Use episode language default"><datalist id="accent-list-${index}">${accentOptions()}</datalist></label>
+            <label class="full">Backstory<textarea data-field="backstory">${escapeHtml(speaker.backstory)}</textarea></label>
+            <label class="full">Personality<textarea data-field="personality">${escapeHtml(speaker.personality)}</textarea></label>
+            <label class="full">Voice direction<textarea data-field="style">${escapeHtml(speaker.style)}</textarea></label>
+          </div>
+        </fieldset>`;
+      }).join("");
+      $("addSpeaker").disabled = profile.speakers.length >= 4;
+      document.querySelectorAll(".remove-speaker").forEach((button) => button.addEventListener("click", () => removeSpeaker(Number(button.dataset.index))));
+      document.querySelectorAll('#speakerCards select[data-field="ttsModelOverride"]').forEach((select) => select.addEventListener("change", () => {
+        syncSpeakerForm();
+        renderSpeakerCards(profile);
+      }));
+      for (const speaker of profile.speakers) ensureProviderVoices(speaker.ttsModelOverride || profile.voiceModel);
+    }
+
+    function syncSpeakerForm() {
+      const profile = state?.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
+      if (!profile) return;
+      profile.name = $("spName").value;
+      profile.description = $("spDescription").value;
+      profile.voiceModel = $("spVoiceModel").value;
+      profile.instructions = $("spInstructions").value;
+      profile.speakers = [...document.querySelectorAll("#speakerCards fieldset[data-speaker-index]")].map((card) => ({
+        name: card.querySelector('[data-field="name"]').value,
+        voiceId: card.querySelector('[data-field="voiceId"]').value,
+        backstory: card.querySelector('[data-field="backstory"]').value,
+        personality: card.querySelector('[data-field="personality"]').value,
+        style: card.querySelector('[data-field="style"]').value,
+        accent: card.querySelector('[data-field="accent"]').value,
+        ttsModelOverride: card.querySelector('[data-field="ttsModelOverride"]').value,
+      }));
+    }
+
+    function addSpeaker() {
+      syncSpeakerForm();
+      const profile = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
+      if (profile.speakers.length >= 4) return;
+      profile.speakers.push({ name: `Speaker ${profile.speakers.length + 1}`, backstory: "Required", personality: "Required", voiceId: profile.voiceModel === "mimo-v2.5-tts" ? "Milo" : "", style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "" });
+      profilesDirty = true;
+      renderSpeakerCards(profile);
+    }
+
+    function removeSpeaker(index) {
+      syncSpeakerForm();
+      const profile = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
+      if (profile.speakers.length <= 1) return;
+      profile.speakers.splice(index, 1);
+      profilesDirty = true;
+      renderSpeakerCards(profile);
+    }
+
+    function loadEpisodeProfileForm(id) {
+      const profile = state.profiles.episodeProfiles.find((item) => item.id === id);
+      if (!profile) return;
+      activeEpisodeProfileId = id;
+      $("epName").value = profile.name;
+      $("epDescription").value = profile.description || "";
+      $("epSpeakerProfile").innerHTML = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === profile.speakerProfileId)).join("");
+      $("epSegments").value = profile.numSegments;
+      $("epOutlineModel").innerHTML = textModelOptions(profile.outlineModel);
+      $("epTranscriptModel").innerHTML = textModelOptions(profile.transcriptModel);
+      $("epLanguage").innerHTML = languageOptions(profile.language);
+      $("epMinutes").value = profile.targetMinutes;
+      $("epBriefing").value = profile.defaultBriefing;
+    }
+
+    function syncEpisodeProfileForm() {
+      const profile = state?.profiles.episodeProfiles.find((item) => item.id === activeEpisodeProfileId);
+      if (!profile) return;
+      profile.name = $("epName").value;
+      profile.description = $("epDescription").value;
+      profile.speakerProfileId = $("epSpeakerProfile").value;
+      profile.numSegments = Number($("epSegments").value);
+      profile.outlineModel = $("epOutlineModel").value;
+      profile.transcriptModel = $("epTranscriptModel").value;
+      profile.language = $("epLanguage").value;
+      profile.targetMinutes = Number($("epMinutes").value);
+      profile.defaultBriefing = $("epBriefing").value;
+    }
+
+    function addSpeakerProfile(copy) {
+      syncSpeakerForm();
+      const current = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
+      const base = copy ? structuredClone(current) : {
+        name: "New speaker profile", description: "", voiceModel: "mimo-v2.5-tts", instructions: "",
+        speakers: [{ name: "Speaker 1", backstory: "Required", personality: "Required", voiceId: "Chloe", style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "" }],
+      };
+      base.id = crypto.randomUUID();
+      if (copy) base.name += " — Copy";
+      state.profiles.speakerProfiles.push(base);
+      profilesDirty = true;
+      activeSpeakerProfileId = base.id;
+      activeProfileSection = "speakers";
+      renderProfileOptions();
+      renderProfileSections();
+    }
+
+    function addEpisodeProfile(copy) {
+      syncEpisodeProfileForm();
+      const current = state.profiles.episodeProfiles.find((item) => item.id === activeEpisodeProfileId);
+      const base = copy ? structuredClone(current) : {
+        name: "New episode profile", description: "", speakerProfileId: state.profiles.speakerProfiles[0]?.id || "", numSegments: 5,
+        outlineModel: "mimo-v2.5-pro", transcriptModel: "mimo-v2.5-pro", language: "es-419", targetMinutes: 18, defaultBriefing: "Required",
+      };
+      base.id = crypto.randomUUID();
+      if (copy) base.name += " — Copy";
+      state.profiles.episodeProfiles.push(base);
+      profilesDirty = true;
+      activeEpisodeProfileId = base.id;
+      activeProfileSection = "episodes";
+      renderProfileOptions();
+      renderProfileSections();
+    }
+
+    async function saveProfiles() {
+      syncSpeakerForm();
+      syncEpisodeProfileForm();
+      state.profiles = await api("/api/profiles", { method: "PUT", body: JSON.stringify(state.profiles) });
+      profilesDirty = false;
+      renderProfileOptions();
+      renderBuildOptions();
+      renderTtsView();
+      notify(activeProfileSection === "episodes" ? "Episode profiles saved." : "Speaker profiles saved.", "ok");
+    }
+
+    function addCompatibleConnection() {
+      if (!configState) return;
+      syncConfigForm();
+      configState.compatibleConnections.push({
+        id: crypto.randomUUID(),
+        name: "OpenAI-compatible",
+        baseUrl: "https://api.openai.com/v1",
+        llmBaseUrl: "",
+        ttsBaseUrl: "",
+        modelsUrl: "",
+        apiKeyEnv: "",
+        apiKey: "",
+        enabled: true,
+        activeModels: {},
+        hasApiKey: false,
+      });
+      configDirty = true;
+      renderConfigView();
+    }
+
+    async function saveConfig() {
+      if (!configState) throw new Error("Config is not loaded yet.");
+      syncConfigForm();
+      const value = await api("/api/config", { method: "PUT", body: JSON.stringify(configState) });
+      configState = structuredClone(value.config);
+      if (state) state.config = structuredClone(value.config);
+      modelCatalog = value.modelCatalog;
+      elevenVoices = [];
+      chatterboxVoices = [];
+      delete voiceRequests.elevenlabs;
+      delete voiceRequests.chatterbox;
+      configDirty = false;
+      renderModelStatus();
+      renderConfigView();
+      renderProfileOptions();
+      renderBuildOptions();
+      renderTtsView();
+      notify("Config saved.", "ok");
+    }
+
+    async function uploadKnowledge() {
+      const file = $("knowledgeFile").files[0];
+      if (!file) throw new Error("Choose a Markdown file first.");
+      const item = await api("/api/knowledge", { method: "POST", body: JSON.stringify({ name: file.name, content: await file.text() }) });
+      await refreshState();
+      $("buildKnowledge").value = item.id;
+      notify(`Uploaded ${item.name}.`, "ok");
+    }
+
+    function resetEpisodeForm(preserveDirty = false) {
+      currentEpisode = null;
+      $("savedEpisodeSelect").value = "";
+      $("ttsEpisodeSelect").value = "";
+      $("ttsLanguageOverride").value = "";
+      $("episodeName").value = "";
+      $("additionalInstructions").value = "";
+      $("transcript").value = "";
+      $("episodeSeed").value = "";
+      $("episodeAudio").hidden = true;
+      $("episodeAudio").removeAttribute("src");
+      updateWordCount();
+      renderTtsView();
+      renderJobIndicators();
+      if (!preserveDirty) {
+        episodeDraftDirty = false;
+        transcriptDirty = false;
+      }
+    }
+
+    async function selectEpisode(id, pendingDraft = null) {
+      if (!id) return resetEpisodeForm();
+      currentEpisode = await api(`/api/episodes/${id}`);
+      $("savedEpisodeSelect").value = id;
+      $("ttsEpisodeSelect").value = id;
+      $("ttsLanguageOverride").value = "";
+      $("buildEpisodeProfile").value = currentEpisode.episodeProfileId;
+      $("buildKnowledge").value = currentEpisode.knowledgeBaseId;
+      $("episodeName").value = currentEpisode.name;
+      $("additionalInstructions").value = currentEpisode.additionalInstructions || "";
+      $("transcript").value = currentEpisode.transcript || "";
+      if (pendingDraft?.id === id) restoreEpisodeDraft(pendingDraft);
+      else {
+        episodeDraftDirty = false;
+        transcriptDirty = false;
+      }
+      updateWordCount();
+      renderTtsView();
+      renderJobIndicators();
+    }
+
+    function captureEpisodeDraft() {
+      return {
+        id: currentEpisode?.id || null,
+        episodeProfileId: $("buildEpisodeProfile").value,
+        knowledgeBaseId: $("buildKnowledge").value,
+        name: $("episodeName").value,
+        additionalInstructions: $("additionalInstructions").value,
+        transcript: $("transcript").value,
+        languageOverride: $("ttsLanguageOverride").value,
+        episodeDraftDirty,
+        transcriptDirty,
+      };
+    }
+
+    function restoreEpisodeDraft(draft) {
+      $("buildEpisodeProfile").value = draft.episodeProfileId;
+      $("buildKnowledge").value = draft.knowledgeBaseId;
+      $("episodeName").value = draft.name;
+      $("additionalInstructions").value = draft.additionalInstructions;
+      $("transcript").value = draft.transcript;
+      $("ttsLanguageOverride").value = draft.languageOverride;
+      episodeDraftDirty = draft.episodeDraftDirty;
+      transcriptDirty = draft.transcriptDirty;
+      updateWordCount();
+    }
+
+    async function saveEpisode() {
+      const value = await api("/api/episodes", {
+        method: "POST",
+        body: JSON.stringify({
+          id: currentEpisode?.id,
+          name: $("episodeName").value,
+          episodeProfileId: $("buildEpisodeProfile").value,
+          knowledgeBaseId: $("buildKnowledge").value,
+          additionalInstructions: $("additionalInstructions").value,
+        }),
+      });
+      currentEpisode = { ...currentEpisode, ...value };
+      episodeDraftDirty = false;
+      await refreshState(value.id);
+      return currentEpisode;
+    }
+
+    async function saveTranscript() {
+      if (!currentEpisode) await saveEpisode();
+      currentEpisode = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcript").value }) });
+      episodeDraftDirty = false;
+      transcriptDirty = false;
+      await refreshState(currentEpisode.id);
+      notify("Transcript saved and validated.", "ok");
+      return currentEpisode;
+    }
+
+    async function generateTranscript() {
+      await saveEpisode();
+      const { job } = await api(`/api/episodes/${currentEpisode.id}/generate`, { method: "POST" });
+      trackJob(job);
+      notify("Transcript job queued.");
+    }
+
+    function selectedSpeakerContext(index) {
+      const saved = currentEpisode ? currentEpisodeProfiles() : {};
+      const episodeProfile = saved.episodeProfile || state.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
+      const speakerProfile = saved.speakerProfile || state.profiles.speakerProfiles.find((item) => item.id === episodeProfile?.speakerProfileId);
+      const speaker = speakerProfile?.speakers[index];
+      if (!speakerProfile || !speaker) throw new Error("Select a valid speaker profile.");
+      return { episodeProfile, speakerProfile, speaker };
+    }
+
+    function previewText(speakerName) {
+      const lines = $("transcript").value.split(/\r?\n/).map((line) => line.trim());
+      const line = lines.find((item) => item.startsWith(`${speakerName}:`) || item.startsWith(`${speakerName} [`)) || lines.find((item) => /:\s*\S/.test(item));
+      if (!line) throw new Error("Save a transcript before previewing voices.");
+      return line.slice(line.indexOf(":") + 1).trim().slice(0, 600);
+    }
+
+    async function preview(index) {
+      const { episodeProfile, speakerProfile, speaker } = selectedSpeakerContext(index);
+      notify(`Generating ${speaker.name} preview…`);
+      const response = await fetch("/api/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episodeId: currentEpisode?.id, episodeProfileId: episodeProfile.id, speakerProfileId: speakerProfile.id, speakerIndex: index, text: previewText(speaker.name), cue: "warm and conversational", languageOverride: $("ttsLanguageOverride").value }),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(error.error);
+      }
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(await response.blob());
+      $("previewAudio").src = previewUrl;
+      $("previewAudio").hidden = false;
+      await $("previewAudio").play().catch(() => {});
+      notify(`${speaker.name} preview ready.`, "ok");
+    }
+
+    function renderTtsView() {
+      if (!state || !currentEpisode) {
+        $("ttsLanguageOverride").innerHTML = option("", "Use episode profile language", true);
+        $("ttsSummary").innerHTML = '<p class="muted">Select a saved episode with a transcript.</p>';
+        $("previewButtons").innerHTML = "";
+        $("episodeAudio").hidden = true;
+        $("applyLatestProfiles").disabled = true;
+        $("renderAudio").disabled = true;
+        return;
+      }
+      const { episodeProfile, speakerProfile } = currentEpisodeProfiles();
+      $("applyLatestProfiles").disabled = episodeProfilesAreCurrent();
+      if (!speakerProfile) return;
+      $("ttsLanguageOverride").innerHTML = ttsLanguageOptions($("ttsLanguageOverride").value);
+      const language = selectedTtsLanguage();
+      const errors = ttsCompatibilityErrors();
+      $("ttsSummary").innerHTML = `<div><strong>${escapeHtml(currentEpisode.name)}</strong><br><span class="muted">${escapeHtml(speakerProfile.name)} · Episode language: ${escapeHtml(languageById(episodeProfile.language)?.name || episodeProfile.language)} · TTS language: ${escapeHtml(language?.name || episodeProfile.language)} · ${currentEpisode.transcriptWords || 0} words · ${escapeHtml(currentEpisode.status)}</span></div>` + speakerProfile.speakers.map((speaker) => {
+        const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
+        const voice = elevenVoices.find((item) => item.id === speaker.voiceId);
+        const requestedAccent = speaker.accent || language?.defaultAccent || "language default";
+        const verified = voice?.verifiedLanguages?.find((item) => item.language === language?.apiCode || item.locale === language?.id);
+        const voiceAccent = verified?.accent || voice?.labels?.accent || "";
+        const mismatch = voiceAccent && requestedAccent !== "language default" && !voiceAccent.toLowerCase().includes(requestedAccent.toLowerCase()) && !requestedAccent.toLowerCase().includes(voiceAccent.toLowerCase());
+        return `<div><strong>${escapeHtml(speaker.name)}</strong> <span class="badge">${escapeHtml(modelLabel(model))}</span><br><span class="muted">Voice: ${escapeHtml(voice ? voiceDescription(voice) : speaker.voiceId)} · Requested accent: ${escapeHtml(requestedAccent)}</span>${mismatch ? `<br><span class="warning">Voice metadata says ${escapeHtml(voiceAccent)}; preview before rendering.</span>` : ""}</div>`;
+      }).join("") + errors.map((error) => `<div class="warning">${escapeHtml(error)}</div>`).join("");
+      $("previewButtons").innerHTML = speakerProfile.speakers.map((speaker, index) => {
+        const error = modelLanguageError(speaker.ttsModelOverride || speakerProfile.voiceModel, language);
+        return `<button type="button" data-preview-index="${index}"${error ? " disabled" : ""}>Preview ${escapeHtml(speaker.name)}</button>`;
+      }).join("");
+      if (currentEpisode.audioUrl) {
+        $("episodeAudio").src = currentEpisode.audioUrl + `?v=${Date.now()}`;
+        $("episodeAudio").hidden = false;
+      } else {
+        $("episodeAudio").hidden = true;
+        $("episodeAudio").removeAttribute("src");
+      }
+      $("renderAudio").disabled = errors.length > 0;
+    }
+
+    async function applyLatestProfiles() {
+      if (!currentEpisode) throw new Error("Select a saved episode first.");
+      const id = currentEpisode.id;
+      const value = await api(`/api/episodes/${id}/profiles`, { method: "PUT" });
+      currentEpisode = value.episode;
+      await refreshState(id);
+      notify(value.changed ? "Latest profiles applied. Re-render MP3 to update audio." : "Episode already uses latest profiles.", "ok");
+    }
+
+    async function renderAudio() {
+      if (!currentEpisode) throw new Error("Select a saved episode first.");
+      const languageOverride = $("ttsLanguageOverride").value;
+      await saveTranscript();
+      const { job } = await api(`/api/episodes/${currentEpisode.id}/render`, { method: "POST", body: JSON.stringify({ languageOverride }) });
+      trackJob(job);
+      notify("TTS job queued.");
+    }
+
+    function updateWordCount() {
+      const spoken = $("transcript").value.split(/\r?\n/).filter((line) => /:\s*\S/.test(line)).map((line) => line.slice(line.indexOf(":") + 1)).join(" ");
+      const words = spoken.trim() ? spoken.trim().split(/\s+/).length : 0;
+      $("wordCount").textContent = `${words.toLocaleString()} words`;
+    }
+
+    function guard(action) {
+      return async (...args) => {
+        clearNotice();
+        try { await action(...args); }
+        catch (error) { notify(error.message || String(error), "error"); }
+      };
+    }
+
+    function configKeyTarget(spec) {
+      const [kind, id] = spec.split(":", 2);
+      return kind === "provider" ? configState.providers[id] : configState.compatibleConnections.find((connection) => connection.id === id);
+    }
+
+    async function changeEpisodeSelection(event) {
+      const id = event.target.value;
+      if ((episodeDraftDirty || transcriptDirty) && id !== currentEpisode?.id && !confirm("Discard unsaved episode changes?")) {
+        event.target.value = currentEpisode?.id || "";
+        return;
+      }
+      episodeDraftDirty = false;
+      transcriptDirty = false;
+      await selectEpisode(id);
+    }
+
+    document.querySelectorAll("nav button").forEach((button) => button.addEventListener("click", () => { location.hash = button.dataset.view; }));
+    window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
+    $("profilesSpeakersTab").addEventListener("click", () => { activeProfileSection = "speakers"; renderProfileSections(); });
+    $("profilesEpisodesTab").addEventListener("click", () => { activeProfileSection = "episodes"; renderProfileSections(); });
+    $("speakerProfileSelect").addEventListener("change", (event) => { syncSpeakerForm(); loadSpeakerForm(event.target.value); });
+    $("episodeProfileSelect").addEventListener("change", (event) => { syncEpisodeProfileForm(); loadEpisodeProfileForm(event.target.value); });
+    $("spVoiceModel").addEventListener("change", () => { syncSpeakerForm(); renderSpeakerCards(state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId)); });
+    $("newSpeakerProfile").addEventListener("click", () => addSpeakerProfile(false));
+    $("duplicateSpeakerProfile").addEventListener("click", () => addSpeakerProfile(true));
+    $("newEpisodeProfile").addEventListener("click", () => addEpisodeProfile(false));
+    $("duplicateEpisodeProfile").addEventListener("click", () => addEpisodeProfile(true));
+    $("addSpeaker").addEventListener("click", addSpeaker);
+    $("refreshModels").addEventListener("click", guard(refreshModels));
+    $("deleteSpeakerProfile").addEventListener("click", guard(async () => {
+      syncSpeakerForm();
+      if (state.profiles.episodeProfiles.some((item) => item.speakerProfileId === activeSpeakerProfileId)) throw new Error("Speaker profile is used by an episode profile.");
+      state.profiles.speakerProfiles = state.profiles.speakerProfiles.filter((item) => item.id !== activeSpeakerProfileId);
+      profilesDirty = true;
+      activeSpeakerProfileId = state.profiles.speakerProfiles[0]?.id || "";
+      activeProfileSection = "speakers";
+      renderProfileOptions();
+      renderProfileSections();
+    }));
+    $("deleteEpisodeProfile").addEventListener("click", guard(async () => {
+      if (state.episodes.some((item) => item.episodeProfileId === activeEpisodeProfileId)) throw new Error("Episode profile is used by a saved episode.");
+      state.profiles.episodeProfiles = state.profiles.episodeProfiles.filter((item) => item.id !== activeEpisodeProfileId);
+      profilesDirty = true;
+      activeEpisodeProfileId = state.profiles.episodeProfiles[0]?.id || "";
+      activeProfileSection = "episodes";
+      renderProfileOptions();
+      renderProfileSections();
+    }));
+    $("saveProfiles").addEventListener("click", guard(saveProfiles));
+    $("addCompatibleConnection").addEventListener("click", addCompatibleConnection);
+    $("saveConfig").addEventListener("click", guard(saveConfig));
+    $("view-config").addEventListener("input", (event) => {
+      configDirty = true;
+      if (event.target.dataset.field === "apiKey" && event.target.value.trim()) {
+        const row = event.target.closest("[data-provider-id], [data-compatible-id]");
+        const target = row?.dataset.providerId ? configState.providers[row.dataset.providerId] : configState.compatibleConnections.find((connection) => connection.id === row?.dataset.compatibleId);
+        if (target) {
+          target.clearApiKey = false;
+          row.querySelector("[data-undo-clear-key]")?.remove();
+          row.querySelector("[data-key-clear-status]")?.remove();
+        }
+      }
+    });
+    $("uploadKnowledge").addEventListener("click", guard(uploadKnowledge));
+    $("savedEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
+    $("ttsEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
+    $("ttsLanguageOverride").addEventListener("change", () => renderTtsView());
+    $("newEpisode").addEventListener("click", () => {
+      if ((episodeDraftDirty || transcriptDirty) && !confirm("Discard unsaved episode changes?")) return;
+      resetEpisodeForm();
+    });
+    $("episodeSeed").addEventListener("change", (event) => {
+      if (event.target.value === "") return;
+      const seed = state.profiles.episodeSeeds[Number(event.target.value)];
+      $("episodeName").value = seed.name;
+      $("additionalInstructions").value = seed.additionalInstructions;
+      episodeDraftDirty = true;
+    });
+    $("saveEpisode").addEventListener("click", guard(async () => { await saveEpisode(); notify("Episode draft saved.", "ok"); }));
+    $("generateTranscript").addEventListener("click", guard(generateTranscript));
+    $("saveTranscript").addEventListener("click", guard(saveTranscript));
+    $("previewButtons").addEventListener("click", guard((event) => {
+      const button = event.target.closest("button[data-preview-index]");
+      if (button) return preview(Number(button.dataset.previewIndex));
+    }));
+    $("applyLatestProfiles").addEventListener("click", guard(applyLatestProfiles));
+    $("renderAudio").addEventListener("click", guard(renderAudio));
+    $("configProviders").addEventListener("click", (event) => {
+      const clearKey = event.target.closest("button[data-clear-key]");
+      if (clearKey) {
+        syncConfigForm();
+        if (!confirm("Clear this saved API key when config is saved?")) return;
+        const target = configKeyTarget(clearKey.dataset.clearKey);
+        if (target) {
+          target.clearApiKey = true;
+          target.apiKey = "";
+          configDirty = true;
+          renderConfigView();
+        }
+        return;
+      }
+      const undoClear = event.target.closest("button[data-undo-clear-key]");
+      if (undoClear) {
+        const target = configKeyTarget(undoClear.dataset.undoClearKey);
+        if (target) {
+          target.clearApiKey = false;
+          configDirty = true;
+          renderConfigView();
+        }
+        return;
+      }
+      const remove = event.target.closest("button[data-remove-connection]");
+      if (remove) {
+        syncConfigForm();
+        configState.compatibleConnections = configState.compatibleConnections.filter((item) => item.id !== remove.dataset.removeConnection);
+        configDirty = true;
+        return renderConfigView();
+      }
+      const providerModels = event.target.closest("button[data-model-provider]");
+      if (providerModels) return openModelDialog("provider", providerModels.dataset.modelProvider);
+      const compatibleModels = event.target.closest("button[data-model-connection]");
+      if (compatibleModels) return openModelDialog("compatible", compatibleModels.dataset.modelConnection);
+    });
+    $("closeModelDialog").addEventListener("click", () => $("modelDialog").close());
+    $("modelSearch").addEventListener("input", filterModelSelection);
+    $("modelSelectionList").addEventListener("change", updateModelSelectionCount);
+    $("toggleFilteredModels").addEventListener("click", toggleFilteredModels);
+    $("addCustomModel").addEventListener("click", guard(addCustomModelRow));
+    $("applyModelSelection").addEventListener("click", applyModelSelection);
+    for (const id of ["buildEpisodeProfile", "buildKnowledge", "episodeName", "additionalInstructions"]) {
+      $(id).addEventListener("input", () => { episodeDraftDirty = true; });
+      $(id).addEventListener("change", () => { episodeDraftDirty = true; });
+    }
+    $("view-profiles").addEventListener("input", (event) => {
+      if (!['speakerProfileSelect', 'episodeProfileSelect'].includes(event.target.id)) profilesDirty = true;
+    });
+    $("transcript").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); });
+    window.addEventListener("beforeunload", (event) => {
+      if (!configDirty && !profilesDirty && !episodeDraftDirty && !transcriptDirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
+    $("transcriptFile").addEventListener("change", guard(async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      $("transcript").value = await file.text();
+      transcriptDirty = true;
+      updateWordCount();
+      notify(`Imported ${file.name}. Save transcript to validate it.`, "ok");
+    }));
+
+    setView(location.hash.slice(1));
+    Promise.all([loadModelCatalog(), refreshState(), refreshJobs()]).catch((error) => notify(error.message || String(error), "error"));
+  </script>
+</body>
+</html>
