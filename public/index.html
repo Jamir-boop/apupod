@@ -48,7 +48,7 @@
     legend { color: var(--accent); }
     .muted, small { color: var(--muted); }
     .app { min-height: 100vh; display: grid; grid-template-columns: 320px minmax(0, 1fr); }
-    aside { position: sticky; top: 0; min-width: 0; height: 100vh; padding: 22px 18px; background: var(--surface-1); border-right: 1px solid var(--line); overflow-x: hidden; overflow-y: auto; }
+    aside { position: sticky; top: 0; display: flex; flex-direction: column; min-width: 0; height: 100vh; padding: 22px 18px; background: var(--surface-1); border-right: 1px solid var(--line); overflow: hidden; }
     aside p { margin-bottom: 22px; }
     nav { display: grid; gap: 7px; }
     nav button { min-width: 0; width: 100%; overflow-wrap: anywhere; text-align: left; background: transparent; border-color: transparent; color: var(--muted); }
@@ -66,6 +66,8 @@
     .subnav button { min-width: 160px; }
     .view-header, .provider-head, .connection-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
     .profile-pills, .active-model-pills, .modality-pills, .model-status { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 16px; }
+    .model-refresh-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: center; margin: 14px 0 16px; }
+    .model-refresh-row .model-status { margin: 0; }
     .profile-pill, .model-pill, .modality-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 9px; overflow-wrap: anywhere; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: var(--surface-1); font-size: 12px; }
     .profile-pill.active, .model-pill.used, .modality-pill.active { color: #000; background: var(--accent); border-color: var(--accent); }
     .model-pill.tts { color: var(--accent); }
@@ -80,10 +82,6 @@
     .status-pill.loading::before { background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
     @keyframes pulse { to { opacity: .25; } }
     .profile-section[hidden] { display: none; }
-    .status { display: none; margin-bottom: 18px; padding: 11px 13px; border-radius: 2px; border: 1px solid var(--line-strong); background: var(--surface-3); }
-    .status.show { display: block; }
-    .status.error { border-style: double; border-color: var(--accent); }
-    .status.ok { border-color: var(--accent); }
     fieldset { margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 2px; }
     legend { font-weight: 750; padding: 0 6px; }
     .speaker-list { display: grid; gap: 12px; margin-top: 14px; }
@@ -112,9 +110,16 @@
     .model-row[hidden] { display: none; }
     audio { width: min(100%, 700px); margin-top: 12px; }
     progress { width: min(100%, 700px); height: 14px; accent-color: var(--accent); }
-    .server-activity { min-width: 0; max-width: 100%; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .server-activity { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto minmax(0, 1fr); min-width: 0; max-width: 100%; min-height: 0; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); overflow: hidden; }
     .server-activity h2 { margin-bottom: 8px; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
-    .activity-list { display: grid; min-width: 0; max-width: 100%; gap: 7px; }
+    .activity-heading { margin: 12px 0 7px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .notice-list { display: grid; align-content: start; min-width: 0; max-width: 100%; min-height: 0; gap: 7px; margin-bottom: 12px; overflow-y: auto; }
+    .notice-item { min-width: 0; max-width: 100%; padding: 8px; overflow: hidden; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--surface-0); font-size: 12px; }
+    .notice-item[data-type="ok"] { border-color: var(--success); }
+    .notice-item[data-type="warning"] { border-color: var(--accent); }
+    .notice-item[data-type="error"] { border-color: var(--danger); }
+    .notice-item strong { display: block; margin-bottom: 2px; color: var(--text); }
+    .activity-list { display: grid; align-content: start; min-width: 0; max-width: 100%; min-height: 0; gap: 7px; overflow-y: auto; }
     .job-item { min-width: 0; max-width: 100%; padding: 8px; overflow: hidden; overflow-wrap: anywhere; border: 1px solid var(--line); background: var(--surface-0); font-size: 12px; }
     .job-item strong { display: block; color: var(--text); overflow-wrap: anywhere; }
     .job-item[data-status="running"], .job-item[data-status="queued"] { border-color: var(--accent); }
@@ -155,7 +160,7 @@
     .chat-busy[hidden] { display: none; }
     @media (max-width: 820px) {
       .app { display: block; }
-      aside { position: sticky; z-index: 10; height: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+      aside { position: sticky; z-index: 10; height: auto; max-height: 60vh; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
       aside h1, aside p { display: none; }
       nav { display: flex; overflow-x: auto; }
       nav button { width: auto; white-space: nowrap; }
@@ -185,13 +190,14 @@
       </nav>
       <section class="server-activity" aria-live="polite">
         <h2>Server Activity</h2>
+        <div class="activity-heading">Notifications</div>
+        <div id="notificationFeed" class="notice-list"><span class="muted">No notifications</span></div>
+        <div class="activity-heading">Jobs</div>
         <div id="serverActivity" class="activity-list"><span class="muted">Loading…</span></div>
       </section>
     </aside>
 
     <main>
-      <div id="status" class="status" role="status" aria-live="polite"></div>
-
       <div id="view-profiles" class="view">
         <div class="view-header">
           <div><h2>Profiles</h2><p class="muted">Speaker and episode profiles are saved together.</p></div>
@@ -199,9 +205,9 @@
         </div>
         <div class="profiles-layout">
           <div class="profiles-main">
-            <div class="actions">
-              <button id="refreshModels">Refresh models</button>
+            <div class="model-refresh-row">
               <div id="modelStatus" class="model-status" role="status" aria-live="polite"></div>
+              <button id="refreshModels">Refresh models</button>
             </div>
             <div class="subnav" aria-label="Profile sections">
               <button id="profilesSpeakersTab" type="button">Speaker Profiles</button>
@@ -253,9 +259,18 @@
           <div id="chatPane" class="chat-pane">
             <div class="chat-pane-header">
               <h3>Profile Assistant</h3>
-              <button id="chatReset" class="danger" title="Start new chat">New Chat</button>
+              <div class="chat-input-actions">
+                <button id="chatReset" title="Start new chat">New Chat</button>
+                <button id="chatDelete" class="danger" title="Delete selected chat">Delete</button>
+              </div>
             </div>
             <div class="chat-controls">
+              <label>Chat history<select id="chatHistory"></select></label>
+              <label>Mode<select id="chatMode">
+                <option value="speaker">Speaker</option>
+                <option value="episode">Episode</option>
+                <option value="both" selected>Both</option>
+              </select></label>
               <label>Model<select id="chatModel"></select></label>
               <label>Knowledge base (optional)<select id="chatKb"><option value="">None</option></select></label>
             </div>
@@ -266,7 +281,7 @@
               <textarea id="chatInput" placeholder="Describe what you want or answer the assistant's questions…" disabled></textarea>
               <div class="chat-input-actions">
                 <button id="chatSend" class="primary" disabled>Send</button>
-                <span id="chatPairLabel" class="muted" style="font-size:11px"></span>
+                <span id="chatTargetLabel" class="muted" style="font-size:11px"></span>
               </div>
             </div>
           </div>
@@ -390,13 +405,19 @@
     let jobPollTimer = null;
     let modelPollTimer = null;
     let hadActiveJobs = false;
+    let notifications = [];
 
     function notify(message, type = "") {
-      $("status").textContent = message;
-      $("status").className = `status show ${type}`;
+      notifications = [{ message: String(message || ""), type: type || "info" }, ...notifications].slice(0, 5);
+      renderNotifications();
     }
 
-    function clearNotice() { $("status").className = "status"; }
+    function renderNotifications() {
+      $("notificationFeed").innerHTML = notifications.length ? notifications.map((item) => `<div class="notice-item" data-type="${escapeHtml(item.type)}">
+        <strong>${escapeHtml(item.type === "ok" ? "Saved" : item.type === "warning" ? "Warning" : item.type === "error" ? "Error" : "Notice")}</strong>
+        <span>${escapeHtml(item.message)}</span>
+      </div>`).join("") : '<span class="muted">No notifications</span>';
+    }
 
     async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -962,12 +983,50 @@
       });
     }
 
-    function voiceSelector(model, selected) {
+    function voiceSelector(model, selected, index) {
       const voices = providerVoices(model);
-      if (!voices.length) return `<input data-field="voiceId" value="${escapeHtml(selected)}" placeholder="Enter voice ID">`;
-      let options = voices.map((voice) => option(voice.id, voice.label, voice.id === selected)).join("");
-      if (selected && !voices.some((voice) => voice.id === selected)) options += option(selected, `${selected} · saved/unavailable`, true);
-      return `<select data-field="voiceId">${options}</select>`;
+      let options = voices.map((voice) => `<option value="${escapeHtml(voice.id)}" label="${escapeHtml(voice.label)}"></option>`).join("");
+      if (selected && !voices.some((voice) => voice.id === selected)) options += `<option value="${escapeHtml(selected)}" label="${escapeHtml(`${selected} · saved/unavailable`)}"></option>`;
+      return `<input data-field="voiceId" list="voice-options-${index}" value="${escapeHtml(selected)}" placeholder="Enter voice ID"><datalist id="voice-options-${index}">${options}</datalist>`;
+    }
+
+    function ttsProvider(model) {
+      if (model === "mimo-v2.5-tts") return "mimo";
+      if (model.startsWith("compat:chatterbox:")) return "chatterbox";
+      if (model.startsWith("eleven")) return "elevenlabs";
+      return voiceProvider(model);
+    }
+
+    function providerTtsFields(speaker, model) {
+      if (ttsProvider(model) === "chatterbox") return `
+            <label title="Controls emotional intensity. Higher values produce more expressive speech; lower values sound more neutral. Default: 0.7.">Exaggeration<input data-field="chatterboxExaggeration" type="number" min="0.25" max="2" step="0.05" value="${speaker.chatterboxExaggeration ?? 0.7}"></label>
+            <label title="Controls adherence to voice and text conditioning. Higher values follow conditioning more strongly; lower values allow freer delivery. Default: 0.3.">CFG weight<input data-field="chatterboxCfgWeight" type="number" min="0" max="1" step="0.05" value="${speaker.chatterboxCfgWeight ?? 0.3}"></label>
+            <label title="Controls sampling variability. Higher values produce more varied, less predictable speech; lower values produce more consistent speech. Default: 0.7.">Temperature<input data-field="chatterboxTemperature" type="number" min="0.05" max="5" step="0.05" value="${speaker.chatterboxTemperature ?? 0.7}"></label>`;
+      if (ttsProvider(model) === "mimo") return `
+            <label title="Sampling variability. Blank uses MiMo default.">MiMo temperature<input data-field="mimoTemperature" type="number" min="0" max="2" step="0.05" value="${speaker.mimoTemperature ?? ""}"></label>
+            <label title="Nucleus sampling. Lower values narrow the output. Blank uses MiMo default.">MiMo top-p<input data-field="mimoTopP" type="number" min="0" max="1" step="0.05" value="${speaker.mimoTopP ?? ""}"></label>
+            <label>MiMo preset<select data-field="mimoInstructionPreset">
+              ${option("", "None", !speaker.mimoInstructionPreset)}
+              ${option("natural", "Natural", speaker.mimoInstructionPreset === "natural")}
+              ${option("warm", "Warm", speaker.mimoInstructionPreset === "warm")}
+              ${option("calm", "Calm", speaker.mimoInstructionPreset === "calm")}
+              ${option("expressive", "Expressive", speaker.mimoInstructionPreset === "expressive")}
+              ${option("energetic", "Energetic", speaker.mimoInstructionPreset === "energetic")}
+            </select></label>
+            <label class="full" title="Extra MiMo instruction appended to the TTS instruction.">MiMo instruction<textarea data-field="mimoInstructionText" placeholder="Example: Keep pacing relaxed and avoid announcer energy.">${escapeHtml(speaker.mimoInstructionText || "")}</textarea></label>`;
+      if (ttsProvider(model) === "elevenlabs") return `
+            <label title="Voice consistency. Higher is more stable; lower is more expressive.">Stability<input data-field="elevenlabsStability" type="number" min="0" max="1" step="0.05" value="${speaker.elevenlabsStability ?? 0.5}"></label>
+            <label title="How closely to match the selected voice.">Similarity boost<input data-field="elevenlabsSimilarityBoost" type="number" min="0" max="1" step="0.05" value="${speaker.elevenlabsSimilarityBoost ?? 0.75}"></label>
+            <label title="Style exaggeration for supported models.">Style<input data-field="elevenlabsStyle" type="number" min="0" max="1" step="0.05" value="${speaker.elevenlabsStyle ?? 0}"></label>
+            <label title="Playback/generation speed.">Speed<input data-field="elevenlabsSpeed" type="number" min="0.7" max="1.2" step="0.01" value="${speaker.elevenlabsSpeed ?? 1}"></label>
+            <label title="Optional deterministic seed. Blank omits it.">Seed<input data-field="elevenlabsSeed" type="number" min="0" max="4294967295" step="1" value="${speaker.elevenlabsSeed ?? ""}"></label>
+            <label>Text normalization<select data-field="elevenlabsTextNormalization">
+              ${option("auto", "Auto", (speaker.elevenlabsTextNormalization || "auto") === "auto")}
+              ${option("on", "On", speaker.elevenlabsTextNormalization === "on")}
+              ${option("off", "Off", speaker.elevenlabsTextNormalization === "off")}
+            </select></label>
+            <label title="Use ElevenLabs speaker boost.">Speaker boost<input data-field="elevenlabsUseSpeakerBoost" type="checkbox"${speaker.elevenlabsUseSpeakerBoost !== false ? " checked" : ""}></label>`;
+      return "";
     }
 
     function voiceDescription(voice) {
@@ -988,19 +1047,15 @@
     function renderSpeakerCards(profile) {
       $("speakerCards").innerHTML = profile.speakers.map((speaker, index) => {
         const resolvedModel = speaker.ttsModelOverride || profile.voiceModel;
-        const chatterboxFields = (resolvedModel.startsWith("compat:chatterbox:") || modelProvider(resolvedModel) === "chatterbox") ? `
-            <label title="Controls emotional intensity. Higher values produce more expressive speech; lower values sound more neutral. Default: 0.7.">Exaggeration<input data-field="chatterboxExaggeration" type="number" min="0.25" max="2" step="0.05" value="${speaker.chatterboxExaggeration ?? 0.7}"></label>
-            <label title="Controls adherence to voice and text conditioning. Higher values follow conditioning more strongly; lower values allow freer delivery. Default: 0.3.">CFG weight<input data-field="chatterboxCfgWeight" type="number" min="0" max="1" step="0.05" value="${speaker.chatterboxCfgWeight ?? 0.3}"></label>
-            <label title="Controls sampling variability. Higher values produce more varied, less predictable speech; lower values produce more consistent speech. Default: 0.7.">Temperature<input data-field="chatterboxTemperature" type="number" min="0.05" max="5" step="0.05" value="${speaker.chatterboxTemperature ?? 0.7}"></label>` : "";
         return `<fieldset data-speaker-index="${index}">
           <legend>Speaker ${index + 1}</legend>
           <div class="speaker-head"><span class="badge">${escapeHtml(modelLabel(resolvedModel))}</span><button type="button" class="danger remove-speaker" data-index="${index}"${profile.speakers.length === 1 ? " disabled" : ""}>Remove</button></div>
           <div class="grid">
             <label>Name<input data-field="name" value="${escapeHtml(speaker.name)}"></label>
             <label>Model override<select data-field="ttsModelOverride">${modelOptions(speaker.ttsModelOverride || "", true)}</select></label>
-            <label class="full">Voice ID${voiceSelector(resolvedModel, speaker.voiceId)}</label>
+            <label class="full">Voice ID${voiceSelector(resolvedModel, speaker.voiceId, index)}</label>
             <label class="full">Accent override<input data-field="accent" list="accent-list-${index}" value="${escapeHtml(speaker.accent || "")}" placeholder="Use episode language default"><datalist id="accent-list-${index}">${accentOptions()}</datalist></label>
-            ${chatterboxFields}
+            ${providerTtsFields(speaker, resolvedModel)}
             <label class="full">Backstory<textarea data-field="backstory">${escapeHtml(speaker.backstory)}</textarea></label>
             <label class="full">Personality<textarea data-field="personality">${escapeHtml(speaker.personality)}</textarea></label>
             <label class="full">Voice direction<textarea data-field="style">${escapeHtml(speaker.style)}</textarea></label>
@@ -1014,6 +1069,13 @@
         renderSpeakerCards(profile);
       }));
       for (const speaker of profile.speakers) ensureProviderVoices(speaker.ttsModelOverride || profile.voiceModel);
+    }
+
+    function optionalNumberField(card, field, fallback = null) {
+      const input = card.querySelector(`[data-field="${field}"]`);
+      if (!input) return fallback ?? null;
+      const value = input.value.trim();
+      return value ? Number(value) : null;
     }
 
     function syncSpeakerForm() {
@@ -1034,6 +1096,17 @@
         chatterboxExaggeration: Number(card.querySelector('[data-field="chatterboxExaggeration"]')?.value ?? profile.speakers[index].chatterboxExaggeration ?? 0.7),
         chatterboxCfgWeight: Number(card.querySelector('[data-field="chatterboxCfgWeight"]')?.value ?? profile.speakers[index].chatterboxCfgWeight ?? 0.3),
         chatterboxTemperature: Number(card.querySelector('[data-field="chatterboxTemperature"]')?.value ?? profile.speakers[index].chatterboxTemperature ?? 0.7),
+        mimoTemperature: optionalNumberField(card, "mimoTemperature", profile.speakers[index].mimoTemperature),
+        mimoTopP: optionalNumberField(card, "mimoTopP", profile.speakers[index].mimoTopP),
+        mimoInstructionPreset: card.querySelector('[data-field="mimoInstructionPreset"]')?.value ?? profile.speakers[index].mimoInstructionPreset ?? "",
+        mimoInstructionText: card.querySelector('[data-field="mimoInstructionText"]')?.value ?? profile.speakers[index].mimoInstructionText ?? "",
+        elevenlabsStability: Number(card.querySelector('[data-field="elevenlabsStability"]')?.value ?? profile.speakers[index].elevenlabsStability ?? 0.5),
+        elevenlabsSimilarityBoost: Number(card.querySelector('[data-field="elevenlabsSimilarityBoost"]')?.value ?? profile.speakers[index].elevenlabsSimilarityBoost ?? 0.75),
+        elevenlabsStyle: Number(card.querySelector('[data-field="elevenlabsStyle"]')?.value ?? profile.speakers[index].elevenlabsStyle ?? 0),
+        elevenlabsUseSpeakerBoost: card.querySelector('[data-field="elevenlabsUseSpeakerBoost"]')?.checked ?? profile.speakers[index].elevenlabsUseSpeakerBoost ?? true,
+        elevenlabsSpeed: Number(card.querySelector('[data-field="elevenlabsSpeed"]')?.value ?? profile.speakers[index].elevenlabsSpeed ?? 1),
+        elevenlabsSeed: optionalNumberField(card, "elevenlabsSeed", profile.speakers[index].elevenlabsSeed),
+        elevenlabsTextNormalization: card.querySelector('[data-field="elevenlabsTextNormalization"]')?.value ?? profile.speakers[index].elevenlabsTextNormalization ?? "auto",
       }));
     }
 
@@ -1041,7 +1114,7 @@
       syncSpeakerForm();
       const profile = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
       if (profile.speakers.length >= 4) return;
-      profile.speakers.push({ name: `Speaker ${profile.speakers.length + 1}`, backstory: "Required", personality: "Required", voiceId: profile.voiceModel === "mimo-v2.5-tts" ? "Milo" : "", style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "", chatterboxExaggeration: 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7 });
+      profile.speakers.push({ name: `Speaker ${profile.speakers.length + 1}`, backstory: "Required", personality: "Required", voiceId: profile.voiceModel === "mimo-v2.5-tts" ? "Milo" : "", style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "", chatterboxExaggeration: 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7, mimoTemperature: null, mimoTopP: null, mimoInstructionPreset: "", mimoInstructionText: "", elevenlabsStability: 0.5, elevenlabsSimilarityBoost: 0.75, elevenlabsStyle: 0, elevenlabsUseSpeakerBoost: true, elevenlabsSpeed: 1, elevenlabsSeed: null, elevenlabsTextNormalization: "auto" });
       profilesDirty = true;
       renderSpeakerCards(profile);
     }
@@ -1089,7 +1162,7 @@
       const current = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
       const base = copy ? structuredClone(current) : {
         name: "New speaker profile", description: "", voiceModel: "mimo-v2.5-tts", instructions: "",
-        speakers: [{ name: "Speaker 1", backstory: "Required", personality: "Required", voiceId: "Chloe", style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "", chatterboxExaggeration: 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7 }],
+        speakers: [{ name: "Speaker 1", backstory: "Required", personality: "Required", voiceId: "Chloe", style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "", chatterboxExaggeration: 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7, mimoTemperature: null, mimoTopP: null, mimoInstructionPreset: "", mimoInstructionText: "", elevenlabsStability: 0.5, elevenlabsSimilarityBoost: 0.75, elevenlabsStyle: 0, elevenlabsUseSpeakerBoost: true, elevenlabsSpeed: 1, elevenlabsSeed: null, elevenlabsTextNormalization: "auto" }],
       };
       base.id = crypto.randomUUID();
       if (copy) base.name += " — Copy";
@@ -1121,12 +1194,14 @@
     async function saveProfiles() {
       syncSpeakerForm();
       syncEpisodeProfileForm();
-      state.profiles = await api("/api/profiles", { method: "PUT", body: JSON.stringify(state.profiles) });
+      const result = await api("/api/profiles", { method: "PUT", body: JSON.stringify(state.profiles) });
+      state.profiles = result.profiles || result;
       profilesDirty = false;
       renderProfileOptions();
       renderBuildOptions();
       renderTtsView();
-      notify(activeProfileSection === "episodes" ? "Episode profiles saved." : "Speaker profiles saved.", "ok");
+      if (result.warnings?.length) notify(`Profiles saved with warnings: ${result.warnings.join(" ")}`, "warning");
+      else notify(activeProfileSection === "episodes" ? "Episode profiles saved." : "Speaker profiles saved.", "ok");
     }
 
     function addCompatibleConnection() {
@@ -1396,7 +1471,6 @@
 
     function guard(action) {
       return async (...args) => {
-        clearNotice();
         try { await action(...args); }
         catch (error) { notify(error.message || String(error), "error"); }
       };
@@ -1560,25 +1634,34 @@
 
     // --- Chat ---
     let chatThread = null;
+    let chatThreads = [];
+    let activeChatThreadId = "";
     let chatBusy = false;
-    let chatPairVersion = 0;
+    let chatLoadVersion = 0;
 
-    function chatPairId() {
+    function currentChatTarget() {
       const sp = activeSpeakerProfileId;
       const ep = activeEpisodeProfileId;
       return sp && ep ? { speakerProfileId: sp, episodeProfileId: ep } : null;
     }
 
-    function chatSavedPairId() {
-      const pair = chatPairId();
-      if (!pair) return null;
-      const sp = state?.profiles.speakerProfiles.find((p) => p.id === pair.speakerProfileId);
-      const ep = state?.profiles.episodeProfiles.find((p) => p.id === pair.episodeProfileId);
+    function savedChatTarget() {
+      const target = currentChatTarget();
+      if (!target) return null;
+      const sp = state?.profiles.speakerProfiles.find((p) => p.id === target.speakerProfileId);
+      const ep = state?.profiles.episodeProfiles.find((p) => p.id === target.episodeProfileId);
       if (!sp || !ep) return null;
-      return pair;
+      return target;
+    }
+
+    function renderChatHistoryOptions() {
+      const opts = [option("", "New chat", !activeChatThreadId)];
+      opts.push(...chatThreads.map((thread) => option(thread.threadId, `${thread.title || "Untitled"} (${thread.messageCount || 0})`, thread.threadId === activeChatThreadId)));
+      $("chatHistory").innerHTML = opts.join("");
     }
 
     function renderChatControls() {
+      renderChatHistoryOptions();
       const models = discoveredModels("text");
       const selected = $("chatModel").value || state?.profiles.episodeProfiles.find((p) => p.id === activeEpisodeProfileId)?.transcriptModel || "";
       let opts = models.map((m) => option(m.id, m.label, m.id === selected)).join("");
@@ -1654,26 +1737,28 @@
     }
 
     function updateChatDisabledState() {
-      const pair = chatSavedPairId();
+      const target = savedChatTarget();
       const notice = $("chatDisabledNotice");
       const input = $("chatInput");
       const send = $("chatSend");
-      const pairLabel = $("chatPairLabel");
+      const targetLabel = $("chatTargetLabel");
 
-      if (!pair) {
+      if (!target) {
         notice.textContent = "Save both a Speaker profile and an Episode profile to start chatting.";
         notice.hidden = false;
         input.disabled = true;
         send.disabled = true;
-        pairLabel.textContent = "";
-        $("chatReset").disabled = true;
+        targetLabel.textContent = "";
+        $("chatReset").disabled = chatBusy;
+        $("chatDelete").disabled = chatBusy || !activeChatThreadId;
         return false;
       }
 
-      const sp = state.profiles.speakerProfiles.find((p) => p.id === pair.speakerProfileId);
-      const ep = state.profiles.episodeProfiles.find((p) => p.id === pair.episodeProfileId);
-      pairLabel.textContent = `${sp?.name || "?"} + ${ep?.name || "?"}`;
+      const sp = state.profiles.speakerProfiles.find((p) => p.id === target.speakerProfileId);
+      const ep = state.profiles.episodeProfiles.find((p) => p.id === target.episodeProfileId);
+      targetLabel.textContent = `${sp?.name || "?"} + ${ep?.name || "?"}`;
       $("chatReset").disabled = chatBusy;
+      $("chatDelete").disabled = chatBusy || !activeChatThreadId;
 
       if (ep?.speakerProfileId !== sp?.id) {
         notice.textContent = "Select the Speaker profile linked by this Episode profile.";
@@ -1706,35 +1791,43 @@
       return true;
     }
 
+    async function loadChatThreads(render = true) {
+      const data = await api("/api/chats");
+      chatThreads = data.chats || [];
+      if (activeChatThreadId && !chatThreads.some((thread) => thread.threadId === activeChatThreadId)) activeChatThreadId = "";
+      if (render) renderChatControls();
+    }
+
     async function loadChatThread() {
-      const pair = chatSavedPairId();
-      const version = ++chatPairVersion;
+      const version = ++chatLoadVersion;
       chatThread = null;
       $("chatModel").innerHTML = "";
       renderChatMessages();
-      if (!pair) { renderChatControls(); updateChatDisabledState(); return; }
+      await loadChatThreads(false);
+      if (!activeChatThreadId) { renderChatControls(); updateChatDisabledState(); return; }
       try {
-        const data = await api(`/api/chat?speakerProfileId=${encodeURIComponent(pair.speakerProfileId)}&episodeProfileId=${encodeURIComponent(pair.episodeProfileId)}`);
-        if (version !== chatPairVersion) return;
+        const data = await api(`/api/chat?threadId=${encodeURIComponent(activeChatThreadId)}`);
+        if (version !== chatLoadVersion) return;
         chatThread = data;
         renderChatMessages();
         renderChatControls();
         updateChatDisabledState();
       } catch (error) {
-        if (version === chatPairVersion) notify(error.message, "error");
+        if (version === chatLoadVersion) notify(error.message, "error");
       }
     }
 
     async function sendChatMessage() {
-      const pair = chatSavedPairId();
-      if (!pair || chatBusy) return;
+      const target = savedChatTarget();
+      if (!target || chatBusy) return;
       if (profilesDirty) { notify("Save profile changes before using the assistant.", "error"); return; }
-      const version = chatPairVersion;
+      const version = chatLoadVersion;
       const text = $("chatInput").value.trim();
       if (!text) return;
       const model = $("chatModel").value;
       if (!model) { notify("Select a text model first.", "error"); return; }
       const kbId = $("chatKb").value || "";
+      const mode = $("chatMode").value || "both";
 
       chatBusy = true;
       updateChatDisabledState();
@@ -1743,20 +1836,23 @@
       $("chatInput").value = "";
 
       try {
-        await api("/api/chat", {
+        const sent = await api("/api/chat", {
           method: "POST",
           body: JSON.stringify({
-            speakerProfileId: pair.speakerProfileId,
-            episodeProfileId: pair.episodeProfileId,
+            threadId: activeChatThreadId,
+            speakerProfileId: target.speakerProfileId,
+            episodeProfileId: target.episodeProfileId,
             text,
             model,
             kbId,
+            mode,
             voiceIds: [...new Set([...mimoVoices, ...openaiVoices, ...elevenVoices.map((voice) => voice.id), ...chatterboxVoices.map((voice) => voice.id)])],
           }),
         });
-        const threadData = await api(`/api/chat?speakerProfileId=${encodeURIComponent(pair.speakerProfileId)}&episodeProfileId=${encodeURIComponent(pair.episodeProfileId)}`);
-        const currentPair = chatSavedPairId();
-        if (version !== chatPairVersion || currentPair?.speakerProfileId !== pair.speakerProfileId || currentPair?.episodeProfileId !== pair.episodeProfileId) return;
+        activeChatThreadId = sent.threadId;
+        await loadChatThreads(false);
+        const threadData = await api(`/api/chat?threadId=${encodeURIComponent(activeChatThreadId)}`);
+        if (version !== chatLoadVersion) return;
         chatThread = threadData;
         renderChatMessages();
       } catch (error) {
@@ -1769,25 +1865,43 @@
     }
 
     async function resetChatThread() {
-      const pair = chatSavedPairId();
-      if (!pair) return;
-      if (!confirm("Start a new chat? Current conversation will be lost.")) return;
+      activeChatThreadId = "";
+      chatThread = null;
+      renderChatControls();
+      renderChatMessages();
+      updateChatDisabledState();
+      notify("New chat ready.", "ok");
+    }
+
+    async function deleteChatThread() {
+      if (!activeChatThreadId) return;
+      if (!confirm("Delete this chat history?")) return;
       try {
-        await api(`/api/chat?speakerProfileId=${encodeURIComponent(pair.speakerProfileId)}&episodeProfileId=${encodeURIComponent(pair.episodeProfileId)}`, { method: "DELETE" });
+        await api(`/api/chat?threadId=${encodeURIComponent(activeChatThreadId)}`, { method: "DELETE" });
+        activeChatThreadId = "";
         chatThread = null;
+        await loadChatThreads();
         renderChatMessages();
-        notify("New chat started.", "ok");
+        updateChatDisabledState();
+        notify("Chat deleted.", "ok");
       } catch (error) {
         notify(error.message, "error");
       }
     }
 
     async function applyChatProposal(type, messageIndex) {
-      const pair = chatSavedPairId();
-      if (!pair || !chatThread) return;
+      const target = savedChatTarget();
+      if (!target || !chatThread) return;
       if (profilesDirty) { notify("Save profile changes before applying a proposal.", "error"); return; }
       const assistantMessage = chatThread.messages[messageIndex];
       if (assistantMessage?.role !== "assistant") return;
+      const original = assistantMessage.context || {};
+      if ((original.speakerProfileId && original.speakerProfileId !== target.speakerProfileId) || (original.episodeProfileId && original.episodeProfileId !== target.episodeProfileId)) {
+        const currentSp = state.profiles.speakerProfiles.find((p) => p.id === target.speakerProfileId)?.name || target.speakerProfileId;
+        const currentEp = state.profiles.episodeProfiles.find((p) => p.id === target.episodeProfileId)?.name || target.episodeProfileId;
+        const originalLabel = `${original.speakerProfileName || original.speakerProfileId || "unknown speaker"} + ${original.episodeProfileName || original.episodeProfileId || "unknown episode"}`;
+        if (!confirm(`This proposal was generated for ${originalLabel}. Apply it to ${currentSp} + ${currentEp} instead?`)) return;
+      }
       let parsed;
       try { parsed = JSON.parse(assistantMessage.content); } catch { return; }
       const proposal = {};
@@ -1798,7 +1912,7 @@
       try {
         const result = await api("/api/chat/apply", {
           method: "POST",
-          body: JSON.stringify({ speakerProfileId: pair.speakerProfileId, episodeProfileId: pair.episodeProfileId, proposal }),
+          body: JSON.stringify({ threadId: activeChatThreadId, speakerProfileId: target.speakerProfileId, episodeProfileId: target.episodeProfileId, proposal }),
         });
         if (result.errors?.length) {
           notify(`Apply failed: ${result.errors.join("; ")}`, "error");
@@ -1808,9 +1922,9 @@
         const applied = [];
         if (result.speakerApplied) applied.push("speaker");
         if (result.episodeApplied) applied.push("episode");
-        notify(`Applied ${applied.join(" and ")} profile changes.`, "ok");
-        chatThread.messages.push({ role: "system", content: `Applied ${applied.join(" and ")} changes.`, timestamp: new Date().toISOString() });
-        renderChatMessages();
+        if (result.warnings?.length) notify(`Applied ${applied.join(" and ")} profile changes with warnings: ${result.warnings.join(" ")}`, "warning");
+        else notify(`Applied ${applied.join(" and ")} profile changes.`, "ok");
+        await loadChatThread();
       } catch (error) {
         notify(error.message, "error");
       }
@@ -1822,7 +1936,13 @@
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); guard(sendChatMessage)(); }
     });
     $("chatReset").addEventListener("click", guard(resetChatThread));
+    $("chatDelete").addEventListener("click", guard(deleteChatThread));
+    $("chatHistory").addEventListener("change", guard(async () => {
+      activeChatThreadId = $("chatHistory").value;
+      await loadChatThread();
+    }));
     $("chatModel").addEventListener("change", updateChatDisabledState);
+    $("chatMode").addEventListener("change", updateChatDisabledState);
     $("chatKb").addEventListener("change", () => { if (chatThread) chatThread.kbId = $("chatKb").value; });
     $("chatMessages").addEventListener("click", (event) => {
       const btn = event.target.closest("[data-apply-proposal]");

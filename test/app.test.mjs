@@ -81,6 +81,18 @@ test("speaker profiles accept 1 to 4 speakers", () => {
   invalidChatterbox.speakerProfiles[0].speakers[0].chatterboxCfgWeight = 1.1;
   assert.throws(() => validateProfileData(invalidChatterbox), /Chatterbox CFG weight must be a number from 0 to 1/);
 
+  const customMimoVoice = structuredClone(DEFAULT_DATA);
+  customMimoVoice.speakerProfiles[0].speakers[0].voiceId = "custom-mimo-voice";
+  assert.equal(validateProfileData(customMimoVoice), true);
+
+  const invalidMimo = structuredClone(DEFAULT_DATA);
+  invalidMimo.speakerProfiles[0].speakers[0].mimoTopP = 1.1;
+  assert.throws(() => validateProfileData(invalidMimo), /MiMo top-p must be a number from 0 to 1/);
+
+  const invalidElevenLabs = structuredClone(DEFAULT_DATA);
+  invalidElevenLabs.speakerProfiles[0].speakers[0].elevenlabsSpeed = 2;
+  assert.throws(() => validateProfileData(invalidElevenLabs), /ElevenLabs speed must be a number from 0.7 to 1.2/);
+
   const spacedName = structuredClone(DEFAULT_DATA);
   spacedName.speakerProfiles[0].speakers[0].name = "  Valeria  ";
   validateProfileData(spacedName);
@@ -195,6 +207,13 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
   profiles.speakerProfiles[0].speakers = [{
     ...profiles.speakerProfiles[0].speakers[0],
     voiceId: "voice-es",
+    elevenlabsStability: 0.6,
+    elevenlabsSimilarityBoost: 0.7,
+    elevenlabsStyle: 0.2,
+    elevenlabsUseSpeakerBoost: false,
+    elevenlabsSpeed: 1.1,
+    elevenlabsSeed: 123,
+    elevenlabsTextNormalization: "off",
   }];
   response = await fetch(`${baseUrl}/api/profiles`, {
     method: "PUT",
@@ -222,7 +241,20 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
   const ttsCall = calls.find((call) => call.url.includes("/text-to-speech/"));
   const request = JSON.parse(ttsCall.options.body);
   assert.equal(ttsCall.options.headers["xi-api-key"], "test-eleven-key");
-  assert.deepEqual(request, { text: "[warm] Hola", model_id: "eleven_v3", language_code: "es" });
+  assert.deepEqual(request, {
+    text: "[warm] Hola",
+    model_id: "eleven_v3",
+    language_code: "es",
+    voice_settings: {
+      stability: 0.6,
+      similarity_boost: 0.7,
+      style: 0.2,
+      use_speaker_boost: false,
+      speed: 1.1,
+    },
+    apply_text_normalization: "off",
+    seed: 123,
+  });
   assert.doesNotMatch(JSON.stringify(voices), /test-eleven-key/);
 });
 
@@ -656,7 +688,12 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   const profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   profiles.episodeProfiles[0].language = "en-US";
   profiles.episodeProfiles[0].targetMinutes = 5;
+  profiles.speakerProfiles[0].speakers[0].voiceId = "custom-mimo";
   profiles.speakerProfiles[0].speakers[0].accent = "British";
+  profiles.speakerProfiles[0].speakers[0].mimoTemperature = 0.4;
+  profiles.speakerProfiles[0].speakers[0].mimoTopP = 0.8;
+  profiles.speakerProfiles[0].speakers[0].mimoInstructionPreset = "expressive";
+  profiles.speakerProfiles[0].speakers[0].mimoInstructionText = "Keep the read intimate.";
   response = await fetch(`${baseUrl}/api/profiles`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles),
   });
@@ -684,6 +721,11 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   assert.equal(ttsCalls, 6);
   assert.match(ttsRequests[0].messages[0].content, /Required spoken language: English \(United States\) \(en-US\)/);
   assert.match(ttsRequests[0].messages[0].content, /Required accent: British/);
+  assert.match(ttsRequests[0].messages[0].content, /more expressive delivery/);
+  assert.match(ttsRequests[0].messages[0].content, /Keep the read intimate/);
+  assert.equal(ttsRequests[0].audio.voice, "custom-mimo");
+  assert.equal(ttsRequests[0].temperature, 0.4);
+  assert.equal(ttsRequests[0].top_p, 0.8);
   const saved = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
   assert.equal(saved.status, "ready");
   assert.equal(saved.audioUrl, `/artifacts/${episode.id}/episode.mp3`);
@@ -1211,19 +1253,115 @@ test("profile assistant validates context and persists structured turns", { conc
   response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({ ...requestBody, threadId: "missing-thread" }),
   });
+  assert.equal(response.status, 404);
+  assert.equal(chatRequests.length, 0);
+
+  response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...requestBody, mode: "speaker" }),
+  });
+  const sent = await response.json();
   assert.equal(response.status, 200);
+  assert.match(sent.threadId, /^[a-zA-Z0-9_-]+$/);
   const prompt = chatRequests[0].messages[1].content;
   assert.match(prompt, /AVAILABLE ACTIVE TEXT MODELS/);
+  assert.match(prompt, /REQUESTED MODE:\nspeaker/);
   assert.match(prompt, /custom-voice/);
   assert.match(prompt, /FULL_CONTEXT_END/);
 
-  response = await fetch(`${baseUrl}/api/chat?speakerProfileId=speaker-chisme-crianza&episodeProfileId=episode-chisme-crianza`);
+  response = await fetch(`${baseUrl}/api/chats`);
+  const chats = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(chats.chats[0].threadId, sent.threadId);
+
+  response = await fetch(`${baseUrl}/api/chat?threadId=${sent.threadId}`);
   const thread = await response.json();
   assert.equal(response.status, 200);
   assert.equal(thread.messages.length, 2);
+  assert.equal(thread.messages[0].context.mode, "speaker");
   assert.equal(JSON.parse(thread.messages[1].content).proposal.speaker.speakers[0].voiceId, "custom-voice");
+
+  response = await fetch(`${baseUrl}/api/chat/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      threadId: sent.threadId,
+      speakerProfileId: "speaker-chisme-crianza",
+      episodeProfileId: "episode-chisme-crianza",
+      proposal: { speaker: { name: "Applied profile" } },
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).speakerApplied, true);
+
+  response = await fetch(`${baseUrl}/api/chat?threadId=${sent.threadId}`);
+  const appliedThread = await response.json();
+  assert.equal(appliedThread.messages.at(-1).role, "system");
+  assert.match(appliedThread.messages.at(-1).content, /Applied speaker changes/);
+});
+
+test("profile saves and proposal apply warn for existing unavailable saved models", { concurrency: false }, async (t) => {
+  const previousKeys = {
+    MIMO_API_KEY: process.env.MIMO_API_KEY,
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    CHATTERBOX_API_KEY: process.env.CHATTERBOX_API_KEY,
+  };
+  delete process.env.MIMO_API_KEY;
+  delete process.env.ELEVENLABS_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.CHATTERBOX_API_KEY;
+  t.after(() => {
+    for (const [name, value] of Object.entries(previousKeys)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  const rootDir = await mkdtemp(join(tmpdir(), "podcast-unavailable-model-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  await mkdir(join(rootDir, "data"), { recursive: true });
+  const seeded = structuredClone(DEFAULT_DATA);
+  seeded.speakerProfiles[0].voiceModel = "compat:chatterbox:chatterbox-multilingual-v3";
+  seeded.speakerProfiles[0].speakers = seeded.speakerProfiles[0].speakers.map((speaker) => ({ ...speaker, voiceId: "female" }));
+  await writeFile(join(rootDir, "data", "profiles.json"), JSON.stringify(seeded, null, 2));
+
+  const server = await createPodcastServer({ rootDir, fetchImpl: async () => {
+    throw new Error("No provider calls expected.");
+  } });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  let state = await (await fetch(`${baseUrl}/api/state`)).json();
+  let response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
+  let saved = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(saved.warnings.join(" "), /compat:chatterbox:chatterbox-multilingual-v3/);
+
+  const invalid = structuredClone(state.profiles);
+  invalid.speakerProfiles[0].voiceModel = "compat:chatterbox:brand-new-unknown";
+  response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(invalid) });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Unsupported TTS model/);
+
+  response = await fetch(`${baseUrl}/api/chat/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      speakerProfileId: "speaker-chisme-crianza",
+      episodeProfileId: "episode-chisme-crianza",
+      proposal: { episode: { name: "Updated while TTS is unavailable" } },
+    }),
+  });
+  const applied = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(applied.episodeApplied, true);
+  assert.deepEqual(applied.errors, []);
+  assert.match(applied.warnings.join(" "), /compat:chatterbox:chatterbox-multilingual-v3/);
 });
 
 test("browser model fields and loading surfaces are present", async () => {
@@ -1233,6 +1371,12 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /<select id="epLanguage"><\/select>/);
   assert.match(html, /<label class="full">Knowledge Base<select id="buildKnowledge"><\/select><\/label>/);
   assert.match(html, /id="serverActivity"/);
+  assert.match(html, /id="notificationFeed"/);
+  assert.match(html, /id="chatHistory"/);
+  assert.match(html, /id="chatMode"/);
+  assert.match(html, /id="chatDelete"/);
+  assert.match(html, /id="chatTargetLabel"/);
+  assert.doesNotMatch(html, /id="status" class="status"/);
   assert.match(html, /id="transcriptJob"/);
   assert.match(html, /grid-template-columns: 320px minmax\(0, 1fr\)/);
   assert.match(html, /\.loading-line\[hidden\] \{ display: none; \}/);
@@ -1251,19 +1395,25 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /id="modelDialog"/);
   assert.match(html, />Add OpenAI compatible connection</);
   assert.match(html, /const openaiVoices/);
-  assert.match(html, /function voiceSelector\(model, selected\)/);
+  assert.match(html, /function voiceSelector\(model, selected, index\)/);
   assert.match(html, /data-field="chatterboxExaggeration"/);
+  assert.match(html, /data-field="mimoTemperature"/);
+  assert.match(html, /data-field="mimoTopP"/);
+  assert.match(html, /data-field="elevenlabsStability"/);
+  assert.match(html, /data-field="elevenlabsTextNormalization"/);
+  assert.match(html, /class="model-refresh-row"/);
+  assert.match(html, /overflow-y: auto/);
   assert.match(html, /data-message-index/);
   assert.match(html, /event\.target\.closest\("#chatPane"\)/);
   assert.match(html, /speakerProfileSelect"\)\.addEventListener\("change"[^\n]+loadChatThread/);
   assert.match(html, /chatThread\.messages\[messageIndex\]/);
-  assert.match(html, /version !== chatPairVersion/);
+  assert.match(html, /version !== chatLoadVersion/);
   assert.match(html, /Save profile changes before using the assistant/);
   assert.match(html, /function renderProposalDiff/);
   assert.doesNotMatch(html, /const lastAssistant/);
   assert.match(html, /id="transcriptLengthWarning"/);
   assert.match(html, /Render anyway\?/);
-  assert.match(html, /<select data-field="voiceId">/);
+  assert.match(html, /<input data-field="voiceId" list="voice-options-\$\{index\}"/);
   assert.match(html, /function ensureProviderVoices\(model\)/);
   assert.doesNotMatch(html, /refreshElevenVoices/);
   assert.match(html, /id="configModelStatus" class="model-status"/);

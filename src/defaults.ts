@@ -164,6 +164,17 @@ export const DEFAULT_DATA = {
           chatterboxExaggeration: 0.7,
           chatterboxCfgWeight: 0.3,
           chatterboxTemperature: 0.7,
+          mimoTemperature: null,
+          mimoTopP: null,
+          mimoInstructionPreset: "",
+          mimoInstructionText: "",
+          elevenlabsStability: 0.5,
+          elevenlabsSimilarityBoost: 0.75,
+          elevenlabsStyle: 0,
+          elevenlabsUseSpeakerBoost: true,
+          elevenlabsSpeed: 1,
+          elevenlabsSeed: null,
+          elevenlabsTextNormalization: "auto",
           ttsModelOverride: ""
         },
         {
@@ -175,6 +186,17 @@ export const DEFAULT_DATA = {
           chatterboxExaggeration: 0.7,
           chatterboxCfgWeight: 0.3,
           chatterboxTemperature: 0.7,
+          mimoTemperature: null,
+          mimoTopP: null,
+          mimoInstructionPreset: "",
+          mimoInstructionText: "",
+          elevenlabsStability: 0.5,
+          elevenlabsSimilarityBoost: 0.75,
+          elevenlabsStyle: 0,
+          elevenlabsUseSpeakerBoost: true,
+          elevenlabsSpeed: 1,
+          elevenlabsSeed: null,
+          elevenlabsTextNormalization: "auto",
           ttsModelOverride: ""
         }
       ]
