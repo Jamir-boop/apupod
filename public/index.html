@@ -339,15 +339,43 @@
           <h2>TTS Generator</h2>
           <label>Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
           <label>TTS language override<select id="ttsLanguageOverride"><option value="">Use episode profile language</option></select></label>
-          <div id="ttsSummary" class="speaker-summary"><p class="muted">Select a saved episode with a transcript.</p></div>
-          <div id="previewButtons" class="actions"></div>
-          <p class="warning">Preview every voice before rendering. MiMo preset TTS is blocked outside English/Chinese; other languages require a compatible ElevenLabs model and <code>ELEVENLABS_API_KEY</code>.</p>
-          <audio id="previewAudio" controls hidden></audio>
-          <div class="separator"></div>
-          <div class="actions"><button id="applyLatestProfiles">Apply latest profiles</button><button id="renderAudio" class="primary">Render MP3</button></div>
-          <progress id="renderProgress" value="0" max="1" hidden></progress>
-          <p id="renderStatus" class="muted"></p>
-          <audio id="episodeAudio" controls hidden></audio>
+          <div class="subnav" aria-label="TTS sections">
+            <button id="ttsAudioTab" type="button">Audio</button>
+            <button id="ttsPromptTab" type="button">Prompt &amp; Script</button>
+          </div>
+          <section id="tts-audio-panel">
+            <div id="ttsSummary" class="speaker-summary"><p class="muted">Select a saved episode with a transcript.</p></div>
+            <div id="previewButtons" class="actions"></div>
+            <p class="warning">Preview every voice before rendering. MiMo preset TTS is blocked outside English/Chinese; other languages require a compatible ElevenLabs model and <code>ELEVENLABS_API_KEY</code>.</p>
+            <audio id="previewAudio" controls hidden></audio>
+            <div class="separator"></div>
+            <div class="actions"><button id="applyLatestProfiles">Apply latest profiles</button><button id="renderAudio" class="primary">Render MP3</button></div>
+            <progress id="renderProgress" value="0" max="1" hidden></progress>
+            <p id="renderStatus" class="muted"></p>
+            <audio id="episodeAudio" controls hidden></audio>
+          </section>
+          <section id="tts-prompt-panel" hidden>
+            <p class="muted">Prepare cue annotations without changing spoken words. Provider references: <a href="https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/speech-synthesis-v2.5" target="_blank" rel="noreferrer">MiMo</a> · <a href="https://elevenlabs.io/docs/best-practices/prompting" target="_blank" rel="noreferrer">ElevenLabs</a> · <a href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noreferrer">Chatterbox</a>.</p>
+            <label>Resolved preparation prompt<textarea id="ttsPreparationPrompt" style="min-height:220px"></textarea></label>
+            <div class="actions"><button id="resetTtsPrompt">Reset provider defaults</button><button id="saveTtsPrompt">Save prompt</button><button id="prepareTtsScript" class="primary">Prepare TTS script</button></div>
+            <div id="ttsPreparationJob" class="loading-line" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="ttsPreparationJobStatus"></span></div>
+            <p id="ttsPreparationStatus" class="muted"></p>
+            <label>Annotated TTS script<textarea id="ttsPreparedScript" class="transcript" spellcheck="true" placeholder="Prepare a TTS script, then review cue annotations here."></textarea></label>
+            <div class="actions"><button id="approveTtsScript" class="primary">Approve script</button></div>
+            <div id="ttsPreparationWarnings" class="speaker-summary"></div>
+            <div class="separator"></div>
+            <div id="ttsChatPane" class="chat-pane" style="position:static;max-height:none">
+              <div class="chat-pane-header"><h3>TTS Prompt Assistant</h3><div class="chat-input-actions"><button id="ttsChatReset">New Chat</button><button id="ttsChatDelete" class="danger">Delete</button></div></div>
+              <div class="chat-controls">
+                <label>Chat history<select id="ttsChatHistory"></select></label>
+                <label>Documentation KB (optional)<select id="ttsChatKb"><option value="">None</option></select></label>
+                <span id="ttsChatModel" class="muted"></span>
+              </div>
+              <div id="ttsChatMessages" class="chat-messages"><div class="chat-msg system">Paste provider documentation or describe desired cue style.</div></div>
+              <div id="ttsChatBusy" class="chat-busy" hidden><span class="spinner" aria-hidden="true"></span><span>Thinking…</span></div>
+              <div class="chat-input-row"><textarea id="ttsChatInput" placeholder="Paste docs or describe how prompt should change…"></textarea><div class="chat-input-actions"><button id="ttsChatSend" class="primary">Send</button></div></div>
+            </div>
+          </section>
         </section>
       </div>
 
@@ -406,6 +434,14 @@
     let modelPollTimer = null;
     let hadActiveJobs = false;
     let notifications = [];
+    let activeTtsSection = "audio";
+    let ttsPreparation = null;
+    let ttsPromptDirty = false;
+    let ttsScriptDirty = false;
+    let ttsChatThread = null;
+    let ttsChatThreads = [];
+    let activeTtsChatThreadId = "";
+    let ttsChatBusy = false;
 
     function notify(message, type = "") {
       notifications = [{ message: String(message || ""), type: type || "info" }, ...notifications].slice(0, 5);
@@ -577,6 +613,7 @@
     function renderJobIndicators() {
       const transcriptJob = currentJob("transcript");
       const ttsJob = currentJob("tts");
+      const ttsPreparationJob = currentJob("tts_prepare");
       const episodeBusy = jobsState.jobs.some((job) => job.episodeId === currentEpisode?.id && ["queued", "running"].includes(job.status));
       const transcriptBusy = transcriptJob && ["queued", "running"].includes(transcriptJob.status);
       $("transcriptJob").hidden = !transcriptBusy;
@@ -585,7 +622,10 @@
       $("saveEpisode").disabled = episodeBusy;
       $("saveTranscript").disabled = episodeBusy;
       $("applyLatestProfiles").disabled = episodeBusy || !currentEpisode || episodeProfilesAreCurrent();
-      $("renderAudio").disabled = episodeBusy || ttsCompatibilityErrors().length > 0;
+      $("renderAudio").disabled = episodeBusy || ttsCompatibilityErrors().length > 0 || !ttsPreparation?.approvedCurrent;
+      const preparationBusy = ttsPreparationJob && ["queued", "running"].includes(ttsPreparationJob.status);
+      $("ttsPreparationJob").hidden = !preparationBusy;
+      $("ttsPreparationJobStatus").textContent = preparationBusy ? ttsPreparationJob.message : "";
 
       if (ttsJob) {
         $("renderProgress").hidden = false;
@@ -596,6 +636,7 @@
         $("renderProgress").hidden = true;
         $("renderStatus").textContent = "";
       }
+      renderTtsPreparation();
     }
 
     async function refreshJobs() {
@@ -607,7 +648,7 @@
       if (hadActiveJobs && !running) {
         const latest = jobsState.jobs[0];
         if (currentEpisode) await refreshState(currentEpisode.id);
-        if (latest?.status === "completed") notify(latest.type === "transcript" ? "Transcript ready." : "MP3 render complete.", "ok");
+        if (latest?.status === "completed") notify(latest.type === "transcript" ? "Transcript ready." : latest.type === "tts_prepare" ? "TTS script ready for review." : "MP3 render complete.", "ok");
         if (["failed", "interrupted"].includes(latest?.status)) notify(latest.error || latest.message, "error");
       }
       hadActiveJobs = running;
@@ -632,6 +673,7 @@
       const pendingProfiles = profilesDirty ? state?.profiles : null;
       const pendingConfig = configState;
       const pendingDraft = episodeDraftDirty || transcriptDirty ? captureEpisodeDraft() : null;
+      const pendingTtsDraft = ttsPromptDirty || ttsScriptDirty ? captureTtsDraft() : null;
       state = await api("/api/state");
       if (pendingProfiles) state.profiles = pendingProfiles;
       configState = configDirty ? pendingConfig : structuredClone(state.config || { providers: { mimo: {}, elevenlabs: {}, openai: {}, chatterbox: {} }, compatibleConnections: [] });
@@ -639,7 +681,10 @@
       renderProfileSections();
       renderBuildOptions();
       renderConfigView();
-      if (preferredEpisodeId && state.episodes.some((episode) => episode.id === preferredEpisodeId && !episode.corrupt)) await selectEpisode(preferredEpisodeId, pendingDraft);
+      if (preferredEpisodeId && state.episodes.some((episode) => episode.id === preferredEpisodeId && !episode.corrupt)) {
+        await selectEpisode(preferredEpisodeId, pendingDraft);
+        restoreTtsDraft(pendingTtsDraft);
+      }
       else {
         resetEpisodeForm(Boolean(pendingDraft));
         if (pendingDraft) restoreEpisodeDraft(pendingDraft);
@@ -1255,6 +1300,9 @@
 
     function resetEpisodeForm(preserveDirty = false) {
       currentEpisode = null;
+      ttsPreparation = null;
+      ttsPromptDirty = false;
+      ttsScriptDirty = false;
       $("savedEpisodeSelect").value = "";
       $("ttsEpisodeSelect").value = "";
       $("ttsLanguageOverride").value = "";
@@ -1264,6 +1312,8 @@
       $("episodeSeed").value = "";
       $("episodeAudio").hidden = true;
       $("episodeAudio").removeAttribute("src");
+      $("ttsPreparationPrompt").value = "";
+      $("ttsPreparedScript").value = "";
       updateWordCount();
       renderTtsView();
       renderJobIndicators();
@@ -1276,6 +1326,8 @@
     async function selectEpisode(id, pendingDraft = null) {
       if (!id) return resetEpisodeForm();
       currentEpisode = await api(`/api/episodes/${id}`);
+      ttsPromptDirty = false;
+      ttsScriptDirty = false;
       $("savedEpisodeSelect").value = id;
       $("ttsEpisodeSelect").value = id;
       $("ttsLanguageOverride").value = "";
@@ -1290,6 +1342,7 @@
         transcriptDirty = false;
       }
       updateWordCount();
+      await loadTtsPreparation();
       renderTtsView();
       renderJobIndicators();
     }
@@ -1318,6 +1371,19 @@
       episodeDraftDirty = draft.episodeDraftDirty;
       transcriptDirty = draft.transcriptDirty;
       updateWordCount();
+    }
+
+    function captureTtsDraft() {
+      return { id: currentEpisode?.id || null, prompt: $("ttsPreparationPrompt").value, script: $("ttsPreparedScript").value, ttsPromptDirty, ttsScriptDirty };
+    }
+
+    function restoreTtsDraft(draft) {
+      if (!draft || draft.id !== currentEpisode?.id) return;
+      $("ttsPreparationPrompt").value = draft.prompt;
+      $("ttsPreparedScript").value = draft.script;
+      ttsPromptDirty = draft.ttsPromptDirty;
+      ttsScriptDirty = draft.ttsScriptDirty;
+      renderTtsPreparation();
     }
 
     async function saveEpisode() {
@@ -1365,7 +1431,8 @@
     }
 
     function previewText(speakerName) {
-      const lines = $("transcript").value.split(/\r?\n/).map((line) => line.trim());
+      const prepared = ttsPreparation?.draftCurrent ? ttsPreparation.draftScript : ttsPreparation?.approvedCurrent ? ttsPreparation.approvedScript : "";
+      const lines = (prepared || $("transcript").value).split(/\r?\n/).map((line) => line.trim());
       const line = lines.find((item) => item.startsWith(`${speakerName}:`) || item.startsWith(`${speakerName} [`)) || lines.find((item) => /:\s*\S/.test(item));
       if (!line) throw new Error("Save a transcript before previewing voices.");
       return line.slice(line.indexOf(":") + 1).trim().slice(0, 600);
@@ -1392,6 +1459,10 @@
     }
 
     function renderTtsView() {
+      $("tts-audio-panel").hidden = activeTtsSection !== "audio";
+      $("tts-prompt-panel").hidden = activeTtsSection !== "prompt";
+      $("ttsAudioTab").classList.toggle("active", activeTtsSection === "audio");
+      $("ttsPromptTab").classList.toggle("active", activeTtsSection === "prompt");
       if (!state || !currentEpisode) {
         $("ttsLanguageOverride").innerHTML = option("", "Use episode profile language", true);
         $("ttsSummary").innerHTML = '<p class="muted">Select a saved episode with a transcript.</p>';
@@ -1399,6 +1470,7 @@
         $("episodeAudio").hidden = true;
         $("applyLatestProfiles").disabled = true;
         $("renderAudio").disabled = true;
+        renderTtsPreparation();
         return;
       }
       const { episodeProfile, speakerProfile } = currentEpisodeProfiles();
@@ -1429,7 +1501,167 @@
         $("episodeAudio").hidden = true;
         $("episodeAudio").removeAttribute("src");
       }
-      $("renderAudio").disabled = errors.length > 0;
+      $("renderAudio").disabled = errors.length > 0 || !ttsPreparation?.approvedCurrent;
+      renderTtsPreparation();
+    }
+
+    async function loadTtsPreparation() {
+      if (!currentEpisode) { ttsPreparation = null; return; }
+      const languageOverride = $("ttsLanguageOverride").value;
+      ttsPreparation = await api(`/api/episodes/${currentEpisode.id}/tts-preparation?languageOverride=${encodeURIComponent(languageOverride)}`);
+      if (!ttsPromptDirty) $("ttsPreparationPrompt").value = ttsPreparation.prompt || "";
+      if (!ttsScriptDirty) $("ttsPreparedScript").value = ttsPreparation.draftScript || ttsPreparation.approvedScript || "";
+      renderTtsPreparation();
+      loadTtsChatThreads().catch((error) => notify(error.message || String(error), "error"));
+    }
+
+    function renderTtsPreparation() {
+      const busy = Boolean(currentJob("tts_prepare") && ["queued", "running"].includes(currentJob("tts_prepare").status));
+      const selected = Boolean(currentEpisode && ttsPreparation);
+      const status = !selected ? "Select a saved episode." : ttsPreparation.promptStale ? "Prompt is stale for current providers or language. Save edits or reset defaults." : ttsPreparation.scriptStatus === "approved" ? "Approved TTS script is current." : ttsPreparation.scriptStatus === "draft" ? "Prepared draft needs review and approval." : ttsPreparation.scriptStatus === "stale" ? "Prepared script is stale. Generate it again." : "Prepare a TTS script before rendering.";
+      $("ttsPreparationStatus").textContent = status;
+      $("ttsPreparationStatus").className = ttsPreparation?.promptStale || ttsPreparation?.scriptStatus === "stale" ? "warning" : "muted";
+      $("resetTtsPrompt").disabled = !selected || busy;
+      $("saveTtsPrompt").disabled = !selected || busy || !$("ttsPreparationPrompt").value.trim();
+      $("prepareTtsScript").disabled = !selected || busy || ttsPromptDirty || ttsPreparation?.promptStale || !currentEpisode?.transcript;
+      $("approveTtsScript").disabled = !selected || busy || ttsPromptDirty || ttsPreparation?.promptStale || !$("ttsPreparedScript").value.trim();
+      $("ttsPreparationWarnings").innerHTML = (ttsPreparation?.warnings || []).map((warning) => `<div class="warning">${escapeHtml(warning)}</div>`).join("");
+      const profile = currentEpisode ? currentEpisodeProfiles().episodeProfile : null;
+      $("ttsChatModel").textContent = profile ? `Model: ${textModelLabel(profile.transcriptModel)}` : "";
+      $("ttsChatInput").disabled = !selected || ttsChatBusy;
+      $("ttsChatSend").disabled = !selected || ttsChatBusy || !$("ttsChatInput").value.trim();
+      $("ttsChatDelete").disabled = ttsChatBusy || !activeTtsChatThreadId;
+    }
+
+    async function saveTtsPrompt() {
+      if (!currentEpisode) return;
+      ttsPreparation = await api(`/api/episodes/${currentEpisode.id}/tts-preparation`, {
+        method: "PUT",
+        body: JSON.stringify({ prompt: $("ttsPreparationPrompt").value, languageOverride: $("ttsLanguageOverride").value }),
+      });
+      ttsPromptDirty = false;
+      renderTtsView();
+      notify("TTS preparation prompt saved.", "ok");
+    }
+
+    async function prepareTtsScript() {
+      if (!currentEpisode) return;
+      const { job } = await api(`/api/episodes/${currentEpisode.id}/tts-preparation/generate`, {
+        method: "POST",
+        body: JSON.stringify({ prompt: $("ttsPreparationPrompt").value, languageOverride: $("ttsLanguageOverride").value }),
+      });
+      ttsPromptDirty = false;
+      trackJob(job);
+      notify("TTS script preparation queued.");
+    }
+
+    async function approveTtsScript() {
+      if (!currentEpisode) return;
+      ttsPreparation = await api(`/api/episodes/${currentEpisode.id}/tts-preparation`, {
+        method: "PUT",
+        body: JSON.stringify({ prompt: $("ttsPreparationPrompt").value, script: $("ttsPreparedScript").value, languageOverride: $("ttsLanguageOverride").value }),
+      });
+      ttsPromptDirty = false;
+      ttsScriptDirty = false;
+      await refreshState(currentEpisode.id);
+      notify("TTS script approved. Render MP3 when ready.", "ok");
+    }
+
+    function renderTtsChatControls() {
+      $("ttsChatHistory").innerHTML = [option("", "New chat", !activeTtsChatThreadId), ...ttsChatThreads.map((thread) => option(thread.threadId, `${thread.title || "Untitled"} (${thread.messageCount || 0})`, thread.threadId === activeTtsChatThreadId))].join("");
+      const currentKb = ttsChatThread?.kbId || "";
+      $("ttsChatKb").innerHTML = option("", "None", !currentKb) + (state?.knowledgeBases || []).map((item) => option(item.id, `${item.name} (${item.characters.toLocaleString()} chars)`, item.id === currentKb)).join("");
+      renderTtsPreparation();
+    }
+
+    function renderTtsChatMessages() {
+      if (!ttsChatThread?.messages?.length) {
+        $("ttsChatMessages").innerHTML = '<div class="chat-msg system">Paste provider documentation or describe desired cue style.</div>';
+        return;
+      }
+      $("ttsChatMessages").innerHTML = ttsChatThread.messages.map((message, index) => {
+        if (message.role === "user") return `<div class="chat-msg user" style="white-space:pre-wrap">${escapeHtml(message.content)}</div>`;
+        if (message.role === "system") return `<div class="chat-msg system">${escapeHtml(message.content)}</div>`;
+        try {
+          const parsed = JSON.parse(message.content);
+          let html = `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>`;
+          if (parsed.questions?.length) html += `<div class="chat-questions"><ol>${parsed.questions.map((question) => `<li>${escapeHtml(question)}</li>`).join("")}</ol></div>`;
+          if (parsed.proposal?.ttsPrompt) html += `<div class="chat-proposal"><strong>Revised prompt</strong><div class="chat-proposal-diff">${escapeHtml(parsed.proposal.ttsPrompt.slice(0, 600))}${parsed.proposal.ttsPrompt.length > 600 ? "…" : ""}</div><div class="actions" style="margin-top:8px"><button class="primary" data-use-tts-prompt="${index}">Use prompt</button></div></div>`;
+          return html;
+        } catch {
+          return `<div class="chat-msg assistant">${escapeHtml(message.content)}</div>`;
+        }
+      }).join("");
+      $("ttsChatMessages").scrollTop = $("ttsChatMessages").scrollHeight;
+    }
+
+    async function loadTtsChatThreads() {
+      if (!currentEpisode) { ttsChatThreads = []; activeTtsChatThreadId = ""; return; }
+      const data = await api(`/api/chats?kind=tts&episodeId=${encodeURIComponent(currentEpisode.id)}`);
+      ttsChatThreads = data.chats || [];
+      if (activeTtsChatThreadId && !ttsChatThreads.some((thread) => thread.threadId === activeTtsChatThreadId)) activeTtsChatThreadId = "";
+      renderTtsChatControls();
+      if (!activeTtsChatThreadId) { ttsChatThread = null; renderTtsChatMessages(); }
+    }
+
+    async function loadTtsChatThread() {
+      if (!activeTtsChatThreadId) { ttsChatThread = null; renderTtsChatControls(); renderTtsChatMessages(); return; }
+      ttsChatThread = await api(`/api/chat?threadId=${encodeURIComponent(activeTtsChatThreadId)}`);
+      renderTtsChatControls();
+      renderTtsChatMessages();
+    }
+
+    async function sendTtsChatMessage() {
+      if (!currentEpisode || ttsChatBusy) return;
+      const text = $("ttsChatInput").value.trim();
+      if (!text) return;
+      ttsChatBusy = true;
+      $("ttsChatBusy").hidden = false;
+      $("ttsChatInput").value = "";
+      renderTtsPreparation();
+      try {
+        const sent = await api("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            mode: "tts",
+            threadId: activeTtsChatThreadId,
+            episodeId: currentEpisode.id,
+            text,
+            kbId: $("ttsChatKb").value || "",
+            ttsPrompt: $("ttsPreparationPrompt").value,
+            languageOverride: $("ttsLanguageOverride").value,
+          }),
+        });
+        activeTtsChatThreadId = sent.threadId;
+        await loadTtsChatThreads();
+        await loadTtsChatThread();
+      } finally {
+        ttsChatBusy = false;
+        $("ttsChatBusy").hidden = true;
+        renderTtsPreparation();
+      }
+    }
+
+    async function deleteTtsChatThread() {
+      if (!activeTtsChatThreadId || !confirm("Delete this TTS prompt chat?")) return;
+      await api(`/api/chat?threadId=${encodeURIComponent(activeTtsChatThreadId)}`, { method: "DELETE" });
+      activeTtsChatThreadId = "";
+      ttsChatThread = null;
+      await loadTtsChatThreads();
+      renderTtsChatMessages();
+    }
+
+    function useTtsPromptProposal(messageIndex) {
+      const message = ttsChatThread?.messages?.[messageIndex];
+      if (!message) return;
+      try {
+        const prompt = JSON.parse(message.content).proposal?.ttsPrompt;
+        if (!prompt) return;
+        $("ttsPreparationPrompt").value = prompt;
+        ttsPromptDirty = true;
+        renderTtsPreparation();
+        notify("Assistant prompt loaded. Review and save it.", "ok");
+      } catch {}
     }
 
     async function applyLatestProfiles() {
@@ -1483,12 +1715,14 @@
 
     async function changeEpisodeSelection(event) {
       const id = event.target.value;
-      if ((episodeDraftDirty || transcriptDirty) && id !== currentEpisode?.id && !confirm("Discard unsaved episode changes?")) {
+      if ((episodeDraftDirty || transcriptDirty || ttsPromptDirty || ttsScriptDirty) && id !== currentEpisode?.id && !confirm("Discard unsaved episode changes?")) {
         event.target.value = currentEpisode?.id || "";
         return;
       }
       episodeDraftDirty = false;
       transcriptDirty = false;
+      ttsPromptDirty = false;
+      ttsScriptDirty = false;
       await selectEpisode(id);
     }
 
@@ -1542,9 +1776,25 @@
     $("uploadKnowledge").addEventListener("click", guard(uploadKnowledge));
     $("savedEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
     $("ttsEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
-    $("ttsLanguageOverride").addEventListener("change", () => renderTtsView());
+    $("ttsLanguageOverride").addEventListener("change", guard(async () => { ttsPromptDirty = false; ttsScriptDirty = false; await loadTtsPreparation(); renderTtsView(); }));
+    $("ttsAudioTab").addEventListener("click", () => { activeTtsSection = "audio"; renderTtsView(); });
+    $("ttsPromptTab").addEventListener("click", () => { activeTtsSection = "prompt"; renderTtsView(); });
+    $("ttsPreparationPrompt").addEventListener("input", () => { ttsPromptDirty = true; renderTtsPreparation(); });
+    $("ttsPreparedScript").addEventListener("input", () => { ttsScriptDirty = true; renderTtsPreparation(); });
+    $("resetTtsPrompt").addEventListener("click", () => { if (!ttsPreparation) return; $("ttsPreparationPrompt").value = ttsPreparation.defaultPrompt; ttsPromptDirty = true; renderTtsPreparation(); });
+    $("saveTtsPrompt").addEventListener("click", guard(saveTtsPrompt));
+    $("prepareTtsScript").addEventListener("click", guard(prepareTtsScript));
+    $("approveTtsScript").addEventListener("click", guard(approveTtsScript));
+    $("ttsChatSend").addEventListener("click", guard(sendTtsChatMessage));
+    $("ttsChatInput").addEventListener("input", renderTtsPreparation);
+    $("ttsChatInput").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); guard(sendTtsChatMessage)(); } });
+    $("ttsChatReset").addEventListener("click", () => { activeTtsChatThreadId = ""; ttsChatThread = null; renderTtsChatControls(); renderTtsChatMessages(); });
+    $("ttsChatDelete").addEventListener("click", guard(deleteTtsChatThread));
+    $("ttsChatHistory").addEventListener("change", guard(async () => { activeTtsChatThreadId = $("ttsChatHistory").value; await loadTtsChatThread(); }));
+    $("ttsChatKb").addEventListener("change", () => { if (ttsChatThread) ttsChatThread.kbId = $("ttsChatKb").value; });
+    $("ttsChatMessages").addEventListener("click", (event) => { const button = event.target.closest("[data-use-tts-prompt]"); if (button) useTtsPromptProposal(Number(button.dataset.useTtsPrompt)); });
     $("newEpisode").addEventListener("click", () => {
-      if ((episodeDraftDirty || transcriptDirty) && !confirm("Discard unsaved episode changes?")) return;
+      if ((episodeDraftDirty || transcriptDirty || ttsPromptDirty || ttsScriptDirty) && !confirm("Discard unsaved episode changes?")) return;
       resetEpisodeForm();
     });
     $("episodeSeed").addEventListener("change", (event) => {
@@ -1616,7 +1866,7 @@
     });
     $("transcript").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); });
     window.addEventListener("beforeunload", (event) => {
-      if (!configDirty && !profilesDirty && !episodeDraftDirty && !transcriptDirty) return;
+      if (!configDirty && !profilesDirty && !episodeDraftDirty && !transcriptDirty && !ttsPromptDirty && !ttsScriptDirty) return;
       event.preventDefault();
       event.returnValue = "";
     });

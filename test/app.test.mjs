@@ -650,12 +650,23 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   });
   let ttsCalls = 0;
   const ttsRequests = [];
+  const preparationRequests = [];
   let wav = silentWav(24_000, 1, 45).toString("base64");
   const fetchImpl = async (url, options = {}) => {
     if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
     if (String(url).endsWith("/chat/completions")) {
+      const request = JSON.parse(options.body);
+      if (!request.audio) {
+        preparationRequests.push(request);
+        const turns = [];
+        for (let index = 0; index < 5; index += 1) {
+          turns.push({ speaker: "Valeria", delivery: index === 0 ? "quick" : "warm", text: `Idea ${index + 1}.${index === 0 ? "[pause]" : ""}` });
+          if (index === 0) turns.push({ speaker: "Diego", delivery: "warm", text: "Quick reaction." });
+        }
+        return Response.json({ choices: [{ message: { content: JSON.stringify({ turns }) } }] });
+      }
       ttsCalls += 1;
-      ttsRequests.push(JSON.parse(options.body));
+      ttsRequests.push(request);
       return Response.json({ choices: [{ message: { audio: { data: wav } } }] });
     }
     throw new Error(`Unexpected URL ${url}`);
@@ -705,6 +716,25 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   });
   assert.equal(response.status, 200);
 
+  let preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`)).json();
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation/generate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: preparation.prompt }),
+  });
+  assert.equal(response.status, 202);
+  await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
+  });
+  preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`)).json();
+  assert.equal(preparation.scriptStatus, "draft");
+  assert.match(preparation.draftScript, /Idea 1\.\[pause\]/);
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: preparation.prompt, script: preparation.draftScript }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).approvedCurrent, true);
+  assert.equal(preparationRequests.length, 1);
+
   const clipsDir = join(rootDir, "data", "episodes", episode.id, "clips");
   await mkdir(clipsDir, { recursive: true });
   const unusedClip = join(clipsDir, `${"f".repeat(64)}.wav`);
@@ -723,6 +753,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   assert.match(ttsRequests[0].messages[0].content, /Required accent: British/);
   assert.match(ttsRequests[0].messages[0].content, /more expressive delivery/);
   assert.match(ttsRequests[0].messages[0].content, /Keep the read intimate/);
+  assert.match(ttsRequests[0].messages[1].content, /\[pause\]/);
   assert.equal(ttsRequests[0].audio.voice, "custom-mimo");
   assert.equal(ttsRequests[0].temperature, 0.4);
   assert.equal(ttsRequests[0].top_p, 0.8);
@@ -756,6 +787,84 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   assert.equal((await response.arrayBuffer()).byteLength, 4);
   response = await fetch(`${baseUrl}${saved.audioUrl}`, { headers: { Range: "bytes=999999999-" } });
   assert.equal(response.status, 416);
+});
+
+test("TTS preparation preserves words, renames placeholder, and supports chat without KB", { concurrency: false }, async (t) => {
+  const oldMimo = process.env.MIMO_API_KEY;
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  t.after(() => { if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo; });
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
+    if (String(url).endsWith("/chat/completions")) {
+      const request = JSON.parse(options.body);
+      if (request.messages[0].content.includes("TTS prompt editor")) {
+        return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Use restrained pauses.", questions: [], proposal: { ttsPrompt: "Use only sparse [pause] cues." } }) } }] });
+      }
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ turns: Array.from({ length: 5 }, (_, index) => ({ speaker: "Valeria", delivery: "warm", text: `Exact words ${index + 1}.[pause]` })) }) } }] });
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  const rootDir = await mkdtemp(join(tmpdir(), "podcast-tts-preparation-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  const server = await createPodcastServer({ rootDir, fetchImpl });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  let response = await fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "source.md", content: "# Source" }) });
+  const knowledge = await response.json();
+  response = await fetch(`${baseUrl}/api/episodes`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "New episode", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
+  });
+  const episode = await response.json();
+  const transcript = `# Generated Title\n\n${Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\n\nValeria [warm]: Exact words ${index + 1}.`).join("\n\n")}`;
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
+  assert.equal(response.status, 200);
+
+  let preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation?languageOverride=en-US`)).json();
+  assert.match(preparation.defaultPrompt, /MiMo/);
+  assert.equal(preparation.scriptStatus, "missing");
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation/generate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: preparation.prompt, languageOverride: "en-US" }),
+  });
+  assert.equal(response.status, 202);
+  await waitFor(async () => {
+    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return jobs.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? jobs : null;
+  });
+  preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation?languageOverride=en-US`)).json();
+  assert.equal(preparation.draftCurrent, true);
+  assert.match(preparation.draftScript, /Exact words 1\.\[pause\]/);
+  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).name, "Generated Title");
+
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: preparation.prompt, languageOverride: "en-US", script: preparation.draftScript.replace("Exact words 1.", "Changed words.") }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /changed spoken text/);
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: preparation.prompt, languageOverride: "en-US", script: preparation.draftScript }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).approvedCurrent, true);
+  const wrongLanguage = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`)).json();
+  assert.equal(wrongLanguage.promptStale, true);
+  assert.equal(wrongLanguage.approvedCurrent, false);
+
+  response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "tts", episodeId: episode.id, text: "Use these pasted docs.", ttsPrompt: preparation.prompt, languageOverride: "en-US" }),
+  });
+  const chat = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(chat.message.proposal.ttsPrompt, "Use only sparse [pause] cues.");
+  const ttsChats = await (await fetch(`${baseUrl}/api/chats?kind=tts&episodeId=${episode.id}`)).json();
+  assert.equal(ttsChats.chats.length, 1);
+  assert.equal((await (await fetch(`${baseUrl}/api/chats`)).json()).chats.length, 0);
 });
 
 test("server restart marks active jobs interrupted", { concurrency: false }, async (t) => {
@@ -1385,6 +1494,12 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /id="profilesSpeakersTab"/);
   assert.match(html, /id="ttsLanguageOverride"/);
   assert.match(html, /id="applyLatestProfiles">Apply latest profiles/);
+  assert.match(html, /id="ttsPromptTab"/);
+  assert.match(html, /id="ttsPreparationPrompt"/);
+  assert.match(html, /id="ttsPreparedScript"/);
+  assert.match(html, /id="prepareTtsScript"/);
+  assert.match(html, /id="approveTtsScript"/);
+  assert.match(html, /id="ttsChatHistory"/);
   assert.match(html, /id="view-config"/);
   assert.match(html, /id="saveProfiles" class="primary">Save all profiles/);
   assert.match(html, /id="speakerProfilePills"/);

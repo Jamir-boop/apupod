@@ -37,7 +37,7 @@ The Fastify shell currently delegates route behavior to `src/legacy-app.ts`. `ap
   - Shared `Save all profiles` action and compact profile summary pills.
 - `Knowledge Base`: upload Markdown source.
 - `Transcript Generator`: create episode, queue transcript job, review and save transcript.
-- `TTS Generator`: preview speakers, optionally override TTS language, render final MP3.
+- `TTS Generator`: review provider-aware preparation prompts, generate and approve a cue-annotated TTS script, preview speakers, optionally override TTS language, and render final MP3.
 - `Config`: manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes model catalog without restart.
 
 ## Providers
@@ -82,6 +82,7 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 - Generated transcripts require at least 125 spoken words per target minute.
 - Short imported or edited transcripts remain renderable after a warning and confirmation.
 - Rendering inserts cue-aware pauses and rejects final MP3s shorter than 90% of target duration.
+- Rendering requires a current approved TTS script. Preparation preserves spoken words and adds only provider/model-supported cue annotations.
 - Failed rerenders preserve the last successful MP3 when it was still valid before the job.
 
 ## Storage
@@ -90,6 +91,8 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 - `data/config.json`: non-secret provider and compatible connection metadata
 - `.env`: API keys and base URL values
 - `data/episodes/*`: saved episodes, transcripts, audio, clip cache
+- `data/episodes/*/tts-script.draft.md`: prepared script awaiting review
+- `data/episodes/*/tts-script.md`: approved script used for rendering
 
 Episodes store speaker and episode profile snapshots. Later profile edits do not alter existing transcripts or renders; save episode draft again to intentionally refresh its snapshots.
 
@@ -105,7 +108,7 @@ OpenAI and compatible TTS voices are AI-generated. Disclose that fact in publish
 
 ## Background Jobs
 
-Transcript and TTS generation run through one local FIFO queue.
+Transcript generation, TTS script preparation, and TTS rendering run through one local FIFO queue.
 
 - `GET /api/jobs` exposes queue state
 - Sidebar `Server Activity` shows latest jobs
