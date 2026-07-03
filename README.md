@@ -1,21 +1,33 @@
 # Local Podcast Builder
 
-Small local web app for building reviewed podcast transcripts and rendered audio. No Docker, DB, or npm deps.
+Small local web app for building reviewed podcast transcripts and rendered audio. No Docker or DB.
 
 ## Requirements
 
 - Node.js 24+
-- FFmpeg on `PATH`
+- FFmpeg and FFprobe on `PATH`
 - Browser on same machine
 
 ## Start
 
 ```powershell
 Copy-Item .env.example .env
+npm install
+npm run build
 npm start
 ```
 
 Open `http://127.0.0.1:4173`.
+
+## Development
+
+Run the TypeScript entrypoint directly:
+
+```powershell
+npm run dev
+```
+
+The Fastify shell currently delegates route behavior to `src/legacy-app.ts`. `app.mjs` and `defaults.mjs` remain compatibility shims for tests and existing imports.
 
 ## Views
 
@@ -51,6 +63,7 @@ Open `http://127.0.0.1:4173`.
   - User-supplied OpenAI-compatible base URL
   - Model discovery via `/models`, voice discovery via `/voices`, and TTS via `/audio/speech`
   - API key is optional for local servers
+  - Per-speaker exaggeration, CFG weight, and temperature controls are sent with TTS requests
 
 Config discovers models but exposes only models explicitly activated as LLM, TTS, or both. Saved profile models are activated during legacy migration so existing profiles keep working. Custom compatible connections may omit API keys for local unauthenticated servers.
 
@@ -64,6 +77,13 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 - TTS can override language per render/preview request without changing transcript text.
 - MiMo preset TTS remains limited to English and Chinese.
 
+## Duration Rules
+
+- Generated transcripts require at least 125 spoken words per target minute.
+- Short imported or edited transcripts remain renderable after a warning and confirmation.
+- Rendering inserts cue-aware pauses and rejects final MP3s shorter than 90% of target duration.
+- Failed rerenders preserve the last successful MP3 when it was still valid before the job.
+
 ## Storage
 
 - `data/profiles.json`: speaker profiles, episode profiles, episode seeds
@@ -73,7 +93,7 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 
 Episodes store speaker and episode profile snapshots. Later profile edits do not alter existing transcripts or renders; save episode draft again to intentionally refresh its snapshots.
 
-Reviewed transcript text remains authoritative when generation instructions change. Refreshing snapshots invalidates audio only when language, speaker mapping, TTS model, voice, style, or accent changes. Stale MP3 files stay hidden until a successful render replaces them.
+Reviewed transcript text remains authoritative when generation instructions change. Refreshing snapshots invalidates audio when language, speaker mapping, TTS model, voice, style, accent, or Chatterbox tuning changes. Stale MP3 files stay hidden until a successful render replaces them.
 
 On startup, obsolete outline/transcript JSON, concat manifests, temporary files, and unused clip-cache entries are removed. Corrupt episode metadata is listed as unavailable instead of silently disappearing; repair its `episode.json` before destructive profile or provider changes.
 
@@ -96,4 +116,5 @@ Transcript and TTS generation run through one local FIFO queue.
 ```powershell
 npm run check
 npm test
+npm run build
 ```

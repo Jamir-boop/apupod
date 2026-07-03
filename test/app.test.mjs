@@ -31,8 +31,8 @@ async function waitFor(check, timeoutMs = 3_000) {
   throw new Error(`Condition not met within ${timeoutMs} ms.`);
 }
 
-function silentWav(sampleRate = 24_000, channels = 1) {
-  const samples = 240;
+function silentWav(sampleRate = 24_000, channels = 1, durationSeconds = 0.01) {
+  const samples = Math.round(sampleRate * durationSeconds);
   const blockAlign = channels * 2;
   const buffer = Buffer.alloc(44 + samples * blockAlign);
   buffer.write("RIFF", 0); buffer.writeUInt32LE(buffer.length - 8, 4); buffer.write("WAVE", 8);
@@ -40,6 +40,10 @@ function silentWav(sampleRate = 24_000, channels = 1) {
   buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(sampleRate * blockAlign, 28); buffer.writeUInt16LE(blockAlign, 32); buffer.writeUInt16LE(16, 34);
   buffer.write("data", 36); buffer.writeUInt32LE(samples * blockAlign, 40);
   return buffer;
+}
+
+function longText(label, words = 225) {
+  return `${label} ${"word ".repeat(words)}`.trim();
 }
 
 test("default profiles are valid", () => {
@@ -72,6 +76,10 @@ test("speaker profiles accept 1 to 4 speakers", () => {
   const invalidAccent = structuredClone(DEFAULT_DATA);
   invalidAccent.speakerProfiles[0].speakers[0].accent = "x".repeat(101);
   assert.throws(() => validateProfileData(invalidAccent), /accent must contain at most 100 characters/);
+
+  const invalidChatterbox = structuredClone(DEFAULT_DATA);
+  invalidChatterbox.speakerProfiles[0].speakers[0].chatterboxCfgWeight = 1.1;
+  assert.throws(() => validateProfileData(invalidChatterbox), /Chatterbox CFG weight must be a number from 0 to 1/);
 
   const spacedName = structuredClone(DEFAULT_DATA);
   spacedName.speakerProfiles[0].speakers[0].name = "  Valeria  ";
@@ -292,6 +300,26 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   assert.equal(state.episodes.length, 1);
 });
 
+test("transcript word counts use locale-aware segmentation", async (t) => {
+  const rootDir = await mkdtemp(join(tmpdir(), "podcast-word-count-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  const server = await createPodcastServer({ rootDir });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  state.profiles.episodeProfiles[0].language = "zh-CN";
+  await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
+  let response = await fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Source" }) });
+  const knowledge = await response.json();
+  response = await fetch(`${baseUrl}/api/episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Chinese", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }) });
+  const episode = await response.json();
+  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria: ä»Šå¤©æˆ‘ä»¬è®¨è®ºå®¶åº­æ²Ÿé€šã€‚`).join("\n\n");
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
+  assert.equal(response.status, 200);
+  assert.ok((await response.json()).transcriptWords > 5);
+});
+
 test("saved episode explicitly applies latest profiles atomically", async (t) => {
   const rootDir = await mkdtemp(join(tmpdir(), "podcast-profile-refresh-"));
   t.after(() => rm(rootDir, { recursive: true, force: true }));
@@ -455,8 +483,8 @@ test("transcript jobs return 202 and run through one FIFO queue", { concurrency:
       number: index + 1,
       title: `Part ${index + 1}`,
       turns: [
-        { speaker: "Valeria", delivery: "warm", text: `Idea ${index + 1}` },
-        { speaker: "Diego", delivery: "dry", text: `Reaction ${index + 1}` },
+        { speaker: "Valeria", delivery: "warm", text: longText(`Idea ${index + 1}`) },
+        { speaker: "Diego", delivery: "dry", text: longText(`Reaction ${index + 1}`) },
       ],
     })),
   };
@@ -525,6 +553,60 @@ test("transcript jobs return 202 and run through one FIFO queue", { concurrency:
   assert.match(saved.transcript, /Valeria \[warm\]: Idea 1/);
 });
 
+test("short generated transcripts fail and can be retried", { concurrency: false }, async (t) => {
+  const oldKey = process.env.MIMO_API_KEY;
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  t.after(() => { if (oldKey === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldKey; });
+
+  let chatCalls = 0;
+  const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Part ${index + 1}`, points: ["Point"] })) };
+  const transcript = (long) => ({
+    title: "Episode",
+    segments: Array.from({ length: 5 }, (_, index) => ({
+      number: index + 1,
+      title: `Part ${index + 1}`,
+      turns: [
+        { speaker: "Valeria", delivery: "warm", text: long ? longText(`Idea ${index + 1}`) : "Short idea" },
+        { speaker: "Diego", delivery: "dry", text: long ? longText(`Reaction ${index + 1}`) : "Short reaction" },
+      ],
+    })),
+  });
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
+    if (String(url).endsWith("/chat/completions")) {
+      chatCalls += 1;
+      return Response.json({ choices: [{ message: { content: JSON.stringify(chatCalls % 2 ? outline : transcript(chatCalls >= 4)) } }] });
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  const rootDir = await mkdtemp(join(tmpdir(), "podcast-transcript-retry-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  const server = await createPodcastServer({ rootDir, fetchImpl });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  let response = await fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Source" }) });
+  const knowledge = await response.json();
+  response = await fetch(`${baseUrl}/api/episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Retry", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }) });
+  const episode = await response.json();
+
+  await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
+  let result = await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "failed" ? value : null;
+  });
+  assert.match(result.jobs.find((job) => job.episodeId === episode.id).error, /Transcript too short: 20 words/);
+  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).transcript, "");
+
+  await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
+  result = await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
+  });
+  assert.equal(result.jobs.find((job) => job.episodeId === episode.id).status, "completed");
+  assert.ok((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).transcriptWords >= 2250);
+});
+
 test("TTS jobs report progress and publish MP3", { concurrency: false }, async (t) => {
   const oldMimo = process.env.MIMO_API_KEY;
   const oldEleven = process.env.ELEVENLABS_API_KEY;
@@ -536,7 +618,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   });
   let ttsCalls = 0;
   const ttsRequests = [];
-  const wav = silentWav().toString("base64");
+  let wav = silentWav(24_000, 1, 45).toString("base64");
   const fetchImpl = async (url, options = {}) => {
     if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
     if (String(url).endsWith("/chat/completions")) {
@@ -562,7 +644,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
     body: JSON.stringify({ name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
   });
   const episode = await response.json();
-  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria [warm]: Idea ${index + 1}.`).join("\n\n");
+  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria [${index === 0 ? "quick" : "warm"}]: Idea ${index + 1}.${index === 0 ? "\nDiego [warm]: Quick reaction." : ""}`).join("\n\n");
   await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }),
   });
@@ -573,6 +655,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
 
   const profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   profiles.episodeProfiles[0].language = "en-US";
+  profiles.episodeProfiles[0].targetMinutes = 5;
   profiles.speakerProfiles[0].speakers[0].accent = "British";
   response = await fetch(`${baseUrl}/api/profiles`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles),
@@ -595,16 +678,35 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   const finished = await waitFor(async () => {
     const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
     return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
-  }, 10_000);
+  }, 30_000);
   const job = finished.jobs.find((item) => item.episodeId === episode.id);
-  assert.equal(job.completed, 5);
-  assert.equal(ttsCalls, 5);
+  assert.equal(job.completed, 6);
+  assert.equal(ttsCalls, 6);
   assert.match(ttsRequests[0].messages[0].content, /Required spoken language: English \(United States\) \(en-US\)/);
   assert.match(ttsRequests[0].messages[0].content, /Required accent: British/);
   const saved = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
   assert.equal(saved.status, "ready");
   assert.equal(saved.audioUrl, `/artifacts/${episode.id}/episode.mp3`);
   await assert.rejects(readFile(unusedClip), { code: "ENOENT" });
+
+  const audioPath = join(rootDir, "data", "episodes", episode.id, "episode.mp3");
+  const previousAudio = await readFile(audioPath);
+  const { stdout: durationOutput } = await execFileAsync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audioPath], { windowsHide: true });
+  assert.ok(Number(durationOutput.trim()) >= 274);
+
+  await rm(clipsDir, { recursive: true, force: true });
+  wav = silentWav().toString("base64");
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, { method: "POST" });
+  assert.equal(response.status, 202);
+  const failed = await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return value.jobs.find((item) => item.episodeId === episode.id)?.status === "failed" ? value : null;
+  }, 30_000);
+  assert.match(failed.jobs.find((item) => item.episodeId === episode.id).error, /Rendered audio too short/);
+  const afterFailure = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(afterFailure.audioReady, true);
+  assert.equal(afterFailure.audioUrl, saved.audioUrl);
+  assert.deepEqual(await readFile(audioPath), previousAudio);
 
   response = await fetch(`${baseUrl}${saved.audioUrl}`, { headers: { Range: "bytes=0-3" } });
   assert.equal(response.status, 206);
@@ -731,7 +833,7 @@ test("TTS rejects missing FFmpeg before provider calls", { concurrency: false },
     if (oldPath === undefined) delete process.env.Path; else process.env.Path = oldPath;
   }
   assert.equal(response.status, 503);
-  assert.match((await response.json()).error, /FFmpeg is unavailable/);
+  assert.match((await response.json()).error, /FFmpeg or FFprobe is unavailable/);
   assert.equal(providerCalls, callsBeforeRender);
 });
 
@@ -757,8 +859,8 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", { conc
       number: index + 1,
       title: `Part ${index + 1}`,
       turns: [
-        { speaker: "Valeria", delivery: "warm", text: `Idea ${index + 1}` },
-        { speaker: "Diego", delivery: "dry", text: `Reaction ${index + 1}` },
+        { speaker: "Valeria", delivery: "warm", text: longText(`Idea ${index + 1}`) },
+        { speaker: "Diego", delivery: "dry", text: longText(`Reaction ${index + 1}`) },
       ],
     })),
   };
@@ -996,13 +1098,132 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   delete process.env.CHATTERBOX_API_KEY;
   state.profiles.speakerProfiles[0].voiceModel = "compat:chatterbox:chatterbox-turbo";
   state.profiles.speakerProfiles[0].speakers[0].voiceId = "female";
+  state.profiles.speakerProfiles[0].speakers[0].chatterboxExaggeration = 0.8;
+  state.profiles.speakerProfiles[0].speakers[0].chatterboxCfgWeight = 0.25;
+  state.profiles.speakerProfiles[0].speakers[0].chatterboxTemperature = 0.65;
   response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
   assert.equal(response.status, 200);
-  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "Hola", cue: "warm" }) });
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "[laugh] Hola", cue: "warm" }) });
   assert.equal(response.status, 200);
   assert.equal(Buffer.from(await response.arrayBuffer()).toString(), "chatterbox-audio");
   const ttsCall = calls.find((call) => call.url.endsWith("/audio/speech"));
   assert.equal(ttsCall.options.headers.Authorization, undefined);
+  assert.deepEqual(JSON.parse(ttsCall.options.body), {
+    model: "chatterbox-turbo",
+    voice: "female",
+    input: "Hola",
+    response_format: "mp3",
+    instructions: JSON.parse(ttsCall.options.body).instructions,
+    exaggeration: 0.8,
+    cfg_weight: 0.25,
+    temperature: 0.65,
+    language: "es",
+  });
+
+  state.profiles.episodeProfiles[0].language = "en-US";
+  response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "[laugh] Hello", cue: "warm" }) });
+  assert.equal(response.status, 200);
+  const ttsCalls = calls.filter((call) => call.url.endsWith("/audio/speech"));
+  assert.equal(JSON.parse(ttsCalls.at(-1).options.body).input, "[laugh] Hello");
+  assert.equal(JSON.parse(ttsCalls.at(-1).options.body).language, "en");
+});
+
+test("profile assistant validates context and persists structured turns", { concurrency: false }, async (t) => {
+  const previousKeys = {
+    MIMO_API_KEY: process.env.MIMO_API_KEY,
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    CHATTERBOX_API_KEY: process.env.CHATTERBOX_API_KEY,
+  };
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  delete process.env.ELEVENLABS_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.CHATTERBOX_API_KEY;
+  t.after(() => {
+    for (const [name, value] of Object.entries(previousKeys)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  const chatRequests = [];
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith("/models")) {
+      return Response.json({ data: [
+        { id: "mimo-v2.5-pro" },
+        { id: "mimo-v2.5-tts" },
+      ] });
+    }
+    if (String(url).endsWith("/chat/completions")) {
+      chatRequests.push(JSON.parse(options.body));
+      return Response.json({ choices: [{ message: { content: JSON.stringify({
+        message: "Proposal ready.",
+        questions: [],
+        proposal: { speaker: { name: "Updated profile", speakers: [{ voiceId: "custom-voice" }] } },
+      }) } }] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  const rootDir = await mkdtemp(join(tmpdir(), "podcast-chat-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  const server = await createPodcastServer({ rootDir, fetchImpl });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+
+  const kbContent = `# Context\n${"x".repeat(50_100)}\nFULL_CONTEXT_END`;
+  let response = await fetch(`${baseUrl}/api/knowledge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "assistant.md", content: kbContent }),
+  });
+  const kb = await response.json();
+  assert.equal(response.status, 201);
+
+  const requestBody = {
+    speakerProfileId: "speaker-chisme-crianza",
+    episodeProfileId: "episode-chisme-crianza",
+    text: "Make the host warmer.",
+    model: "mimo-v2.5-pro",
+    kbId: kb.id,
+    voiceIds: ["custom-voice"],
+  };
+  response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...requestBody, kbId: "../../README" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal(chatRequests.length, 0);
+
+  response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...requestBody, model: "inactive-model" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal(chatRequests.length, 0);
+
+  response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+  });
+  assert.equal(response.status, 200);
+  const prompt = chatRequests[0].messages[1].content;
+  assert.match(prompt, /AVAILABLE ACTIVE TEXT MODELS/);
+  assert.match(prompt, /custom-voice/);
+  assert.match(prompt, /FULL_CONTEXT_END/);
+
+  response = await fetch(`${baseUrl}/api/chat?speakerProfileId=speaker-chisme-crianza&episodeProfileId=episode-chisme-crianza`);
+  const thread = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(thread.messages.length, 2);
+  assert.equal(JSON.parse(thread.messages[1].content).proposal.speaker.speakers[0].voiceId, "custom-voice");
 });
 
 test("browser model fields and loading surfaces are present", async () => {
@@ -1031,6 +1252,17 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, />Add OpenAI compatible connection</);
   assert.match(html, /const openaiVoices/);
   assert.match(html, /function voiceSelector\(model, selected\)/);
+  assert.match(html, /data-field="chatterboxExaggeration"/);
+  assert.match(html, /data-message-index/);
+  assert.match(html, /event\.target\.closest\("#chatPane"\)/);
+  assert.match(html, /speakerProfileSelect"\)\.addEventListener\("change"[^\n]+loadChatThread/);
+  assert.match(html, /chatThread\.messages\[messageIndex\]/);
+  assert.match(html, /version !== chatPairVersion/);
+  assert.match(html, /Save profile changes before using the assistant/);
+  assert.match(html, /function renderProposalDiff/);
+  assert.doesNotMatch(html, /const lastAssistant/);
+  assert.match(html, /id="transcriptLengthWarning"/);
+  assert.match(html, /Render anyway\?/);
   assert.match(html, /<select data-field="voiceId">/);
   assert.match(html, /function ensureProviderVoices\(model\)/);
   assert.doesNotMatch(html, /refreshElevenVoices/);

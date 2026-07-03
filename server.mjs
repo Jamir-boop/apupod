@@ -1,4 +1,4 @@
-import { createPodcastServer } from "./app.mjs";
+import { createPodcastServer } from "./dist/app.js";
 
 const host = "127.0.0.1";
 const port = Number(process.env.PORT || "4173");
