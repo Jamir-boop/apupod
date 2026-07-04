@@ -206,6 +206,8 @@
     .chat-proposal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
     .chat-proposal-header strong { color: var(--accent); }
     .chat-proposal-diff { font-size: 11px; color: var(--muted); max-height: 120px; overflow-y: auto; }
+    .chat-proposal.expanded .chat-proposal-diff { max-height: none; }
+    .chat-proposal-toggle { padding: 3px 7px; font-size: 11px; }
     .chat-proposal-diff div { padding: 2px 0; border-bottom: 1px solid var(--line); }
     .chat-input-row { padding: 10px 16px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
     .chat-input-row textarea { min-height: 60px; font-size: 13px; resize: vertical; }
@@ -2170,10 +2172,9 @@
       const languageOverride = $("ttsLanguageOverride").value;
       await saveTranscript();
       const lengthWarning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
-      if (lengthWarning && !confirm(`${lengthWarning}\n\nRender anyway?`)) return;
       const { job } = await api(`/api/episodes/${currentEpisode.id}/render`, { method: "POST", body: JSON.stringify({ languageOverride }) });
       trackJob(job);
-      notify("TTS job queued.");
+      notify(lengthWarning ? `${lengthWarning} TTS job queued anyway.` : "TTS job queued.", lengthWarning ? "warning" : "");
     }
 
     function transcriptLengthMessage(words, episodeProfile) {
@@ -2502,7 +2503,7 @@
       }
       if (parsed.proposal?.speaker || parsed.proposal?.episode) {
         html += `<div class="chat-proposal">`;
-        html += `<div class="chat-proposal-header"><strong>Proposed changes</strong></div>`;
+        html += `<div class="chat-proposal-header"><strong>Proposed changes</strong><button type="button" class="chat-proposal-toggle" data-toggle-proposal aria-expanded="false">Expand</button></div>`;
         html += `<div class="chat-proposal-diff">`;
         if (parsed.proposal.speaker) html += renderProposalDiff("speaker", parsed.proposal.speaker);
         if (parsed.proposal.episode) html += renderProposalDiff("episode", parsed.proposal.episode);
@@ -2713,6 +2714,13 @@
     $("chatMode").addEventListener("change", updateChatDisabledState);
     $("chatKb").addEventListener("change", () => { if (chatThread) chatThread.kbId = $("chatKb").value; });
     $("chatMessages").addEventListener("click", (event) => {
+      const toggle = event.target.closest("[data-toggle-proposal]");
+      if (toggle) {
+        const expanded = toggle.closest(".chat-proposal").classList.toggle("expanded");
+        toggle.textContent = expanded ? "Collapse" : "Expand";
+        toggle.setAttribute("aria-expanded", String(expanded));
+        return;
+      }
       const btn = event.target.closest("[data-apply-proposal]");
       if (btn) guard(() => applyChatProposal(btn.dataset.applyProposal, Number(btn.dataset.messageIndex)))();
     });

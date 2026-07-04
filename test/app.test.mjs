@@ -1316,7 +1316,7 @@ test("profile assistant validates context and persists structured turns", { conc
       return Response.json({ choices: [{ message: { content: JSON.stringify({
         message: "Proposal ready.",
         questions: [],
-        proposal: { speaker: { name: "Updated profile", speakers: [{ voiceId: "custom-voice" }] } },
+        proposal: { speaker: { name: "Updated profile", speakers: [{ name: "Speaker 1", voiceId: "custom-voice" }, { name: "Speaker 1" }] } },
       }) } }] });
     }
     throw new Error(`Unexpected request: ${url}`);
@@ -1375,6 +1375,7 @@ test("profile assistant validates context and persists structured turns", { conc
   assert.equal(response.status, 200);
   assert.match(sent.threadId, /^[a-zA-Z0-9_-]+$/);
   const prompt = chatRequests[0].messages[1].content;
+  assert.match(chatRequests[0].messages[0].content, /Replace them with unique natural names/);
   assert.match(prompt, /AVAILABLE ACTIVE TEXT MODELS/);
   assert.match(prompt, /REQUESTED MODE:\nspeaker/);
   assert.match(prompt, /CURRENT EPISODE PROFILE: None/);
@@ -1392,6 +1393,7 @@ test("profile assistant validates context and persists structured turns", { conc
   assert.equal(thread.messages.length, 2);
   assert.equal(thread.messages[0].context.mode, "speaker");
   assert.equal(JSON.parse(thread.messages[1].content).proposal.speaker.speakers[0].voiceId, "custom-voice");
+  assert.deepEqual(JSON.parse(thread.messages[1].content).proposal.speaker.speakers.map((speaker) => speaker.name), ["Valeria", "Diego"]);
 
   response = await fetch(`${baseUrl}/api/chat/apply`, {
     method: "POST",
@@ -1404,6 +1406,22 @@ test("profile assistant validates context and persists structured turns", { conc
   });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).speakerApplied, true);
+
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  const currentSpeaker = state.profiles.speakerProfiles.find((profile) => profile.id === "speaker-chisme-crianza");
+  response = await fetch(`${baseUrl}/api/chat/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      speakerProfileId: currentSpeaker.id,
+      proposal: { speaker: { ...currentSpeaker, description: "Duplicate names repaired.", speakers: currentSpeaker.speakers.map((speaker) => ({ ...speaker, name: "Speaker 1" })) } },
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).speakerApplied, true);
+  const repaired = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles.speakerProfiles.find((profile) => profile.id === currentSpeaker.id);
+  assert.equal(repaired.description, "Duplicate names repaired.");
+  assert.deepEqual(repaired.speakers.map((speaker) => speaker.name), ["Valeria", "Diego"]);
 
   response = await fetch(`${baseUrl}/api/chat?threadId=${sent.threadId}`);
   const appliedThread = await response.json();
@@ -1692,9 +1710,12 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /version !== chatLoadVersion/);
   assert.match(html, /Save profile changes before using the assistant/);
   assert.match(html, /function renderProposalDiff/);
+  assert.match(html, /data-toggle-proposal/);
+  assert.match(html, /aria-expanded="false">Expand/);
   assert.doesNotMatch(html, /const lastAssistant/);
   assert.match(html, /id="transcriptLengthWarning"/);
-  assert.match(html, /Render anyway\?/);
+  assert.doesNotMatch(html, /Render anyway\?/);
+  assert.match(html, /TTS job queued anyway/);
   assert.match(html, /<input data-field="voiceId" list="voice-options-\$\{index\}"/);
   assert.match(html, /function ensureProviderVoices\(model\)/);
   assert.doesNotMatch(html, /refreshElevenVoices/);
