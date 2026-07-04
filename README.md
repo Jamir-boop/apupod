@@ -12,8 +12,6 @@ Small local web app for building reviewed podcast transcripts and rendered audio
 
 ```powershell
 Copy-Item .env.example .env
-npm install
-npm run build
 npm start
 ```
 
@@ -21,23 +19,21 @@ Open `http://127.0.0.1:4173`.
 
 ## Development
 
-Run the TypeScript entrypoint directly:
+Run with automatic environment loading:
 
 ```powershell
 npm run dev
 ```
 
-The Fastify shell currently delegates route behavior to `src/legacy-app.ts`. `app.mjs` and `defaults.mjs` remain compatibility shims for tests and existing imports.
+`server.mjs` is the runtime entrypoint. `app.mjs` and `defaults.mjs` expose server and default-data APIs.
 
 ## Views
 
-- `Profiles`
-  - `Speaker Profiles`: 1 to 4 speakers, default TTS model, per-speaker overrides.
-  - `Episode Profiles`: speaker profile link, outline model, transcript model, required language, timing, briefing.
-  - Shared `Save all profiles` action and compact profile summary pills.
-- `Knowledge Base`: upload Markdown source.
-- `Transcript Generator`: create episode, queue transcript job, review and save transcript.
-- `TTS Generator`: review provider-aware preparation prompts, generate and approve a cue-annotated TTS script, preview speakers, optionally override TTS language, and render final MP3.
+- `Speaker Profiles`: 1 to 4 speakers, default TTS model, per-speaker overrides, and speaker assistant.
+- `Content Planner`: upload optional Markdown, plan one episode or a series, generate and save Episode Formats, then create episode drafts.
+- `Transcript Generator`: create one-off episodes without Planner, review provider/model cue rules, generate transcripts, and edit canonical text.
+- `TTS Generator`: preview speakers, optionally override TTS language, and render final MP3.
+- `Player`: play rendered episodes, change playback speed, and manage an in-memory queue while navigating other views.
 - `Config`: manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes model catalog without restart.
 
 ## Providers
@@ -71,7 +67,7 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 
 ## Language Rules
 
-- Episode profile language is source of truth for transcript generation.
+- Episode Format language is source of truth for transcript generation.
 - Editable prompts no longer need language wording.
 - Server injects hidden language rule during outline and transcript generation.
 - TTS can override language per render/preview request without changing transcript text.
@@ -82,19 +78,19 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 - Generated transcripts require at least 125 spoken words per target minute.
 - Short imported or edited transcripts remain renderable after a warning and confirmation.
 - Rendering inserts cue-aware pauses and rejects final MP3s shorter than 90% of target duration.
-- Rendering requires a current approved TTS script. Preparation preserves spoken words and adds only provider/model-supported cue annotations.
+- Rendering uses the saved transcript directly and preserves only cue syntax supported by each selected TTS model.
 - Failed rerenders preserve the last successful MP3 when it was still valid before the job.
 
 ## Storage
 
 - `data/profiles.json`: speaker profiles, episode profiles, episode seeds
+- `data/plans/index.json`: content plan summaries
+- `data/plans/*.json`: editable content plans and creation links
 - `data/config.json`: non-secret provider and compatible connection metadata
 - `.env`: API keys and base URL values
 - `data/episodes/*`: saved episodes, transcripts, audio, clip cache
-- `data/episodes/*/tts-script.draft.md`: prepared script awaiting review
-- `data/episodes/*/tts-script.md`: approved script used for rendering
 
-Episodes store speaker and episode profile snapshots. Later profile edits do not alter existing transcripts or renders; save episode draft again to intentionally refresh its snapshots.
+Episodes store Speaker Profile and Episode Format snapshots. Later profile edits do not alter existing transcripts or renders; save episode draft again to intentionally refresh its snapshots.
 
 Reviewed transcript text remains authoritative when generation instructions change. Refreshing snapshots invalidates audio when language, speaker mapping, TTS model, voice, style, accent, or Chatterbox tuning changes. Stale MP3 files stay hidden until a successful render replaces them.
 
@@ -108,7 +104,7 @@ OpenAI and compatible TTS voices are AI-generated. Disclose that fact in publish
 
 ## Background Jobs
 
-Transcript generation, TTS script preparation, and TTS rendering run through one local FIFO queue.
+Transcript generation and TTS rendering run through one local FIFO queue.
 
 - `GET /api/jobs` exposes queue state
 - Sidebar `Server Activity` shows latest jobs
@@ -117,7 +113,5 @@ Transcript generation, TTS script preparation, and TTS rendering run through one
 ## Verify
 
 ```powershell
-npm run check
 npm test
-npm run build
 ```

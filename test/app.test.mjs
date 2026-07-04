@@ -31,6 +31,16 @@ async function waitFor(check, timeoutMs = 3_000) {
   throw new Error(`Condition not met within ${timeoutMs} ms.`);
 }
 
+async function startTestServer(t, prefix, options = {}, prepare) {
+  const rootDir = await mkdtemp(join(tmpdir(), prefix));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  await prepare?.(rootDir);
+  const server = await createPodcastServer({ rootDir, ...options });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  return { rootDir, baseUrl: `http://127.0.0.1:${server.address().port}` };
+}
+
 function silentWav(sampleRate = 24_000, channels = 1, durationSeconds = 0.01) {
   const samples = Math.round(sampleRate * durationSeconds);
   const blockAlign = channels * 2;
@@ -177,7 +187,10 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url: String(url), options });
     if (String(url).endsWith("/v1/models")) {
-      return Response.json([{ model_id: "eleven_v3", name: "Eleven v3", can_do_text_to_speech: true }]);
+      return Response.json([
+        { model_id: "eleven_v3", name: "Eleven v3", can_do_text_to_speech: true },
+        { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5", can_do_text_to_speech: true },
+      ]);
     }
     if (String(url).includes("/v2/voices")) {
       return new Response(JSON.stringify({
@@ -191,15 +204,13 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
     return new Response(Buffer.from("fake-mp3"), { status: 200, headers: { "Content-Type": "audio/mpeg" } });
   };
 
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-builder-eleven-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-builder-eleven-", { fetchImpl });
 
   const initialState = await (await fetch(`${baseUrl}/api/state`)).json();
-  initialState.config.providers.elevenlabs.activeModels = { eleven_v3: { text: false, tts: true } };
+  initialState.config.providers.elevenlabs.activeModels = {
+    eleven_v3: { text: false, tts: true },
+    eleven_flash_v2_5: { text: false, tts: true },
+  };
   let response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(initialState.config) });
   assert.equal(response.status, 200);
   const profiles = initialState.profiles;
@@ -220,6 +231,29 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(profiles),
   });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza" }),
+  });
+  let prompt = await response.json();
+  assert.match(prompt.lockedPrompt, /eleven_v3/);
+  assert.match(prompt.lockedPrompt, /Do not use SSML break tags/);
+  assert.equal(prompt.capabilities[0].cueMode, "tags");
+
+  profiles.speakerProfiles[0].voiceModel = "eleven_flash_v2_5";
+  response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza" }),
+  });
+  prompt = await response.json();
+  assert.match(prompt.lockedPrompt, /<break time="0\.5s" \/>/);
+  assert.equal(prompt.capabilities[0].cueMode, "breaks");
+  profiles.speakerProfiles[0].voiceModel = "eleven_v3";
+  response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles) });
   assert.equal(response.status, 200);
 
   response = await fetch(`${baseUrl}/api/tts/elevenlabs/voices`);
@@ -259,14 +293,10 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
 });
 
 test("local API seeds data and saves knowledge plus episode", async (t) => {
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-builder-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  await mkdir(join(rootDir, "public"), { recursive: true });
-  await writeFile(join(rootDir, "public", "index.html"), "<!doctype html><title>Test</title>");
-  const server = await createPodcastServer({ rootDir });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-builder-", {}, async (rootDir) => {
+    await mkdir(join(rootDir, "public"), { recursive: true });
+    await writeFile(join(rootDir, "public", "index.html"), "<!doctype html><title>Test</title>");
+  });
 
   let response = await fetch(baseUrl);
   assert.equal(response.status, 200);
@@ -333,12 +363,7 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
 });
 
 test("transcript word counts use locale-aware segmentation", async (t) => {
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-word-count-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-word-count-");
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
   state.profiles.episodeProfiles[0].language = "zh-CN";
   await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
@@ -353,12 +378,7 @@ test("transcript word counts use locale-aware segmentation", async (t) => {
 });
 
 test("saved episode explicitly applies latest profiles atomically", async (t) => {
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-profile-refresh-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-profile-refresh-");
 
   let state = await (await fetch(`${baseUrl}/api/state`)).json();
   let response = await fetch(`${baseUrl}/api/knowledge`, {
@@ -472,12 +492,7 @@ test("model catalog uses provider APIs without exposing keys", { concurrency: fa
     ]);
     throw new Error(`Unexpected URL ${url}`);
   };
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-models-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-models-", { fetchImpl });
 
   const catalog = await waitFor(async () => {
     const value = await (await fetch(`${baseUrl}/api/models`)).json();
@@ -531,12 +546,7 @@ test("transcript jobs return 202 and run through one FIFO queue", { concurrency:
     }
     throw new Error(`Unexpected URL ${url}`);
   };
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-jobs-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-jobs-", { fetchImpl });
 
   const profileData = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   profileData.episodeProfiles[0].language = "fr-FR";
@@ -585,7 +595,7 @@ test("transcript jobs return 202 and run through one FIFO queue", { concurrency:
   assert.match(saved.transcript, /Valeria \[warm\]: Idea 1/);
 });
 
-test("short generated transcripts fail and can be retried", { concurrency: false }, async (t) => {
+test("short generated transcripts save with warning and can be retried", { concurrency: false }, async (t) => {
   const oldKey = process.env.MIMO_API_KEY;
   process.env.MIMO_API_KEY = "test-mimo-key";
   t.after(() => { if (oldKey === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldKey; });
@@ -611,12 +621,7 @@ test("short generated transcripts fail and can be retried", { concurrency: false
     }
     throw new Error(`Unexpected URL ${url}`);
   };
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-transcript-retry-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-transcript-retry-", { fetchImpl });
   let response = await fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Source" }) });
   const knowledge = await response.json();
   response = await fetch(`${baseUrl}/api/episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Retry", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }) });
@@ -625,10 +630,14 @@ test("short generated transcripts fail and can be retried", { concurrency: false
   await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
   let result = await waitFor(async () => {
     const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "failed" ? value : null;
+    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
   });
-  assert.match(result.jobs.find((job) => job.episodeId === episode.id).error, /Transcript too short: 20 words/);
-  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).transcript, "");
+  const shortJob = result.jobs.find((job) => job.episodeId === episode.id);
+  assert.equal(shortJob.status, "completed");
+  assert.match(shortJob.message, /Transcript is too short: 20 words/);
+  const savedShort = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(savedShort.status, "transcript_ready");
+  assert.ok(savedShort.transcriptWords > 0);
 
   await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
   result = await waitFor(async () => {
@@ -650,33 +659,18 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   });
   let ttsCalls = 0;
   const ttsRequests = [];
-  const preparationRequests = [];
   let wav = silentWav(24_000, 1, 45).toString("base64");
   const fetchImpl = async (url, options = {}) => {
     if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
     if (String(url).endsWith("/chat/completions")) {
       const request = JSON.parse(options.body);
-      if (!request.audio) {
-        preparationRequests.push(request);
-        const turns = [];
-        for (let index = 0; index < 5; index += 1) {
-          turns.push({ speaker: "Valeria", delivery: index === 0 ? "quick" : "warm", text: `Idea ${index + 1}.${index === 0 ? "[pause]" : ""}` });
-          if (index === 0) turns.push({ speaker: "Diego", delivery: "warm", text: "Quick reaction." });
-        }
-        return Response.json({ choices: [{ message: { content: JSON.stringify({ turns }) } }] });
-      }
       ttsCalls += 1;
       ttsRequests.push(request);
       return Response.json({ choices: [{ message: { audio: { data: wav } } }] });
     }
     throw new Error(`Unexpected URL ${url}`);
   };
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-tts-job-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-tts-job-", { fetchImpl });
 
   let response = await fetch(`${baseUrl}/api/knowledge`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Grounded" }),
@@ -687,7 +681,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
     body: JSON.stringify({ name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
   });
   const episode = await response.json();
-  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria [${index === 0 ? "quick" : "warm"}]: Idea ${index + 1}.${index === 0 ? "\nDiego [warm]: Quick reaction." : ""}`).join("\n\n");
+  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria [${index === 0 ? "quick" : "warm"}]: Idea ${index + 1}.${index === 0 ? "[pause]\nDiego [warm]: Quick reaction." : ""}`).join("\n\n");
   await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }),
   });
@@ -715,25 +709,6 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
     body: JSON.stringify({ id: episode.id, name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
   });
   assert.equal(response.status, 200);
-
-  let preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`)).json();
-  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation/generate`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: preparation.prompt }),
-  });
-  assert.equal(response.status, 202);
-  await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
-  });
-  preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`)).json();
-  assert.equal(preparation.scriptStatus, "draft");
-  assert.match(preparation.draftScript, /Idea 1\.\[pause\]/);
-  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: preparation.prompt, script: preparation.draftScript }),
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).approvedCurrent, true);
-  assert.equal(preparationRequests.length, 1);
 
   const clipsDir = join(rootDir, "data", "episodes", episode.id, "clips");
   await mkdir(clipsDir, { recursive: true });
@@ -789,81 +764,105 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   assert.equal(response.status, 416);
 });
 
-test("TTS preparation preserves words, renames placeholder, and supports chat without KB", { concurrency: false }, async (t) => {
+test("transcript prompt adds cues, supports no KB, renames placeholder, and isolates chat", { concurrency: false }, async (t) => {
   const oldMimo = process.env.MIMO_API_KEY;
   process.env.MIMO_API_KEY = "test-mimo-key";
   t.after(() => { if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo; });
+  const requests = [];
   const fetchImpl = async (url, options = {}) => {
     if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
     if (String(url).endsWith("/chat/completions")) {
       const request = JSON.parse(options.body);
-      if (request.messages[0].content.includes("TTS prompt editor")) {
-        return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Use restrained pauses.", questions: [], proposal: { ttsPrompt: "Use only sparse [pause] cues." } }) } }] });
+      requests.push(request);
+      const system = request.messages[0].content;
+      if (system.includes("transcript prompt editor")) {
+        return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Use restrained pauses.", questions: [], proposal: { transcriptPromptGuidance: "Use one meaningful [pause] near the opening." } }) } }] });
       }
-      return Response.json({ choices: [{ message: { content: JSON.stringify({ turns: Array.from({ length: 5 }, (_, index) => ({ speaker: "Valeria", delivery: "warm", text: `Exact words ${index + 1}.[pause]` })) }) } }] });
+      if (system.includes("create grounded podcast outlines")) {
+        return Response.json({ choices: [{ message: { content: JSON.stringify({ segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Segment ${index + 1}`, purpose: "Discuss", points: ["Point"], closingBeat: "Close" })) }) } }] });
+      }
+      const words = Array.from({ length: 130 }, (_, index) => `word${index}`).join(" ");
+      return Response.json({ choices: [{ message: { content: JSON.stringify({
+        title: "Generated Title",
+        segments: Array.from({ length: 5 }, (_, index) => ({
+          number: index + 1,
+          title: `Segment ${index + 1}`,
+          turns: [{ speaker: "Valeria", delivery: "warm", text: `${words}${index === 0 ? " [pause]" : ""}` }],
+        })),
+      }) } }] });
     }
     throw new Error(`Unexpected URL ${url}`);
   };
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-tts-preparation-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-transcript-prompt-", { fetchImpl });
 
-  let response = await fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "source.md", content: "# Source" }) });
-  const knowledge = await response.json();
-  response = await fetch(`${baseUrl}/api/episodes`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "New episode", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  state.profiles.episodeProfiles[0].language = "en-US";
+  state.profiles.episodeProfiles[0].targetMinutes = 5;
+  let response = await fetch(`${baseUrl}/api/profiles`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles),
   });
-  const episode = await response.json();
-  const transcript = `# Generated Title\n\n${Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\n\nValeria [warm]: Exact words ${index + 1}.`).join("\n\n")}`;
-  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
   assert.equal(response.status, 200);
 
-  let preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation?languageOverride=en-US`)).json();
-  assert.match(preparation.defaultPrompt, /MiMo/);
-  assert.equal(preparation.scriptStatus, "missing");
-  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation/generate`, {
+  response = await fetch(`${baseUrl}/api/episodes`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: preparation.prompt, languageOverride: "en-US" }),
+    body: JSON.stringify({
+      name: "New episode",
+      episodeProfileId: "episode-chisme-crianza",
+      knowledgeBaseId: "",
+      transcriptPromptGuidance: "Keep reactions restrained.",
+    }),
   });
+  assert.equal(response.status, 201);
+  const episode = await response.json();
+  assert.equal(episode.knowledgeBaseId, "");
+
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ episodeProfileId: episode.episodeProfileId, guidance: episode.transcriptPromptGuidance }),
+  });
+  const prompt = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(prompt.lockedPrompt, /MiMo/);
+  assert.match(prompt.effectivePrompt, /Keep reactions restrained/);
+  assert.equal(prompt.capabilities[0].cueMode, "tags");
+
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
   assert.equal(response.status, 202);
   await waitFor(async () => {
     const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
     return jobs.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? jobs : null;
   });
-  preparation = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation?languageOverride=en-US`)).json();
-  assert.equal(preparation.draftCurrent, true);
-  assert.match(preparation.draftScript, /Exact words 1\.\[pause\]/);
-  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).name, "Generated Title");
+  const generated = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(generated.name, "Generated Title");
+  assert.match(generated.transcript, /\[pause\]/);
+  const transcriptRequest = requests.find((request) => request.messages[0].content.includes("write grounded"));
+  assert.match(transcriptRequest.messages[1].content, /TTS-AWARE DIALOGUE RULES/);
+  assert.match(transcriptRequest.messages[1].content, /Keep reactions restrained/);
+  assert.match(transcriptRequest.messages[1].content, /No knowledge base was supplied/);
 
-  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`, {
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, {
     method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: preparation.prompt, languageOverride: "en-US", script: preparation.draftScript.replace("Exact words 1.", "Changed words.") }),
+    body: JSON.stringify({ transcript: generated.transcript.replace("[pause]", '<break time="1s" />') }),
   });
   assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /changed spoken text/);
-  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`, {
-    method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: preparation.prompt, languageOverride: "en-US", script: preparation.draftScript }),
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).approvedCurrent, true);
-  const wrongLanguage = await (await fetch(`${baseUrl}/api/episodes/${episode.id}/tts-preparation`)).json();
-  assert.equal(wrongLanguage.promptStale, true);
-  assert.equal(wrongLanguage.approvedCurrent, false);
+  assert.match((await response.json()).error, /does not support SSML break tags/);
 
   response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "tts", episodeId: episode.id, text: "Use these pasted docs.", ttsPrompt: preparation.prompt, languageOverride: "en-US" }),
+    body: JSON.stringify({
+      mode: "transcript",
+      episodeId: episode.id,
+      model: "mimo-v2.5-pro",
+      text: "Use these pasted docs.",
+      transcriptPromptGuidance: episode.transcriptPromptGuidance,
+    }),
   });
   const chat = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(chat.message.proposal.ttsPrompt, "Use only sparse [pause] cues.");
-  const ttsChats = await (await fetch(`${baseUrl}/api/chats?kind=tts&episodeId=${episode.id}`)).json();
-  assert.equal(ttsChats.chats.length, 1);
+  assert.equal(chat.message.proposal.transcriptPromptGuidance, "Use one meaningful [pause] near the opening.");
+  const transcriptChats = await (await fetch(`${baseUrl}/api/chats?kind=transcript&episodeId=${episode.id}`)).json();
+  assert.equal(transcriptChats.chats.length, 1);
+  assert.equal(transcriptChats.chats[0].lastModel, "mimo-v2.5-pro");
   assert.equal((await (await fetch(`${baseUrl}/api/chats`)).json()).chats.length, 0);
 });
 
@@ -926,6 +925,14 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   const clipsDir = join(healthyDir, "clips");
   await mkdir(clipsDir, { recursive: true });
   for (const name of ["outline.json", "transcript.json", "concat.txt"]) await writeFile(join(healthyDir, name), "obsolete");
+  for (const name of ["tts-script.md", "tts-script.draft.md"]) await writeFile(join(healthyDir, name), "obsolete TTS script");
+  const episodePath = join(healthyDir, "episode.json");
+  const storedEpisode = JSON.parse(await readFile(episodePath, "utf8"));
+  storedEpisode.ttsPreparation = { prompt: "obsolete" };
+  storedEpisode.job = { id: "obsolete-preparation", type: "tts_prepare", status: "completed" };
+  await writeFile(episodePath, JSON.stringify(storedEpisode, null, 2));
+  const legacyChatPath = join(rootDir, "data", "chat", "legacy-tts.json");
+  await writeFile(legacyChatPath, JSON.stringify({ threadId: "legacy-tts", kind: "tts", messages: [] }));
   await writeFile(join(clipsDir, `${"e".repeat(64)}.wav`), silentWav());
   const corruptDir = join(rootDir, "data", "episodes", "corrupt-episode");
   await mkdir(corruptDir, { recursive: true });
@@ -938,9 +945,14 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
   const corrupt = state.episodes.find((item) => item.id === "corrupt-episode");
+  const cleanedEpisode = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
   assert.equal(corrupt.status, "corrupt");
   assert.equal(corrupt.corrupt, true);
+  assert.equal(cleanedEpisode.ttsPreparation, undefined);
+  assert.equal(cleanedEpisode.job, undefined);
   for (const name of ["outline.json", "transcript.json", "concat.txt"]) await assert.rejects(readFile(join(healthyDir, name)), { code: "ENOENT" });
+  for (const name of ["tts-script.md", "tts-script.draft.md"]) await assert.rejects(readFile(join(healthyDir, name)), { code: "ENOENT" });
+  await assert.rejects(readFile(legacyChatPath), { code: "ENOENT" });
   await assert.rejects(readFile(join(clipsDir, `${"e".repeat(64)}.wav`)), { code: "ENOENT" });
   assert.equal(await readFile(join(corruptDir, "outline.json"), "utf8"), "preserve");
 
@@ -962,13 +974,10 @@ test("TTS rejects missing FFmpeg before provider calls", { concurrency: false },
     if (oldEleven === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = oldEleven;
     if (oldOpenAi === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldOpenAi;
   });
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-ffmpeg-check-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
   let providerCalls = 0;
-  const server = await createPodcastServer({ rootDir, fetchImpl: async () => { providerCalls += 1; return Response.json({ data: [] }); } });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-ffmpeg-check-", {
+    fetchImpl: async () => { providerCalls += 1; return Response.json({ data: [] }); },
+  });
   let response = await fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Source" }) });
   const knowledge = await response.json();
   response = await fetch(`${baseUrl}/api/episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "No FFmpeg", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }) });
@@ -1029,12 +1038,7 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", { conc
     }
     throw new Error(`Unexpected URL ${url}`);
   };
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-compat-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-compat-", { fetchImpl });
 
   let response = await fetch(`${baseUrl}/api/config`, {
     method: "PUT",
@@ -1138,16 +1142,13 @@ test("compatible config owns env names and blocks referenced connection removal"
     if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo;
     if (oldOpenAi === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldOpenAi;
   });
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-config-safety-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl: async (url) => {
-    if (String(url).includes("xiaomimimo.com")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "custom-tts" }] });
-    throw new Error(`Unexpected URL ${url}`);
-  } });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-config-safety-", {
+    fetchImpl: async (url) => {
+      if (String(url).includes("xiaomimimo.com")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
+      if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "custom-tts" }] });
+      throw new Error(`Unexpected URL ${url}`);
+    },
+  });
   const providers = { mimo: { baseUrl: "https://api.xiaomimimo.com/v1" }, elevenlabs: {}, openai: { baseUrl: "https://api.openai.com/v1", enabled: false } };
 
   let response = await fetch(`${baseUrl}/api/config`, {
@@ -1221,12 +1222,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
     if (String(url).endsWith("/audio/speech")) return new Response(Buffer.from("chatterbox-audio"), { headers: { "Content-Type": "audio/mpeg" } });
     throw new Error(`Unexpected URL ${url}`);
   };
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-chatterbox-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-chatterbox-", { fetchImpl });
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
   state.config.providers.chatterbox = { baseUrl: "http://127.0.0.1:8100/v1", modelsUrl: "", enabled: true, activeModels: { "chatterbox-turbo": { text: false, tts: true } } };
   let response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.config) });
@@ -1254,6 +1250,10 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   state.profiles.speakerProfiles[0].speakers[0].chatterboxTemperature = 0.65;
   response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
   assert.equal(response.status, 200);
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza" }) });
+  let transcriptPrompt = await response.json();
+  assert.match(transcriptPrompt.lockedPrompt, /does not support inline tags/);
+  assert.equal(transcriptPrompt.capabilities[0].cueMode, "delivery");
   response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "[laugh] Hola", cue: "warm" }) });
   assert.equal(response.status, 200);
   assert.equal(Buffer.from(await response.arrayBuffer()).toString(), "chatterbox-audio");
@@ -1274,6 +1274,11 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   state.profiles.episodeProfiles[0].language = "en-US";
   response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
   assert.equal(response.status, 200);
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza" }) });
+  transcriptPrompt = await response.json();
+  assert.match(transcriptPrompt.lockedPrompt, /English Turbo/);
+  assert.match(transcriptPrompt.lockedPrompt, /\[laugh\]/);
+  assert.equal(transcriptPrompt.capabilities[0].cueMode, "tags");
   response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "[laugh] Hello", cue: "warm" }) });
   assert.equal(response.status, 200);
   const ttsCalls = calls.filter((call) => call.url.endsWith("/audio/speech"));
@@ -1318,12 +1323,7 @@ test("profile assistant validates context and persists structured turns", { conc
     throw new Error(`Unexpected request: ${url}`);
   };
 
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-chat-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  const server = await createPodcastServer({ rootDir, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-chat-", { fetchImpl });
   await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
 
   const kbContent = `# Context\n${"x".repeat(50_100)}\nFULL_CONTEXT_END`;
@@ -1370,7 +1370,7 @@ test("profile assistant validates context and persists structured turns", { conc
   response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...requestBody, mode: "speaker" }),
+    body: JSON.stringify({ ...requestBody, episodeProfileId: "", mode: "speaker" }),
   });
   const sent = await response.json();
   assert.equal(response.status, 200);
@@ -1378,6 +1378,7 @@ test("profile assistant validates context and persists structured turns", { conc
   const prompt = chatRequests[0].messages[1].content;
   assert.match(prompt, /AVAILABLE ACTIVE TEXT MODELS/);
   assert.match(prompt, /REQUESTED MODE:\nspeaker/);
+  assert.match(prompt, /CURRENT EPISODE PROFILE: None/);
   assert.match(prompt, /custom-voice/);
   assert.match(prompt, /FULL_CONTEXT_END/);
 
@@ -1399,7 +1400,6 @@ test("profile assistant validates context and persists structured turns", { conc
     body: JSON.stringify({
       threadId: sent.threadId,
       speakerProfileId: "speaker-chisme-crianza",
-      episodeProfileId: "episode-chisme-crianza",
       proposal: { speaker: { name: "Applied profile" } },
     }),
   });
@@ -1430,20 +1430,15 @@ test("profile saves and proposal apply warn for existing unavailable saved model
     }
   });
 
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-unavailable-model-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  await mkdir(join(rootDir, "data"), { recursive: true });
   const seeded = structuredClone(DEFAULT_DATA);
   seeded.speakerProfiles[0].voiceModel = "compat:chatterbox:chatterbox-multilingual-v3";
   seeded.speakerProfiles[0].speakers = seeded.speakerProfiles[0].speakers.map((speaker) => ({ ...speaker, voiceId: "female" }));
-  await writeFile(join(rootDir, "data", "profiles.json"), JSON.stringify(seeded, null, 2));
-
-  const server = await createPodcastServer({ rootDir, fetchImpl: async () => {
-    throw new Error("No provider calls expected.");
-  } });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl } = await startTestServer(t, "podcast-unavailable-model-", {
+    fetchImpl: async () => { throw new Error("No provider calls expected."); },
+  }, async (rootDir) => {
+    await mkdir(join(rootDir, "data"), { recursive: true });
+    await writeFile(join(rootDir, "data", "profiles.json"), JSON.stringify(seeded, null, 2));
+  });
 
   let state = await (await fetch(`${baseUrl}/api/state`)).json();
   let response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
@@ -1473,14 +1468,149 @@ test("profile saves and proposal apply warn for existing unavailable saved model
   assert.match(applied.warnings.join(" "), /compat:chatterbox:chatterbox-multilingual-v3/);
 });
 
+test("content plans support CRUD and appear in state", async (t) => {
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-plans-crud-");
+  let state = await (await fetch(`${baseUrl}/api/state`)).json();
+  assert.deepEqual(state.plans, []);
+  assert.deepEqual(JSON.parse(await readFile(join(rootDir, "data", "plans", "index.json"), "utf8")), []);
+
+  let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: "../../escape", name: "Series", theme: "Initial", episodeCount: 3, episodes: [{ id: "client-owned" }] }) });
+  assert.equal(response.status, 201);
+  let plan = (await response.json()).plan;
+  assert.notEqual(plan.id, "../../escape");
+  assert.deepEqual(plan.episodes, []);
+  assert.equal(plan.status, "draft");
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...plan, theme: "Updated" }) });
+  assert.equal(response.status, 200);
+  plan = (await response.json()).plan;
+  assert.equal(plan.theme, "Updated");
+  assert.equal((await (await fetch(`${baseUrl}/api/plans`)).json()).plans[0].id, plan.id);
+  assert.equal((await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan.theme, "Updated");
+  state = await (await fetch(`${baseUrl}/api/state`)).json();
+  assert.equal(state.plans[0].id, plan.id);
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "DELETE" });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await (await fetch(`${baseUrl}/api/plans`)).json()).plans, []);
+});
+
+test("content planner validates generation inputs", async (t) => {
+  const { baseUrl } = await startTestServer(t, "podcast-plans-validation-");
+  let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Invalid", planningModel: "" }) });
+  const plan = (await response.json()).plan;
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: "Theme", planningModel: "" }) });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "Planning model is required.");
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: "Theme", planningModel: "inactive-model" }) });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Unsupported or inactive text model/);
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: "Theme", knowledgeBaseId: "missing" }) });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "Knowledge base does not exist.");
+});
+
+test("planner generates plans, saves formats, creates drafts, and chats", { concurrency: false }, async (t) => {
+  const oldKey = process.env.MIMO_API_KEY;
+  process.env.MIMO_API_KEY = "planner-test-key";
+  t.after(() => {
+    if (oldKey === undefined) delete process.env.MIMO_API_KEY;
+    else process.env.MIMO_API_KEY = oldKey;
+  });
+  const generated = {
+    seriesTitle: "Ignored title",
+    formatDrafts: [{ name: "Interview", description: "Focused format", numSegments: 5, targetMinutes: 18, language: "es-419", defaultBriefing: "Ask clear questions." }],
+    episodes: [
+      { number: 1, title: "First", premise: "First premise", knowledgeScope: "Chapter one", keyPoints: ["Point A"], listenerOutcome: "Learn A", formatDraftName: "Interview", additionalInstructions: "Stay focused", transcriptPromptGuidance: "Use a concise opening." },
+      { number: 2, title: "Second", premise: "Second premise", knowledgeScope: "Chapter two", keyPoints: ["Point B"], listenerOutcome: "Learn B", formatDraftName: "Interview", additionalInstructions: "Avoid overlap", transcriptPromptGuidance: "End with a recap." },
+    ],
+  };
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith("/chat/completions")) {
+      const request = JSON.parse(options.body);
+      const system = request.messages?.[0]?.content || "";
+      const content = system.includes("content planning assistant")
+        ? JSON.stringify({ message: "Narrow audience.", questions: [], proposal: { planPatch: { audience: "Developers", episodeCount: 2 } } })
+        : JSON.stringify(generated);
+      return Response.json({ choices: [{ message: { content } }] });
+    }
+    return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
+  };
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-plans-generate-", { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).providers.mimo.textModels.some((item) => item.id === "mimo-v2.5-pro"));
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  const speakerProfileId = state.profiles.speakerProfiles[0].id;
+  const planningModel = state.profiles.episodeProfiles[0].outlineModel;
+  let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Kept name", speakerProfileId, planningModel, theme: "Build reliable software", audience: "Engineers", goal: "Teach", episodeCount: 2 }) });
+  let plan = (await response.json()).plan;
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ generateFormats: true, formatCount: 1 }) });
+  const generatedBody = await response.json();
+  assert.equal(response.status, 200, generatedBody.error);
+  plan = generatedBody.plan;
+  assert.equal(plan.name, "Kept name");
+  assert.equal(plan.formatDrafts.length, 1);
+  assert.equal(plan.episodes.length, 2);
+  assert.equal(plan.episodes[0].title, "First");
+
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/save-formats`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ formatDraftIds: [plan.formatDrafts[0].id] }) });
+  assert.equal(response.status, 200);
+  let saved = await response.json();
+  plan = saved.plan;
+  assert.equal(saved.saved.length, 1);
+  assert.ok(plan.formatDrafts[0].savedEpisodeProfileId);
+  assert.equal(plan.episodes[0].episodeProfileId, plan.formatDrafts[0].savedEpisodeProfileId);
+  assert.ok(saved.profiles.episodeProfiles.some((item) => item.id === plan.formatDrafts[0].savedEpisodeProfileId));
+
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/create-episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plannedEpisodeIds: plan.episodes.map((item) => item.id) }) });
+  assert.equal(response.status, 200);
+  const created = await response.json();
+  assert.equal(created.episodes.length, 2);
+  assert.match(created.episodes[0].additionalInstructions, /Point A/);
+  assert.equal(created.episodes[0].transcriptPromptGuidance, "Use a concise opening.");
+  assert.ok(created.plan.episodes.every((item) => item.createdEpisodeId));
+  assert.ok(await readFile(join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json"), "utf8"));
+
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Improve setup", model: planningModel, planDraft: { audience: "Current draft", episodeCount: null } }) });
+  const chat = await response.json();
+  assert.equal(response.status, 200, chat.error);
+  assert.equal(chat.message.proposal.planPatch.audience, "Developers");
+  const chats = await (await fetch(`${baseUrl}/api/chats?kind=planner&planId=${plan.id}`)).json();
+  assert.equal(chats.chats[0].kind, "planner");
+  assert.equal(chats.chats[0].lastPlanId, plan.id);
+
+  response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Auto count", speakerProfileId, planningModel, theme: "Choose a useful series length", audience: "Engineers", goal: "Teach" }) });
+  let autoPlan = (await response.json()).plan;
+  assert.equal(response.status, 201);
+  assert.equal(autoPlan.episodeCount, null);
+  response = await fetch(`${baseUrl}/api/plans/${autoPlan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ generateFormats: true, formatCount: 1 }) });
+  autoPlan = (await response.json()).plan;
+  assert.equal(response.status, 200);
+  assert.equal(autoPlan.episodeCount, 2);
+  assert.equal(autoPlan.episodes.length, 2);
+  await fetch(`${baseUrl}/api/plans/${autoPlan.id}`, { method: "DELETE" });
+
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "DELETE" });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await (await fetch(`${baseUrl}/api/chats?kind=planner&planId=${plan.id}`)).json()).chats, []);
+});
+
 test("browser model fields and loading surfaces are present", async () => {
   const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
+  assert.match(html, /Local UI · cloud generation · v0\.4\.0/);
   assert.match(html, /<select id="epOutlineModel"><\/select>/);
   assert.match(html, /<select id="epTranscriptModel"><\/select>/);
   assert.match(html, /<select id="epLanguage"><\/select>/);
   assert.match(html, /<label class="full">Knowledge Base<select id="buildKnowledge"><\/select><\/label>/);
   assert.match(html, /id="serverActivity"/);
   assert.match(html, /id="notificationFeed"/);
+  assert.match(html, /<details class="notice-item"/);
+  assert.match(html, /<details class="job-item"/);
+  assert.match(html, /\.job-item\[open\]\[data-job-id\]/);
+  assert.match(html, /openJobs\.has\(job\.id\) \? " open" : ""/);
+  assert.match(html, /<summary>\[\$\{label\} - \$\{escapeHtml\(item\.message\)\}\]<\/summary>/);
+  assert.match(html, /\$\{escapeHtml\(job\.type\.toLowerCase\(\)\)\} - \$\{escapeHtml\(job\.status\)\}/);
+  assert.match(html, /grid-auto-rows: max-content/);
+  assert.match(html, /\.notice-item summary, \.job-item summary \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
+  assert.match(html, /class="notice-detail"/);
+  assert.match(html, /class="job-detail"/);
   assert.match(html, /id="chatHistory"/);
   assert.match(html, /id="chatMode"/);
   assert.match(html, /id="chatDelete"/);
@@ -1491,22 +1621,60 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /\.loading-line\[hidden\] \{ display: none; \}/);
   assert.match(html, /data-field="accent"/);
   assert.match(html, /--accent: #FFB900/);
-  assert.match(html, /id="profilesSpeakersTab"/);
+  assert.match(html, /id="view-speakers"/);
+  assert.match(html, /id="view-planner"/);
+  assert.match(html, /data-view="planner"/);
+  assert.match(html, /id="planSelect"/);
+  assert.match(html, /id="generatePlan"/);
+  assert.match(html, /id="plannerChatPane"/);
+  assert.match(html, /data-planner-section="knowledge"/);
+  assert.match(html, /data-planner-section="setup"/);
+  assert.match(html, /data-planner-section="formats"/);
+  assert.match(html, /data-planner-section="format-drafts"/);
+  assert.match(html, /data-planner-section="episodes"/);
+  assert.match(html, /id="selectAllUnsavedFormats"/);
+  assert.match(html, /id="saveAllUnsavedFormats"/);
+  assert.match(html, /id="plannedEpisodeSidebar"/);
+  assert.match(html, /id="speakerSidebar"/);
+  assert.match(html, /placeholder="Auto - LLM chooses"/);
+  assert.match(html, /min-height: 56px/);
+  assert.match(html, /Episode Format/);
   assert.match(html, /id="ttsLanguageOverride"/);
   assert.match(html, /id="applyLatestProfiles">Apply latest profiles/);
-  assert.match(html, /id="ttsPromptTab"/);
-  assert.match(html, /id="ttsPreparationPrompt"/);
-  assert.match(html, /id="ttsPreparedScript"/);
-  assert.match(html, /id="prepareTtsScript"/);
-  assert.match(html, /id="approveTtsScript"/);
-  assert.match(html, /id="ttsChatHistory"/);
+  assert.match(html, /id="transcriptPromptTab"/);
+  assert.match(html, /id="transcriptLockedPrompt" readonly/);
+  assert.match(html, /id="transcriptPromptGuidance"/);
+  assert.match(html, /id="transcriptChatHistory"/);
+  assert.match(html, /id="transcriptChatModel"/);
+  assert.match(html, /None — use LLM knowledge/);
+  assert.doesNotMatch(html, /id="episodeSeed"|Suggested episode/);
+  assert.doesNotMatch(html, /id="ttsPromptTab"/);
+  assert.doesNotMatch(html, /ttsPreparation/);
+  assert.doesNotMatch(html, /prepareTtsScript|approveTtsScript/);
+  assert.match(html, /data-view="player"/);
+  assert.match(html, /id="view-player"/);
+  assert.match(html, /id="playerAudio" preload="metadata" hidden/);
+  assert.match(html, /id="playerBottom" class="player-bottom"[^>]* hidden/);
+  assert.match(html, /id="bottomPlayerSeek" class="player-bottom-seek"/);
+  assert.match(html, /id="bottomPlayerElapsed"/);
+  assert.match(html, /id="bottomPlayerDuration"/);
+  assert.match(html, /id="playerLibrary"/);
+  assert.match(html, /id="playerQueue"/);
+  assert.match(html, /id="playerSpeed"/);
+  assert.match(html, /id="bottomPlayerSpeed"/);
+  assert.match(html, /function playEpisode\(id\)/);
+  assert.match(html, /function queueEpisode\(id\)/);
+  assert.match(html, /function playNextEpisode\(\)/);
+  assert.match(html, /Skipping to next episode/);
+  assert.match(html, /data-episode-player="play"/);
+  assert.doesNotMatch(html, /id="episodeAudio"/);
   assert.match(html, /id="view-config"/);
-  assert.match(html, /id="saveProfiles" class="primary">Save all profiles/);
+  assert.match(html, /id="saveProfiles" class="primary">Save speaker profiles/);
   assert.match(html, /id="speakerProfilePills"/);
-  assert.match(html, /id="episodeProfilePills" class="profile-pills" aria-label="Selected episode profile details"/);
+  assert.match(html, /id="episodeProfilePills" class="profile-pills" aria-label="Selected Episode Format details"/);
   assert.match(html, /const selectedEpisode = episodes\.find/);
   assert.match(html, /Outline: \$\{escapeHtml\(textModelLabel\(selectedEpisode\.outlineModel\)\)\}/);
-  assert.match(html, /Save episode profiles/);
+  assert.match(html, /Save Episode Formats/);
   assert.match(html, /id="modelDialog"/);
   assert.match(html, />Add OpenAI compatible connection</);
   assert.match(html, /const openaiVoices/);
@@ -1533,6 +1701,8 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.doesNotMatch(html, /refreshElevenVoices/);
   assert.match(html, /id="configModelStatus" class="model-status"/);
   assert.match(html, /<details class="connection-row"/);
+  assert.match(html, /class="connection-title"/);
+  assert.match(html, /modalityPills\(\["text", "tts"\], connection\.activeModels\)/);
   assert.match(html, /class="status-pill \$\{status\}"/);
   assert.match(html, /used\.text\.has\(profileId\)/);
   assert.doesNotMatch(html, /const ttsModels/);
