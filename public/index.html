@@ -793,8 +793,8 @@
         const latest = jobsState.jobs[0];
         if (currentEpisode) await refreshState(currentEpisode.id);
         if (latest?.status === "completed") {
-          const transcriptWarning = latest.type === "transcript" && latest.message?.includes("too short");
-          notify(latest.message || (latest.type === "transcript" ? "Transcript ready." : "MP3 render complete."), transcriptWarning ? "warning" : "ok");
+          const isWarning = latest.message?.includes("too short");
+          notify(latest.message || (latest.type === "transcript" ? "Transcript ready." : "MP3 render complete."), isWarning ? "warning" : "ok");
         }
         if (["failed", "interrupted"].includes(latest?.status)) notify(latest.error || latest.message, "error");
       }

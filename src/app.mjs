@@ -1827,13 +1827,14 @@ async function runTtsJob(context, queued) {
 
   await updateJob(context, queued, { phase: "combining", message: "Combining MP3…" });
   const targetSeconds = episodeProfile.targetMinutes * 60;
-  await assembleMp3(clipPaths, episodeDir(context.paths, episode.id), targetSeconds * 0.9, episodeProfile.targetMinutes);
+  const mp3Result = await assembleMp3(clipPaths, episodeDir(context.paths, episode.id), targetSeconds * 0.9, episodeProfile.targetMinutes);
   await pruneClipCache(clipsDir, usedKeys);
   await updateJob(context, queued, {}, {
     status: "ready",
     audioReady: true,
     lastError: null,
   });
+  return { warning: mp3Result?.warning || "" };
 }
 
 function turnClipDescriptor(speakerProfile, speaker, turn, language) {
@@ -2571,10 +2572,11 @@ async function assembleMp3(clipPaths, directory, minimumSeconds, targetMinutes) 
   try {
     await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", listPath, "-codec:a", "libmp3lame", "-b:a", "128k", temporary]);
     const actualSeconds = await mediaDurationSeconds(temporary);
-    if (actualSeconds < minimumSeconds) {
-      throw new Error(`Rendered audio too short: ${(actualSeconds / 60).toFixed(1)} min. Target: ${targetMinutes} min. Regenerate a longer transcript.`);
-    }
     await rename(temporary, output);
+    if (actualSeconds < minimumSeconds) {
+      return { warning: `Rendered audio too short: ${(actualSeconds / 60).toFixed(1)} min. Target: ${targetMinutes} min. Regenerate a longer transcript.` };
+    }
+    return {};
   } finally {
     await rm(listPath, { force: true });
     await rm(temporary, { force: true });

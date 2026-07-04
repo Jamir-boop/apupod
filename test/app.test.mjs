@@ -746,15 +746,14 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   wav = silentWav().toString("base64");
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, { method: "POST" });
   assert.equal(response.status, 202);
-  const failed = await waitFor(async () => {
+  const shortRender = await waitFor(async () => {
     const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return value.jobs.find((item) => item.episodeId === episode.id)?.status === "failed" ? value : null;
+    return value.jobs.find((item) => item.episodeId === episode.id)?.status === "completed" ? value : null;
   }, 30_000);
-  assert.match(failed.jobs.find((item) => item.episodeId === episode.id).error, /Rendered audio too short/);
-  const afterFailure = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
-  assert.equal(afterFailure.audioReady, true);
-  assert.equal(afterFailure.audioUrl, saved.audioUrl);
-  assert.deepEqual(await readFile(audioPath), previousAudio);
+  assert.match(shortRender.jobs.find((item) => item.episodeId === episode.id).message, /Rendered audio too short/);
+  const afterShort = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(afterShort.audioReady, true);
+  assert.equal(afterShort.audioUrl, saved.audioUrl);
 
   response = await fetch(`${baseUrl}${saved.audioUrl}`, { headers: { Range: "bytes=0-3" } });
   assert.equal(response.status, 206);
