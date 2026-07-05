@@ -51,9 +51,8 @@
     h3 { font-size: 16px; }
     p { margin: 8px 0; }
     code { color: var(--accent); background: var(--surface-1); border: 1px solid var(--line); padding: 1px 5px; border-radius: 2px; }
-    legend { color: var(--accent); }
     .muted, small { color: var(--muted); }
-    .app { min-height: 100vh; display: grid; grid-template-columns: 320px minmax(0, 1fr); }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 240px minmax(0, 1fr) auto; }
     aside { position: sticky; top: 0; display: flex; flex-direction: column; min-width: 0; height: 100vh; padding: 22px 18px; background: var(--surface-1); border-right: 1px solid var(--line); overflow: hidden; }
     aside p { margin-bottom: 22px; }
     nav { display: grid; gap: 7px; }
@@ -65,7 +64,7 @@
     .view { display: grid; gap: 18px; }
     .view[hidden] { display: none; }
     .panel { padding: 20px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
     .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .full { grid-column: 1 / -1; }
     .actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 14px; }
@@ -92,7 +91,6 @@
     .status-pill.loading { color: var(--accent); border-color: var(--accent); }
     .status-pill.loading::before { background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
     @keyframes pulse { to { opacity: .25; } }
-    .profile-section[hidden] { display: none; }
     fieldset { margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 2px; }
     legend { font-weight: 750; padding: 0 6px; }
     .speaker-list { display: grid; gap: 12px; margin-top: 14px; }
@@ -142,8 +140,23 @@
     .model-row[hidden] { display: none; }
     audio { width: min(100%, 700px); margin-top: 12px; }
     progress { width: min(100%, 700px); height: 14px; accent-color: var(--accent); }
-    .server-activity { flex: 1 1 auto; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto minmax(0, 1fr); min-width: 0; max-width: 100%; min-height: 0; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); overflow: hidden; }
-    .server-activity h2 { margin-bottom: 8px; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    .rightbar { position: sticky; top: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto minmax(0, 1fr); min-width: 0; width: 320px; height: 100vh; padding: 18px 14px; background: var(--surface-1); border-left: 1px solid var(--line); overflow: hidden; }
+    .rightbar[hidden] { display: none; }
+    .rightbar-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .rightbar-header h2 { margin: 0; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    .rightbar-header button { padding: 5px 9px; font-size: 12px; }
+    body.player-active .rightbar { height: calc(100vh - 56px); }
+    .rightbar-toggle { position: fixed; top: 12px; right: 12px; z-index: 55; padding: 7px 10px; }
+    .rightbar-toggle[hidden] { display: none; }
+    .rightbar-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: #FFFFFF; background: var(--danger); font-size: 11px; text-align: center; }
+    .rightbar-badge[hidden] { display: none; }
+    .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); }
+    body.player-active .toasts { bottom: 72px; }
+    .toast { padding: 10px 12px; overflow-wrap: anywhere; text-align: left; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, .55); font-size: 13px; font-weight: 400; }
+    .toast:hover:not(:disabled) { color: var(--text); background: var(--surface-3); border-color: var(--accent); }
+    .toast[data-type="ok"] { border-color: var(--success); }
+    .toast[data-type="warning"] { border-color: var(--accent); }
+    .toast[data-type="error"] { border-color: var(--danger); }
     .activity-heading { margin: 12px 0 7px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
     .notice-list, .activity-list { display: grid; grid-auto-rows: max-content; align-content: start; min-width: 0; max-width: 100%; min-height: 0; gap: 7px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
     .notice-list { margin-bottom: 12px; }
@@ -163,9 +176,8 @@
     .loading-line[hidden] { display: none; }
     .spinner { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid var(--disabled); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .profiles-layout, .planner-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; }
-    #view-speakers .profiles-layout, .planner-layout { grid-template-columns: 1fr; }
-    .profiles-main, .planner-main { min-width: 0; display: grid; gap: 18px; }
+    .planner-layout { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
+    .planner-main { min-width: 0; display: grid; gap: 18px; }
     .plan-list { display: grid; gap: 10px; }
     .plan-card { padding: 12px; border: 1px solid var(--line); background: var(--surface-1); }
     .plan-card[hidden] { display: none; }
@@ -203,12 +215,13 @@
     body.player-active { padding-bottom: 56px; }
     body.player-active aside { height: calc(100vh - 56px); }
     .chat-pane { position: sticky; top: 24px; display: flex; flex-direction: column; max-height: calc(100vh - 48px); background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
+    body.player-active .chat-pane { max-height: calc(100vh - 48px - 56px); }
     .chat-pane-header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .chat-pane-header h3 { margin: 0; font-size: 14px; }
     .chat-controls { padding: 10px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
     .chat-controls label { font-size: 12px; }
     .chat-controls select { font-size: 12px; padding: 6px 8px; }
-    .chat-messages { flex: 1; overflow-y: auto; padding: 14px 16px; display: grid; gap: 10px; min-height: 200px; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 14px 16px; display: grid; gap: 10px; min-height: 0; align-content: start; }
     .chat-msg { padding: 8px 11px; border-radius: 2px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
     .chat-msg.user { background: var(--surface-3); border: 1px solid var(--line); }
     .chat-msg.assistant { background: #0A1520; border: 1px solid #1A3040; }
@@ -236,9 +249,13 @@
     .chat-pane[hidden] { display: none; }
     label[data-help]::after { content: attr(data-help); color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
     .assistant-context { margin: 10px 16px 0; padding: 7px 9px; color: var(--accent); border: 1px solid var(--line); background: var(--surface-1); font-size: 12px; }
-    .assistant-progress { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-    .assistant-progress button { padding: 5px 7px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-    .assistant-progress button.complete { color: var(--success); border-color: var(--success); }
+    .assistant-steps { display: grid; gap: 4px; margin: 0; padding: 10px 16px; border-bottom: 1px solid var(--line); list-style: none; }
+    .assistant-steps button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; overflow: hidden; text-align: left; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
+    .assistant-steps .step-mark { flex: 0 0 16px; width: 16px; text-align: center; font-weight: 800; }
+    .assistant-steps li[data-state="done"] button { color: var(--success); }
+    .assistant-steps li[data-state="current"] button { color: var(--accent); background: var(--surface-1); border-color: var(--line-strong); }
+    .assistant-steps li[data-state="pending"] button { color: var(--disabled); }
+    .assistant-steps button:hover:not(:disabled) { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
     .assistant-prompts { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
     .assistant-prompts button { padding: 4px 7px; color: var(--muted); font-size: 11px; }
     .assistant-impact { margin-top: 6px; color: var(--accent); }
@@ -249,14 +266,14 @@
       aside h1, aside p { display: none; }
       nav { display: flex; overflow-x: auto; }
       nav button { width: auto; white-space: nowrap; }
-      .server-activity { margin-top: 10px; padding-top: 10px; }
+      .rightbar { position: fixed; top: 0; right: 0; z-index: 45; width: min(340px, 92vw); box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
       main { width: min(100% - 24px, 1120px); margin-top: 14px; }
       .grid, .grid.three { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
       .toolbar { grid-template-columns: 1fr 1fr; }
       .model-row { grid-template-columns: auto minmax(0, 1fr); }
       .model-row select { grid-column: 1 / -1; }
-      .profiles-layout, .planner-layout, .player-layout { grid-template-columns: 1fr; }
+      .planner-layout, .player-layout { grid-template-columns: 1fr; }
       .internal-nav-layout { grid-template-columns: 1fr; }
       .internal-sidebar { position: static; display: flex; max-height: none; overflow-x: auto; overflow-y: hidden; }
       .internal-sidebar button { width: auto; flex: 0 0 auto; }
@@ -268,7 +285,7 @@
     @media (max-width: 1200px) {
       main.assistant-active { display: block; width: min(1120px, calc(100% - 36px)); }
       main.assistant-active > .view:not([hidden]) { margin-top: 18px; }
-      #podcastAssistant { position: static; max-height: none; }
+      #podcastAssistant { position: static; max-height: 80vh; }
     }
   </style>
 </head>
@@ -276,29 +293,23 @@
   <div class="app">
     <aside>
       <h1>Podcast Builder</h1>
-      <p class="muted">Local UI · cloud generation · v0.6.2</p>
+      <p class="muted">Local UI · cloud generation · v0.8.0</p>
       <nav aria-label="Builder views">
         <button data-view="config">Config</button>
-        <button data-view="speakers">Speaker Profiles</button>
+        <button data-view="speakers">Speakers</button>
+        <button data-view="formats">Formats</button>
         <button data-view="planner">Content Planner</button>
         <button data-view="transcript">Transcript Generator</button>
         <button data-view="tts">TTS Generator</button>
         <button data-view="player">Player</button>
       </nav>
-      <section class="server-activity" aria-live="polite">
-        <h2>Server Activity</h2>
-        <div class="activity-heading">Notifications</div>
-        <div id="notificationFeed" class="notice-list"><span class="muted">No notifications</span></div>
-        <div class="activity-heading">Jobs</div>
-        <div id="serverActivity" class="activity-list"><span class="muted">Loading…</span></div>
-      </section>
     </aside>
 
     <main id="appMain">
       <div id="podcastAssistant" class="chat-pane" hidden>
         <div class="chat-pane-header"><h3>Podcast Assistant</h3><div class="chat-input-actions"><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
         <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
-        <div id="assistantProgress" class="assistant-progress" aria-label="Podcast workflow progress"></div>
+        <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
         <div class="chat-controls">
           <label data-help="Project context shared across planning and generation.">Plan<select id="assistantPlanSelect"><option value="">New plan on first message</option></select></label>
           <label>Chat history<select id="plannerChatHistory"></select></label>
@@ -311,137 +322,103 @@
         <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary">Send</button></div></div>
       </div>
 
-      <div id="view-speakers" class="view">
-        <div class="view-header">
-          <div><h2>Speaker Profiles</h2><p class="muted">Define hosts, voices, and delivery rules.</p></div>
-          <button id="saveProfiles" class="primary">Save speaker profiles</button>
-        </div>
-        <div class="profiles-layout">
-          <div class="profiles-main">
-            <div class="model-refresh-row">
-              <div id="modelStatus" class="model-status" role="status" aria-live="polite"></div>
-              <button id="refreshModels">Refresh models</button>
-            </div>
-            <section id="profiles-speakers" class="panel">
-              <h2>Speaker Profiles</h2>
-              <p class="muted">Each profile supports 1–4 speakers. MiMo stays default; ElevenLabs models can be selected globally or per speaker.</p>
-              <div class="toolbar">
-                <label>Profile<select id="speakerProfileSelect"></select></label>
-                <button id="newSpeakerProfile">New</button>
-                <button id="duplicateSpeakerProfile">Duplicate</button>
-                <button id="deleteSpeakerProfile" class="danger">Delete</button>
-              </div>
-              <div id="speakerProfilePills" class="profile-pills" aria-label="Selected speaker profile details"></div>
-              <div class="grid">
-                <label class="full">Name<input id="spName"></label>
-                <label class="full">Description<textarea id="spDescription"></textarea></label>
-                <label>Default TTS model<select id="spVoiceModel"></select></label>
-                <label class="full">Profile rules<textarea id="spInstructions"></textarea></label>
-              </div>
-              <div class="internal-nav-layout">
-                <div id="speakerSidebar" class="internal-sidebar" role="navigation" aria-label="Speakers"></div>
-                <div id="speakerCards" class="speaker-list"></div>
-              </div>
-              <div class="actions"><button id="addSpeaker">Add speaker</button></div>
-            </section>
-
-          </div>
-
-          <div id="chatPane" class="chat-pane" hidden>
-            <div class="chat-pane-header">
-              <h3>Speaker Profile Assistant</h3>
-              <div class="chat-input-actions">
-                <button id="chatReset" title="Start new chat">New Chat</button>
-                <button id="chatDelete" class="danger" title="Delete selected chat">Delete</button>
-              </div>
-            </div>
-            <div class="chat-controls">
-              <label>Chat history<select id="chatHistory"></select></label>
-              <input id="chatMode" type="hidden" value="speaker">
-              <label>Model<select id="chatModel"></select></label>
-              <label>Knowledge base (optional)<select id="chatKb"><option value="">None</option></select></label>
-            </div>
-            <div id="chatDisabledNotice" class="chat-disabled-notice" hidden></div>
-            <div id="chatMessages" class="chat-messages"></div>
-            <div id="chatBusy" class="chat-busy" hidden><span class="spinner" aria-hidden="true"></span><span id="chatBusyText">Thinking…</span></div>
-            <div class="chat-input-row">
-              <textarea id="chatInput" placeholder="Describe what you want or answer the assistant's questions…" disabled></textarea>
-              <div class="chat-input-actions">
-                <button id="chatSend" class="primary" disabled>Send</button>
-                <span id="chatTargetLabel" class="muted" style="font-size:11px"></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div id="view-planner" class="view" hidden>
-        <div class="view-header"><div><h2>Content Planner</h2><p class="muted">Plan one episode or full series, create Episode Formats, and create episode drafts.</p></div><button id="savePlan" class="primary">Save plan</button></div>
+        <div class="view-header"><div><h2>Content Planner</h2><p class="muted">Plan one episode or full series, create Episode Formats, and create episode drafts.</p></div><button id="savePlan" class="primary" disabled>Save plan</button></div>
         <div class="subnav planner-tabs" aria-label="Content Planner sections">
-          <button type="button" data-planner-section="knowledge">Knowledge Base</button>
-          <button type="button" data-planner-section="setup">Plan Setup</button>
-          <button type="button" data-planner-section="formats">Saved Episode Formats</button>
-          <button type="button" data-planner-section="format-drafts">Generated Episode Format Drafts</button>
-          <button type="button" data-planner-section="episodes">Planned Episodes</button>
+          <button type="button" data-planner-section="plan">Plan</button>
+          <button type="button" data-planner-section="episodes">Episodes</button>
         </div>
         <div class="planner-layout">
           <div class="planner-main">
-            <section class="panel planner-section" data-planner-panel="setup">
+            <section class="panel planner-section" data-planner-panel="plan">
               <h3>Plan Setup</h3>
-              <p class="muted">Define series goals, choose source material, speakers, and planning model, then generate formats and episode outlines.</p>
+              <p class="muted">Define series goals, source material, speakers, and format, then generate episode titles and first-episode detail.</p>
               <div class="toolbar"><label data-help="Selects the project this setup and assistant conversation belong to.">Plan<select id="planSelect"></select></label><button id="newPlan">New</button><button id="duplicatePlan">Duplicate</button><button id="deletePlan" class="danger">Delete</button></div>
               <div class="grid">
                 <label class="full" data-help="Names the project in selectors, histories, and generated drafts.">Name<input id="planName"></label>
                 <label data-help="Grounds planning and transcripts in uploaded source material.">Knowledge Base<select id="planKnowledge"></select></label>
-                <label data-help="Defines hosts, voices, and delivery style used by generated formats.">Speaker Profile<select id="planSpeakerProfile"></select></label>
-                <label data-help="Creates format proposals and episode outlines; it does not generate audio.">Planning model<select id="planModel"></select></label>
+                <label data-help="Defines hosts, voices, and delivery style used by Episode Formats.">Speaker Profile<select id="planSpeakerProfile"></select></label>
+                <label data-help="Uses a saved structure, or creates one automatically from this plan.">Episode Format<select id="planEpisodeFormat"></select></label>
+                <label data-help="Creates episode titles and planning detail; it does not generate audio.">Planning model<select id="planModel"></select></label>
                 <label data-help="Fixes series length, or leaves it empty so the model chooses without padding.">Episode count (optional)<input id="planEpisodeCount" type="number" min="1" max="100" placeholder="Auto - LLM chooses"></label>
+                <div id="planAutoFormatFields" class="grid full">
+                  <label data-help="Sets language for automatically created Episode Format.">Language<select id="planLanguage"></select></label>
+                  <label data-help="Sets duration for automatically created Episode Format.">Target minutes<input id="planMinutes" type="number" min="5" max="60"></label>
+                </div>
                 <label class="full" data-help="Sets listener knowledge level, interests, and expected tone.">Audience<textarea id="planAudience"></textarea></label>
                 <label class="full" data-help="Defines the useful outcome listeners should reach.">Goal<textarea id="planGoal"></textarea></label>
                 <label class="full" data-help="Sets the subject, boundaries, and central promise for the series.">Theme<textarea id="planTheme" style="min-height:180px"></textarea></label>
-                <label data-help="Creates reusable format drafts together with episode outlines."><input id="planGenerateFormats" type="checkbox" checked> Generate Episode Formats</label>
-                <label data-help="Controls how many distinct structures the generated series may use.">Format count<input id="planFormatCount" type="number" min="1" max="20" value="1"></label>
               </div>
               <div class="actions"><button id="generatePlan" class="primary">Generate plan</button></div>
             </section>
 
-            <section class="panel planner-section" data-planner-panel="knowledge" hidden>
+            <section class="panel planner-section" data-planner-panel="plan" hidden>
               <h3>Knowledge Base</h3>
               <p class="muted">Upload and manage source material used by plans, assistants, and transcript generation.</p>
               <div class="grid"><label data-help="Provides trusted source material; embedded instructions are ignored.">Markdown file<input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain"></label><div class="actions"><button id="uploadKnowledge" class="primary">Upload knowledge base</button></div></div>
               <div class="separator"></div><div id="knowledgeSummary" class="speaker-summary"><p class="muted">No knowledge base loaded.</p></div>
             </section>
 
-            <section id="profiles-episodes" class="panel planner-section" data-planner-panel="formats" hidden>
-              <h3>Saved Episode Formats</h3>
-              <p class="muted">Create reusable episode structures with language, duration, speaker, and generation-model defaults.</p>
-              <div class="toolbar"><label data-help="Selects the reusable structure being reviewed or edited.">Format<select id="episodeProfileSelect"></select></label><button id="newEpisodeProfile">New</button><button id="duplicateEpisodeProfile">Duplicate</button><button id="deleteEpisodeProfile" class="danger">Delete</button></div>
-              <div id="episodeProfilePills" class="profile-pills" aria-label="Selected Episode Format details"></div>
-              <div class="grid">
-                <label class="full" data-help="Identifies this reusable format.">Name<input id="epName"></label><label class="full" data-help="Explains when this structure should be chosen.">Description<textarea id="epDescription"></textarea></label>
-                <label data-help="Supplies hosts and voice behavior.">Speaker Profile<select id="epSpeakerProfile"></select></label><label data-help="Defines the required outline and transcript section count.">Segments<input id="epSegments" type="number" min="3" max="20"></label>
-                <label data-help="Builds the episode outline.">Outline model<select id="epOutlineModel"></select></label><label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="epTranscriptModel"></select></label>
-                <label data-help="Controls transcript language and compatible voices.">Language<select id="epLanguage"></select></label><label data-help="Sets expected transcript length and duration checks.">Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
-                <label class="full" data-help="Provides reusable structural and editorial instructions for every episode using this format.">Default briefing<textarea id="epBriefing" style="min-height:240px"></textarea></label>
-              </div>
-              <div class="actions"><button id="saveEpisodeFormats">Save Episode Formats</button></div>
-            </section>
-
-            <section class="panel planner-section" data-planner-panel="format-drafts" hidden><div class="view-header"><h3>Generated Episode Format Drafts</h3><div class="actions" style="margin:0"><label class="bulk-check"><input id="selectAllUnsavedFormats" type="checkbox"> Select all unsaved</label><button id="saveSelectedFormats">Save selected</button><button id="saveAllUnsavedFormats">Save all unsaved</button></div></div><p class="muted">Review format proposals from this plan, then save selected drafts as reusable Episode Formats.</p><div id="planFormatDrafts" class="plan-list"><p class="muted">Generate plan to create format drafts.</p></div></section>
             <section class="panel planner-section" data-planner-panel="episodes" hidden><div class="view-header"><h3>Planned Episodes</h3><button id="createSelectedEpisodes">Create selected drafts</button></div><p class="muted">Review generated episode outlines, choose formats, and create saved drafts for transcript generation.</p><div class="internal-nav-layout"><div id="plannedEpisodeSidebar" class="internal-sidebar" role="navigation" aria-label="Planned episodes"></div><div id="plannedEpisodes" class="plan-list"><p class="muted">Generate plan to create episodes.</p></div></div></section>
           </div>
 
         </div>
       </div>
 
+      <div id="view-speakers" class="view" hidden>
+        <div class="view-header">
+          <div><h2>Speaker Profiles</h2><p class="muted">Define hosts, voices, and delivery rules. Each profile supports 1–4 speakers; MiMo stays default, ElevenLabs models can be selected globally or per speaker.</p></div>
+          <button id="saveProfiles" class="primary" disabled>Save speaker profiles</button>
+        </div>
+        <section id="profiles-speakers" class="panel">
+          <div class="model-refresh-row">
+            <div id="modelStatus" class="model-status" role="status" aria-live="polite"></div>
+            <button id="refreshModels">Refresh models</button>
+          </div>
+          <div class="toolbar">
+            <label>Profile<select id="speakerProfileSelect"></select></label>
+            <button id="newSpeakerProfile">New</button>
+            <button id="duplicateSpeakerProfile">Duplicate</button>
+            <button id="deleteSpeakerProfile" class="danger">Delete</button>
+          </div>
+          <div id="speakerProfilePills" class="profile-pills" aria-label="Selected speaker profile details"></div>
+          <div class="grid">
+            <label class="full">Name<input id="spName"></label>
+            <label class="full">Description<textarea id="spDescription"></textarea></label>
+            <label>Default TTS model<select id="spVoiceModel"></select></label>
+            <label class="full">Profile rules<textarea id="spInstructions"></textarea></label>
+          </div>
+          <div class="internal-nav-layout">
+            <div id="speakerSidebar" class="internal-sidebar" role="navigation" aria-label="Speakers"></div>
+            <div id="speakerCards" class="speaker-list"></div>
+          </div>
+          <div class="actions"><button id="addSpeaker">Add speaker</button></div>
+        </section>
+      </div>
+
+      <div id="view-formats" class="view" hidden>
+        <div class="view-header">
+          <div><h2>Episode Formats</h2><p class="muted">Create reusable episode structures with language, duration, speaker, and generation-model defaults.</p></div>
+          <button id="saveEpisodeFormats" class="primary" disabled>Save Episode Formats</button>
+        </div>
+        <section id="profiles-episodes" class="panel">
+          <div class="toolbar"><label data-help="Selects the reusable structure being reviewed or edited.">Format<select id="episodeProfileSelect"></select></label><button id="newEpisodeProfile">New</button><button id="duplicateEpisodeProfile">Duplicate</button><button id="deleteEpisodeProfile" class="danger">Delete</button></div>
+          <div id="episodeProfilePills" class="profile-pills" aria-label="Selected Episode Format details"></div>
+          <div class="grid">
+            <label class="full" data-help="Identifies this reusable format.">Name<input id="epName"></label><label class="full" data-help="Explains when this structure should be chosen.">Description<textarea id="epDescription"></textarea></label>
+            <label data-help="Supplies hosts and voice behavior.">Speaker Profile<select id="epSpeakerProfile"></select></label>
+            <label data-help="Builds the episode outline.">Outline model<select id="epOutlineModel"></select></label><label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="epTranscriptModel"></select></label>
+            <label data-help="Controls transcript language and compatible voices.">Language<select id="epLanguage"></select></label><label data-help="Sets expected transcript length and duration checks.">Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
+          </div>
+        </section>
+      </div>
+
       <div id="view-transcript" class="view" hidden>
         <section class="panel">
           <h2>Transcript Generator</h2>
-          <p class="muted">For one-off episodes, use this view directly. For books or series, start in Content Planner.</p>
-          <div class="toolbar">
-            <label data-help="Loads the episode draft and keeps Transcript and TTS on the same selection.">Saved episode<select id="savedEpisodeSelect"><option value="">New episode</option></select></label>
-            <button id="newEpisode">New Single Episode</button>
-            <span></span><span></span>
+          <p class="muted">Create episode drafts in Content Planner, then generate transcripts here.</p>
+          <div class="toolbar" style="grid-template-columns: 1fr">
+            <label data-help="Loads the episode draft and keeps Transcript and TTS on the same selection.">Saved episode<select id="savedEpisodeSelect"><option value="">Select saved episode</option></select></label>
           </div>
           <div class="subnav" aria-label="Transcript sections">
             <button id="transcriptScriptTab" type="button">Script</button>
@@ -456,7 +433,7 @@
               <label class="full" data-help="Adds episode-specific facts, boundaries, and editorial direction.">Additional instructions<textarea id="additionalInstructions" style="min-height:190px"></textarea></label>
             </div>
             <div class="actions">
-              <button id="saveEpisode">Save draft</button>
+              <button id="saveEpisode" disabled>Save draft</button>
               <button id="generateTranscript" class="primary">Generate transcript</button>
             </div>
             <div id="transcriptJob" class="loading-line" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="transcriptJobStatus"></span></div>
@@ -468,26 +445,14 @@
             </div>
             <p id="transcriptLengthWarning" class="warning" hidden></p>
             <textarea id="transcript" class="transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
-            <div class="actions"><button id="saveTranscript" class="primary">Save transcript</button><button id="saveTranscriptAndTts">Save + go to TTS</button></div>
+            <div class="actions"><button id="saveTranscript" class="primary" disabled>Save transcript</button><button id="saveTranscriptAndTts" disabled>Save + go to TTS</button></div>
           </section>
           <section id="transcript-prompt-panel" hidden>
             <p class="muted">Rules resolve from each speaker's TTS model. References: <a href="https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/speech-synthesis-v2.5" target="_blank" rel="noreferrer">MiMo</a> · <a href="https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices" target="_blank" rel="noreferrer">ElevenLabs</a> · <a href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noreferrer">Chatterbox</a>.</p>
             <div id="transcriptCapabilitySummary" class="speaker-summary"></div>
             <label data-help="Shows non-editable syntax and capability constraints resolved from selected models.">Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly style="min-height:240px"></textarea></label>
             <label data-help="Adds reviewed creative direction without replacing provider rules.">Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" style="min-height:160px" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
-            <div class="actions"><button id="resetTranscriptPrompt">Clear guidance</button><button id="saveTranscriptPrompt">Save draft</button><button id="generateTranscriptFromPrompt" class="primary">Generate transcript</button></div>
-            <div class="separator"></div>
-            <div id="transcriptChatPane" class="chat-pane" style="position:static;max-height:none" hidden>
-              <div class="chat-pane-header"><h3>Transcript Prompt Assistant</h3><div class="chat-input-actions"><button id="transcriptChatReset">New Chat</button><button id="transcriptChatDelete" class="danger">Delete</button></div></div>
-              <div class="chat-controls">
-                <label>Chat history<select id="transcriptChatHistory"></select></label>
-                <label>Model<select id="transcriptChatModel"></select></label>
-                <label>Knowledge base (optional)<select id="transcriptChatKb"><option value="">None</option></select></label>
-              </div>
-              <div id="transcriptChatMessages" class="chat-messages"><div class="chat-msg system">Paste documentation or describe desired transcript guidance.</div></div>
-              <div id="transcriptChatBusy" class="chat-busy" hidden><span class="spinner" aria-hidden="true"></span><span>Thinking…</span></div>
-              <div class="chat-input-row"><textarea id="transcriptChatInput" placeholder="Paste docs or describe how transcript guidance should change…"></textarea><div class="chat-input-actions"><button id="transcriptChatSend" class="primary">Send</button></div></div>
-            </div>
+            <div class="actions"><button id="resetTranscriptPrompt">Clear guidance</button><button id="saveTranscriptPrompt" disabled>Save draft</button><button id="generateTranscriptFromPrompt" class="primary">Generate transcript</button></div>
           </section>
         </section>
       </div>
@@ -529,7 +494,7 @@
         <div class="player-layout">
           <section class="panel">
             <h3>Rendered Episodes</h3>
-            <div id="playerLibrary" class="player-list"><p class="muted">Loading rendered episodesâ€¦</p></div>
+            <div id="playerLibrary" class="player-list"><p class="muted">Loading rendered episodes…</p></div>
           </section>
           <section class="panel">
             <div class="view-header"><div><h3>Up Next</h3><p class="muted">Upcoming episodes only.</p></div><button id="clearPlayerQueue" type="button" disabled>Clear queue</button></div>
@@ -546,7 +511,7 @@
         <section class="panel">
           <div class="view-header">
             <div><h2>Model Connections</h2><p class="muted">Configure connections, then activate only models needed by profiles and generators.</p></div>
-            <button id="saveConfig" class="primary">Save config</button>
+            <button id="saveConfig" class="primary" disabled>Save config</button>
           </div>
           <div id="configModelStatus" class="model-status" role="status" aria-live="polite"></div>
           <div id="configProviders"></div>
@@ -569,7 +534,18 @@
         </div>
       </dialog>
     </main>
+
+    <aside id="rightbar" class="rightbar" aria-label="Notifications and jobs" hidden>
+      <div class="rightbar-header"><h2>Activity</h2><button id="rightbarClose" type="button">Close</button></div>
+      <div class="activity-heading">Notifications</div>
+      <div id="notificationFeed" class="notice-list" aria-live="polite"><span class="muted">No notifications</span></div>
+      <div class="activity-heading">Jobs</div>
+      <div id="serverActivity" class="activity-list"><span class="muted">Loading…</span></div>
+    </aside>
   </div>
+
+  <button id="rightbarToggle" class="rightbar-toggle" type="button" aria-label="Open notifications">🔔<span id="rightbarBadge" class="rightbar-badge" hidden>0</span></button>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
 
   <audio id="playerAudio" preload="metadata" hidden></audio>
   <footer id="playerBottom" class="player-bottom" aria-label="Podcast player" hidden>
@@ -597,7 +573,6 @@
     let configState = null;
     let activeSpeakerProfileId = viewSelections.speakerProfileId || "";
     let activeEpisodeProfileId = viewSelections.episodeProfileId || "";
-    let activeProfileSection = "speakers";
     let previewUrl = "";
     let elevenVoices = [];
     let chatterboxVoices = [];
@@ -612,18 +587,14 @@
     let hadActiveJobs = false;
     const autoTtsTranscriptJobs = new Set();
     let notifications = [];
+    const RIGHTBAR_KEY = "podcast-builder.rightbar.v1";
+    let rightbarOpen = false;
+    try { rightbarOpen = sessionStorage.getItem(RIGHTBAR_KEY) === "open"; } catch {}
+    let toastEntries = [];
+    let toastOverflow = 0;
     let activeTranscriptSection = ["script", "prompt"].includes(viewSelections.transcriptSection) ? viewSelections.transcriptSection : "script";
     let transcriptPromptState = null;
     let transcriptPromptDirty = false;
-    let transcriptChatThread = null;
-    let transcriptChatThreads = [];
-    let activeTranscriptChatThreadId = "";
-    let transcriptChatBusy = false;
-    let chatThread = null;
-    let chatThreads = [];
-    let activeChatThreadId = "";
-    let chatBusy = false;
-    let chatLoadVersion = 0;
     let activePlanId = rememberedPlanId;
     let activePlan = null;
     let planDirty = false;
@@ -631,8 +602,7 @@
     let plannerChatThread = null;
     let plannerChatThreads = [];
     let plannerChatBusy = false;
-    let activePlannerSection = ["knowledge", "setup", "formats", "format-drafts", "episodes"].includes(viewSelections.plannerSection) ? viewSelections.plannerSection : "setup";
-    let activeFormatDraftId = "";
+    let activePlannerSection = ["plan", "episodes"].includes(viewSelections.plannerSection) ? viewSelections.plannerSection : "plan";
     let activePlannedEpisodeId = "";
     let activeSpeakerIndex = 0;
     let playingEpisodeId = "";
@@ -658,15 +628,59 @@
     }
 
     function notify(message, type = "") {
-      notifications = [{ message: String(message || ""), type: type || "info" }, ...notifications].slice(0, 5);
+      const entry = { id: crypto.randomUUID(), message: String(message || ""), type: type || "info", at: Date.now(), read: rightbarOpen };
+      notifications = [entry, ...notifications].slice(0, 30);
       renderNotifications();
+      if (!rightbarOpen) showToast(entry);
     }
 
     function renderNotifications() {
       $("notificationFeed").innerHTML = notifications.length ? notifications.map((item) => {
         const label = item.type === "ok" ? "saved" : item.type === "warning" ? "warning" : item.type === "error" ? "error" : "notice";
-        return `<details class="notice-item" data-type="${escapeHtml(item.type)}"><summary>[${label} - ${escapeHtml(item.message)}]</summary><div class="notice-detail">${escapeHtml(item.message)}</div></details>`;
+        return `<details class="notice-item" data-type="${escapeHtml(item.type)}"><summary>[${label} - ${escapeHtml(item.message)}]</summary><div class="notice-detail">${escapeHtml(item.message)}<br><span class="muted">${escapeHtml(new Date(item.at).toLocaleTimeString())}</span></div></details>`;
       }).join("") : '<span class="muted">No notifications</span>';
+      const unread = notifications.filter((item) => !item.read).length;
+      $("rightbarBadge").hidden = unread === 0;
+      $("rightbarBadge").textContent = String(unread);
+    }
+
+    function setRightbarOpen(open) {
+      rightbarOpen = open;
+      try { sessionStorage.setItem(RIGHTBAR_KEY, open ? "open" : "closed"); } catch {}
+      $("rightbar").hidden = !open;
+      $("rightbarToggle").hidden = open;
+      if (open) {
+        notifications.forEach((item) => { item.read = true; });
+        clearToasts();
+        renderNotifications();
+      }
+    }
+
+    function showToast(entry) {
+      toastEntries.push(entry);
+      if (toastEntries.length > 3) {
+        toastOverflow += toastEntries.length - 3;
+        toastEntries = toastEntries.slice(-3);
+      }
+      renderToasts();
+      if (!["warning", "error"].includes(entry.type)) setTimeout(() => dismissToast(entry.id), 5000);
+    }
+
+    function dismissToast(id) {
+      const before = toastEntries.length;
+      toastEntries = toastEntries.filter((item) => item.id !== id);
+      if (toastEntries.length !== before) renderToasts();
+    }
+
+    function clearToasts() {
+      toastEntries = [];
+      toastOverflow = 0;
+      renderToasts();
+    }
+
+    function renderToasts() {
+      $("toasts").innerHTML = (toastOverflow ? `<button type="button" class="toast toast-more">+${toastOverflow} more notification${toastOverflow === 1 ? "" : "s"}</button>` : "")
+        + toastEntries.map((item) => `<button type="button" class="toast" data-type="${escapeHtml(item.type)}">${escapeHtml(item.message)}</button>`).join("");
     }
 
     async function api(path, options = {}) {
@@ -753,9 +767,9 @@
     }
 
     function setView(view) {
-      const aliases = { profiles: "speakers", knowledge: "planner" };
+      const aliases = { profiles: "formats", knowledge: "planner" };
       const candidate = aliases[view] || view;
-      const selected = ["speakers", "planner", "transcript", "tts", "player", "config"].includes(candidate) ? candidate : "planner";
+      const selected = ["config", "speakers", "formats", "planner", "transcript", "tts", "player"].includes(candidate) ? candidate : "planner";
       document.querySelectorAll(".view").forEach((node) => { node.hidden = node.id !== `view-${selected}`; });
       document.querySelectorAll("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === selected));
       if (location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
@@ -763,7 +777,6 @@
       if (selected === "tts") renderTtsView();
       if (selected === "player") renderPlayer();
       if (selected === "config") renderConfigView();
-      if (selected === "speakers") loadChatThread();
       if (selected === "planner") { renderPlannerSections(); loadPlannerChatThread(); }
       renderPodcastAssistant();
     }
@@ -779,8 +792,6 @@
         plannerSection: view === "planner" ? activePlannerSection : "",
         transcriptSection: view === "transcript" ? activeTranscriptSection : "",
         episodeProfileId: activeEpisodeProfileId,
-        formatDraftIds: [...document.querySelectorAll("[data-format-check]:checked")].map((item) => item.dataset.formatCheck),
-        formatDraftId: activeFormatDraftId,
         plannedEpisodeId: activePlannedEpisodeId,
         episodeId: currentEpisode?.id || "",
       };
@@ -788,10 +799,10 @@
 
     function assistantWorkspaceDraft() {
       const view = activeViewName();
-      if (view === "planner" && activePlannerSection === "formats") return {
+      if (view === "formats") return {
         id: activeEpisodeProfileId, name: $("epName").value, description: $("epDescription").value, speakerProfileId: $("epSpeakerProfile").value,
-        numSegments: Number($("epSegments").value), outlineModel: $("epOutlineModel").value, transcriptModel: $("epTranscriptModel").value,
-        language: $("epLanguage").value, targetMinutes: Number($("epMinutes").value), defaultBriefing: $("epBriefing").value,
+        outlineModel: $("epOutlineModel").value, transcriptModel: $("epTranscriptModel").value,
+        language: $("epLanguage").value, targetMinutes: Number($("epMinutes").value),
       };
       if (view === "transcript") return {
         id: currentEpisode?.id || "", name: $("episodeName").value, episodeProfileId: $("buildEpisodeProfile").value, knowledgeBaseId: $("buildKnowledge").value,
@@ -803,12 +814,16 @@
 
     function renderPodcastAssistant() {
       const view = activeViewName();
-      const visible = ["planner", "transcript", "tts"].includes(view);
+      const visible = ["planner", "speakers", "formats", "transcript", "tts"].includes(view);
       $("podcastAssistant").hidden = !visible;
       $("appMain").classList.toggle("assistant-active", visible);
       if (!visible) return;
-      const sectionLabels = { knowledge: "Knowledge Base", setup: "Plan Setup", formats: "Saved Episode Formats", "format-drafts": "Generated Episode Format Drafts", episodes: "Planned Episodes", script: "Transcript Script", prompt: "Prompt & Cues" };
-      const focus = view === "planner" ? sectionLabels[activePlannerSection] : view === "transcript" ? sectionLabels[activeTranscriptSection] : "TTS Generation";
+      const sectionLabels = { plan: "Plan Setup", episodes: "Planned Episodes", script: "Transcript Script", prompt: "Prompt & Cues" };
+      const focus = view === "planner" ? sectionLabels[activePlannerSection]
+        : view === "speakers" ? "Speaker Profiles"
+        : view === "formats" ? "Episode Formats"
+        : view === "transcript" ? sectionLabels[activeTranscriptSection]
+        : "TTS Generation";
       $("assistantContext").textContent = `Helping with: ${focus}`;
       const plans = state?.plans || [];
       $("assistantPlanSelect").innerHTML = option("", plans.length ? "Select plan" : "New plan on first message", !activePlanId) + plans.map((item) => option(item.id, item.name, item.id === activePlanId)).join("");
@@ -819,23 +834,26 @@
       const selectedSpeaker = state?.profiles.speakerProfiles.find((item) => item.id === activePlan?.speakerProfileId);
       const activeTtsModels = new Set(discoveredModels("tts").map((item) => item.id));
       const profilesReady = Boolean(selectedSpeaker && activeTtsModels.has(selectedSpeaker.voiceModel) && selectedSpeaker.speakers.every((speaker) => !speaker.ttsModelOverride || activeTtsModels.has(speaker.ttsModelOverride)));
-      const formatsReady = Boolean(activePlan && (activePlan.formatDrafts.length ? activePlan.formatDrafts.every((item) => item.savedEpisodeProfileId) : planned.length && planned.every((item) => item.episodeProfileId)));
-      const stages = [
-        ["Setup", Boolean(activePlan?.theme && activePlan?.planningModel && activePlan?.speakerProfileId), "planner:setup"],
-        ["Profiles", profilesReady, "speakers"],
-        ["Plan", planned.length > 0, planned.length ? "planner:episodes" : "planner:setup"],
-        ["Formats", formatsReady, "planner:format-drafts"],
+      const formatReady = Boolean(activePlan?.episodeFormatId && state?.profiles.episodeProfiles.some((item) => item.id === activePlan.episodeFormatId));
+      const steps = [
+        ["Plan setup", Boolean(activePlan?.theme && activePlan?.planningModel && activePlan?.speakerProfileId), "planner:plan"],
+        ["Speaker Profile", profilesReady, "speakers"],
+        ["Episode Format", formatReady, "formats"],
         [`Episodes ${created.length}/${planned.length}`, Boolean(planned.length && created.length === planned.length), "planner:episodes"],
-        [`Transcript ${transcriptCount}/${created.length}`, Boolean(created.length && transcriptCount === created.length), "transcript"],
+        [`Transcripts ${transcriptCount}/${created.length}`, Boolean(created.length && transcriptCount === created.length), "transcript"],
         [`Audio ${audioCount}/${created.length}`, Boolean(created.length && audioCount === created.length), "tts"],
       ];
-      $("assistantProgress").innerHTML = stages.map(([label, complete, target]) => `<button type="button" data-assistant-target="${target}" class="${complete ? "complete" : ""}">${complete ? "✓ " : ""}${escapeHtml(label)}</button>`).join("");
+      const currentIndex = steps.findIndex(([, done]) => !done);
+      $("assistantProgress").innerHTML = steps.map(([label, done, target], index) => {
+        const stepState = done ? "done" : index === currentIndex ? "current" : "pending";
+        const mark = done ? "✓" : index === currentIndex ? "●" : "○";
+        return `<li data-state="${stepState}"><button type="button" data-assistant-target="${target}"><span class="step-mark" aria-hidden="true">${mark}</span>${escapeHtml(label)}</button></li>`;
+      }).join("");
       const prompts = view === "planner"
-        ? activePlannerSection === "formats" ? ["Improve this Episode Format", "Create a new format", "Explain missing fields"]
-          : activePlannerSection === "format-drafts" ? ["Review focused format", "Improve checked formats", "What should I save?"]
-          : activePlannerSection === "episodes" ? ["Improve this episode", "Review checked episodes", "What is the next step?"]
-          : activePlannerSection === "knowledge" ? ["How should I use this source?", "What source is missing?"]
-          : ["Help shape this podcast", "Fill missing setup fields", "What should I decide next?"]
+        ? activePlannerSection === "episodes" ? ["Review checked episodes", "Improve this episode", "What is the next step?"]
+          : ["Help shape this podcast", "Fill missing setup fields", "What is the next step?"]
+        : view === "speakers" ? ["Design the hosts", "Improve speaker personalities", "Check voice setup"]
+        : view === "formats" ? ["Improve this format", "Suggest target duration", "What is the next step?"]
         : view === "transcript" ? ["Improve episode guidance", "Check transcript readiness", "What should I do next?"]
           : ["Check voice readiness", "Help choose language", "What should I render next?"];
       $("assistantPrompts").innerHTML = prompts.map((text) => `<button type="button" data-assistant-prompt="${escapeHtml(text)}">${escapeHtml(text)}</button>`).join("");
@@ -908,20 +926,35 @@
       return jobsState.jobs.find((job) => job.episodeId === currentEpisode?.id && job.type === type);
     }
 
+    function episodeIsBusy() {
+      return jobsState.jobs.some((job) => job.episodeId === currentEpisode?.id && ["queued", "running"].includes(job.status));
+    }
+
+    function updateSaveButtons() {
+      const episodeLocked = episodeIsBusy() || !currentEpisode;
+      $("saveConfig").disabled = !configDirty;
+      $("saveProfiles").disabled = !profilesDirty;
+      $("saveEpisodeFormats").disabled = !profilesDirty;
+      $("savePlan").disabled = !activePlan || !planDirty;
+      $("saveEpisode").disabled = episodeLocked || !(episodeDraftDirty || transcriptPromptDirty);
+      $("saveTranscript").disabled = episodeLocked || !transcriptDirty;
+      $("saveTranscriptAndTts").disabled = episodeLocked || (!transcriptDirty && !currentEpisode?.transcript);
+      $("saveTranscriptPrompt").disabled = episodeLocked || !transcriptPromptDirty;
+    }
+
     function renderJobIndicators() {
       const transcriptJob = currentJob("transcript");
       const ttsJob = currentJob("tts");
-      const episodeBusy = jobsState.jobs.some((job) => job.episodeId === currentEpisode?.id && ["queued", "running"].includes(job.status));
+      const episodeBusy = episodeIsBusy();
+      const episodeDisabled = episodeBusy || !currentEpisode;
       const transcriptBusy = transcriptJob && ["queued", "running"].includes(transcriptJob.status);
       $("transcriptJob").hidden = !transcriptBusy;
       $("transcriptJobStatus").textContent = transcriptBusy ? transcriptJob.message : "";
-      $("generateTranscript").disabled = episodeBusy;
-      $("generateTranscriptFromPrompt").disabled = episodeBusy;
-      $("saveEpisode").disabled = episodeBusy;
-      $("saveTranscriptPrompt").disabled = episodeBusy;
-      $("saveTranscript").disabled = episodeBusy;
-      $("saveTranscriptAndTts").disabled = episodeBusy;
-      $("autoGenerateTts").disabled = episodeBusy;
+      $("generateTranscript").disabled = episodeDisabled;
+      $("generateTranscriptFromPrompt").disabled = episodeDisabled;
+      $("autoGenerateTts").disabled = episodeDisabled;
+      updateSaveButtons();
+      for (const id of ["buildEpisodeProfile", "buildKnowledge", "episodeName", "additionalInstructions", "transcriptPromptGuidance", "transcriptFile", "transcript", "resetTranscriptPrompt"]) $(id).disabled = episodeDisabled;
       $("applyLatestProfiles").disabled = episodeBusy || !currentEpisode || episodeProfilesAreCurrent();
       $("renderAudio").disabled = episodeBusy || ttsCompatibilityErrors().length > 0 || !currentEpisode?.transcript;
 
@@ -1017,7 +1050,6 @@
       $("speakerProfilePills").innerHTML = selectedSpeaker ? `<span class="profile-pill active">${selectedSpeaker.speakers.length} speaker${selectedSpeaker.speakers.length === 1 ? "" : "s"}</span><span class="profile-pill">${escapeHtml(modelLabel(selectedSpeaker.voiceModel))}</span>` : "";
       $("episodeProfilePills").innerHTML = selectedEpisode ? [
         `<span class="profile-pill active">${escapeHtml(languageById(selectedEpisode.language)?.name || selectedEpisode.language)}</span>`,
-        `<span class="profile-pill">${selectedEpisode.numSegments} segments</span>`,
         `<span class="profile-pill">${selectedEpisode.targetMinutes} min</span>`,
         `<span class="profile-pill">${escapeHtml(selectedEpisodeSpeaker?.name || "Speaker profile unavailable")}</span>`,
         `<span class="profile-pill">Outline: ${escapeHtml(textModelLabel(selectedEpisode.outlineModel))}</span>`,
@@ -1025,9 +1057,7 @@
       ].join("") : "";
       loadSpeakerForm(activeSpeakerProfileId);
       loadEpisodeProfileForm(activeEpisodeProfileId);
-      renderChatControls();
-      updateChatDisabledState();
-      if (location.hash === "#speakers") loadChatThread();
+      updateSaveButtons();
     }
 
     function renderBuildOptions() {
@@ -1035,14 +1065,12 @@
       $("buildKnowledge").innerHTML = option("", "None — use LLM knowledge")
         + state.knowledgeBases.map((item) => option(item.id, `${item.name} (${item.characters.toLocaleString()} chars)`)).join("");
       const episodeOptions = state.episodes.map((item) => option(item.id, item.corrupt ? `${item.name} — ${item.lastError}` : `${item.name} — ${item.status}`, currentEpisode?.id === item.id, item.corrupt)).join("");
-      $("savedEpisodeSelect").innerHTML = '<option value="">New episode</option>' + episodeOptions;
+      $("savedEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
       $("ttsEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
       $("knowledgeSummary").innerHTML = state.knowledgeBases.length
         ? state.knowledgeBases.map((item) => `<div class="view-header"><div><strong>${escapeHtml(item.name)}</strong><br><span class="muted">${item.characters.toLocaleString()} characters</span></div><button type="button" class="danger" data-delete-knowledge="${escapeHtml(item.id)}">Delete</button></div>`).join("")
         : '<p class="muted">No knowledge base loaded.</p>';
     }
-
-    function renderProfileSections() {}
 
     function ttsLanguageOptions(selected) {
       return option("", "Use episode profile language", !selected) + languageOptions(selected);
@@ -1200,6 +1228,7 @@
         `<section class="provider-card provider-group"><div class="provider-head"><div><h3>OpenAI Compatible</h3>${modalityPills(["text", "tts"], compatibleActiveSummary())}</div><span class="badge">${configState.compatibleConnections.length} connection${configState.compatibleConnections.length === 1 ? "" : "s"}</span></div>${compatibleRows(openConnections)}</section>`,
       ].join("");
       renderModelStatus();
+      updateSaveButtons();
     }
 
     function selectedModelTarget() {
@@ -1486,6 +1515,7 @@
       activeSpeakerIndex = profile.speakers.length - 1;
       profilesDirty = true;
       renderSpeakerCards(profile);
+      updateSaveButtons();
     }
 
     function removeSpeaker(index) {
@@ -1496,6 +1526,7 @@
       activeSpeakerIndex = Math.min(index, profile.speakers.length - 1);
       profilesDirty = true;
       renderSpeakerCards(profile);
+      updateSaveButtons();
     }
 
     function loadEpisodeProfileForm(id) {
@@ -1506,12 +1537,10 @@
       $("epName").value = profile.name;
       $("epDescription").value = profile.description || "";
       $("epSpeakerProfile").innerHTML = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === profile.speakerProfileId)).join("");
-      $("epSegments").value = profile.numSegments;
       $("epOutlineModel").innerHTML = textModelOptions(profile.outlineModel);
       $("epTranscriptModel").innerHTML = textModelOptions(profile.transcriptModel);
       $("epLanguage").innerHTML = languageOptions(profile.language);
       $("epMinutes").value = profile.targetMinutes;
-      $("epBriefing").value = profile.defaultBriefing;
     }
 
     function syncEpisodeProfileForm() {
@@ -1520,12 +1549,10 @@
       profile.name = $("epName").value;
       profile.description = $("epDescription").value;
       profile.speakerProfileId = $("epSpeakerProfile").value;
-      profile.numSegments = Number($("epSegments").value);
       profile.outlineModel = $("epOutlineModel").value;
       profile.transcriptModel = $("epTranscriptModel").value;
       profile.language = $("epLanguage").value;
       profile.targetMinutes = Number($("epMinutes").value);
-      profile.defaultBriefing = $("epBriefing").value;
     }
 
     function addSpeakerProfile(copy) {
@@ -1540,26 +1567,22 @@
       state.profiles.speakerProfiles.push(base);
       profilesDirty = true;
       activeSpeakerProfileId = base.id;
-      activeProfileSection = "speakers";
       renderProfileOptions();
-      renderProfileSections();
     }
 
     function addEpisodeProfile(copy) {
       syncEpisodeProfileForm();
       const current = state.profiles.episodeProfiles.find((item) => item.id === activeEpisodeProfileId);
       const base = copy ? structuredClone(current) : {
-        name: "New Episode Format", description: "", speakerProfileId: state.profiles.speakerProfiles[0]?.id || "", numSegments: 5,
-        outlineModel: "mimo-v2.5-pro", transcriptModel: "mimo-v2.5-pro", language: "es-419", targetMinutes: 18, defaultBriefing: "Required",
+        name: "New Episode Format", description: "", speakerProfileId: state.profiles.speakerProfiles[0]?.id || "",
+        outlineModel: "mimo-v2.5-pro", transcriptModel: "mimo-v2.5-pro", language: "es-419", targetMinutes: 18,
       };
       base.id = crypto.randomUUID();
       if (copy) base.name += " — Copy";
       state.profiles.episodeProfiles.push(base);
       profilesDirty = true;
       activeEpisodeProfileId = base.id;
-      activeProfileSection = "episodes";
       renderProfileOptions();
-      renderProfileSections();
     }
 
     async function saveProfiles() {
@@ -1642,8 +1665,6 @@
       if ($("buildKnowledge").value === id) $("buildKnowledge").value = "";
       if (currentEpisode?.knowledgeBaseId === id) currentEpisode.knowledgeBaseId = "";
       if (activePlan?.knowledgeBaseId === id) { activePlan.knowledgeBaseId = ""; $("planKnowledge").value = ""; }
-      if (chatThread?.kbId === id) chatThread.kbId = "";
-      if (transcriptChatThread?.kbId === id) transcriptChatThread.kbId = "";
       if (plannerChatThread?.kbId === id) plannerChatThread.kbId = "";
       await refreshState(currentEpisode?.id);
       notify(`Deleted ${item.name}. Cleared ${result.cleared.plans} plan(s), ${result.cleared.episodes} episode(s), and ${result.cleared.chats} chat(s).`, "ok");
@@ -1673,6 +1694,13 @@
       $("planKnowledge").innerHTML = option("", "None", !kb) + state.knowledgeBases.map((item) => option(item.id, item.name, item.id === kb)).join("");
       const speaker = planDirty ? $("planSpeakerProfile").value : activePlan?.speakerProfileId || $("planSpeakerProfile").value || state.profiles.speakerProfiles[0]?.id || "";
       $("planSpeakerProfile").innerHTML = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === speaker)).join("");
+      const episodeFormat = planDirty ? $("planEpisodeFormat").value : activePlan?.episodeFormatId || "";
+      $("planEpisodeFormat").innerHTML = option("", "Create automatically from this plan", !episodeFormat)
+        + state.profiles.episodeProfiles.filter((item) => item.speakerProfileId === speaker).map((item) => option(item.id, item.name, item.id === episodeFormat)).join("");
+      const language = planDirty ? $("planLanguage").value : activePlan?.language || "es-419";
+      $("planLanguage").innerHTML = languageOptions(language);
+      if (!planDirty) $("planMinutes").value = activePlan?.targetMinutes ?? 18;
+      $("planAutoFormatFields").hidden = Boolean($("planEpisodeFormat").value);
       const model = planDirty ? $("planModel").value : activePlan?.planningModel || $("planModel").value || "";
       $("planModel").innerHTML = textModelOptions(model);
       const chatModel = plannerChatThread?.lastModel || $("plannerChatModel").value || model;
@@ -1680,10 +1708,10 @@
       const chatKb = plannerChatThread?.kbId || $("plannerChatKb").value || "";
       $("plannerChatKb").innerHTML = option("", "None", !chatKb) + state.knowledgeBases.map((item) => option(item.id, item.name, item.id === chatKb)).join("");
       renderPlannerChatHistory();
-      $("savePlan").disabled = !activePlan;
       $("duplicatePlan").disabled = !activePlan;
       $("deletePlan").disabled = !activePlan;
       $("generatePlan").disabled = !activePlan;
+      updateSaveButtons();
       renderPodcastAssistant();
     }
 
@@ -1700,6 +1728,10 @@
       $("planSelect").value = plan.id;
       $("planKnowledge").value = plan.knowledgeBaseId;
       $("planSpeakerProfile").value = plan.speakerProfileId;
+      $("planEpisodeFormat").value = plan.episodeFormatId || "";
+      $("planLanguage").value = plan.language || "es-419";
+      $("planMinutes").value = plan.targetMinutes ?? 18;
+      $("planAutoFormatFields").hidden = Boolean($("planEpisodeFormat").value);
       $("planModel").value = plan.planningModel;
       renderPlanCollections();
       planDirty = false;
@@ -1712,23 +1744,19 @@
       plan.name = $("planName").value;
       plan.knowledgeBaseId = $("planKnowledge").value;
       plan.speakerProfileId = $("planSpeakerProfile").value;
+      plan.episodeFormatId = $("planEpisodeFormat").value;
       plan.planningModel = $("planModel").value;
+      plan.language = $("planLanguage").value;
+      plan.targetMinutes = Number($("planMinutes").value);
       plan.episodeCount = $("planEpisodeCount").value.trim() ? Number($("planEpisodeCount").value) : null;
       plan.audience = $("planAudience").value;
       plan.goal = $("planGoal").value;
       plan.theme = $("planTheme").value;
-      document.querySelectorAll("[data-format-draft-id]").forEach((card) => {
-        const draft = plan.formatDrafts.find((item) => item.id === card.dataset.formatDraftId);
-        if (!draft) return;
-        for (const input of card.querySelectorAll("[data-draft-field]")) draft[input.dataset.draftField] = ["numSegments", "targetMinutes"].includes(input.dataset.draftField) ? Number(input.value) : input.value;
-      });
       document.querySelectorAll("[data-planned-episode-id]").forEach((card) => {
         const episode = plan.episodes.find((item) => item.id === card.dataset.plannedEpisodeId);
         if (!episode) return;
         for (const input of card.querySelectorAll("[data-episode-field]")) episode[input.dataset.episodeField] = input.dataset.episodeField === "keyPoints" ? input.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : input.value;
-        const format = card.querySelector("[data-episode-format]")?.value || "";
-        episode.formatDraftId = format.startsWith("draft:") ? format.slice(6) : "";
-        episode.episodeProfileId = format.startsWith("saved:") ? format.slice(6) : "";
+        episode.episodeProfileId = card.querySelector("[data-episode-format]")?.value || "";
       });
       return plan;
     }
@@ -1761,7 +1789,7 @@
     async function createNewPlan(copy = false) {
       if (planDirty && !confirm("Discard unsaved plan changes?")) return;
       const source = copy && activePlan ? capturePlanDraft() : {};
-      const body = copy ? { name: `${source.name} — Copy`, knowledgeBaseId: source.knowledgeBaseId, speakerProfileId: source.speakerProfileId, planningModel: source.planningModel, theme: source.theme, audience: source.audience, goal: source.goal, episodeCount: source.episodeCount } : {};
+      const body = copy ? { name: `${source.name} — Copy`, knowledgeBaseId: source.knowledgeBaseId, speakerProfileId: source.speakerProfileId, episodeFormatId: source.episodeFormatId, planningModel: source.planningModel, language: source.language, targetMinutes: source.targetMinutes, theme: source.theme, audience: source.audience, goal: source.goal, episodeCount: source.episodeCount } : {};
       const data = await api("/api/plans", { method: "POST", body: JSON.stringify(body) });
       await refreshPlanIndex();
       loadPlanForm(data.plan);
@@ -1780,25 +1808,17 @@
     async function generateActivePlan() {
       if (!activePlan) throw new Error("Create or select a plan first.");
       await saveActivePlan();
-      const replaceExisting = Boolean(activePlan.formatDrafts.length || activePlan.episodes.length);
-      if (replaceExisting && !confirm("Replace current generated Episode Format drafts and planned episodes? Saved formats and episodes remain.")) return;
-      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/generate`, { method: "POST", body: JSON.stringify({ generateFormats: $("planGenerateFormats").checked, formatCount: Number($("planFormatCount").value), replaceExisting }) });
+      const replaceExisting = Boolean(activePlan.episodes.length);
+      if (replaceExisting && !confirm("Replace the current planned episode list? Created episode drafts stay saved.")) return;
+      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/generate`, { method: "POST", body: JSON.stringify({ replaceExisting }) });
+      state.profiles = data.profiles;
+      renderProfileOptions();
+      renderBuildOptions();
       loadPlanForm(data.plan);
-      activePlannerSection = "format-drafts";
+      activePlannerSection = "episodes";
       renderPlannerSections();
       await refreshPlanIndex();
       notify("Content plan generated.", "ok");
-    }
-
-    function renderFormatBulkControls() {
-      const unsaved = new Set((activePlan?.formatDrafts || []).filter((draft) => !draft.savedEpisodeProfileId).map((draft) => draft.id));
-      const eligible = [...document.querySelectorAll("[data-format-check]")].filter((checkbox) => unsaved.has(checkbox.dataset.formatCheck));
-      const selected = eligible.filter((checkbox) => checkbox.checked).length;
-      $("selectAllUnsavedFormats").disabled = eligible.length === 0;
-      $("selectAllUnsavedFormats").checked = eligible.length > 0 && selected === eligible.length;
-      $("selectAllUnsavedFormats").indeterminate = selected > 0 && selected < eligible.length;
-      $("saveAllUnsavedFormats").disabled = unsaved.size === 0;
-      $("saveSelectedFormats").disabled = !document.querySelector("[data-format-check]:checked");
     }
 
     function showPlannedEpisode(id) {
@@ -1811,42 +1831,28 @@
     function renderPlanCollections() {
       const plan = activePlan;
       if (!plan) {
-        $("planFormatDrafts").innerHTML = '<p class="muted">Create or select a plan.</p>';
         $("plannedEpisodes").innerHTML = '<p class="muted">Create or select a plan.</p>';
         $("plannedEpisodeSidebar").innerHTML = "";
-        renderFormatBulkControls();
         return;
       }
-      activeFormatDraftId = plan.formatDrafts.some((draft) => draft.id === activeFormatDraftId) ? activeFormatDraftId : plan.formatDrafts[0]?.id || "";
-      $("planFormatDrafts").innerHTML = plan.formatDrafts.length ? plan.formatDrafts.map((draft) => `<div class="plan-card" data-format-draft-id="${escapeHtml(draft.id)}">
-        <div class="plan-card-head"><h3><label><input type="checkbox" data-format-check="${escapeHtml(draft.id)}"> ${escapeHtml(draft.name)}</label></h3><div class="actions" style="margin:0"><button type="button" data-focus-format="${escapeHtml(draft.id)}"${draft.id === activeFormatDraftId ? " disabled" : ""}>${draft.id === activeFormatDraftId ? "Assistant focused" : "Focus assistant"}</button><span class="badge">${draft.savedEpisodeProfileId ? `Saved as ${escapeHtml(draft.savedEpisodeProfileId)}` : "Unsaved"}</span></div></div>
-        <div class="grid"><label class="full" data-help="Identifies this proposed reusable structure.">Name<input data-draft-field="name" value="${escapeHtml(draft.name)}"></label><label class="full" data-help="Explains when this format fits an episode.">Description<textarea data-draft-field="description">${escapeHtml(draft.description)}</textarea></label>
-        <label data-help="Provides hosts and delivery behavior.">Speaker Profile<select data-draft-field="speakerProfileId">${state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === draft.speakerProfileId)).join("")}</select></label><label data-help="Defines required episode sections.">Segments<input type="number" min="3" max="20" data-draft-field="numSegments" value="${draft.numSegments}"></label>
-        <label data-help="Creates outlines for this format.">Outline model<select data-draft-field="outlineModel">${textModelOptions(draft.outlineModel)}</select></label><label data-help="Writes scripts from approved outlines.">Transcript model<select data-draft-field="transcriptModel">${textModelOptions(draft.transcriptModel)}</select></label>
-        <label data-help="Controls transcript language and compatible voices.">Language<select data-draft-field="language">${languageOptions(draft.language)}</select></label><label data-help="Sets duration and transcript-length expectations.">Minutes<input type="number" min="5" max="60" data-draft-field="targetMinutes" value="${draft.targetMinutes}"></label><label class="full" data-help="Reusable editorial instructions for episodes using this format.">Default briefing<textarea data-draft-field="defaultBriefing">${escapeHtml(draft.defaultBriefing)}</textarea></label></div>
-        <div class="actions"><button data-save-format="${escapeHtml(draft.id)}" data-overwrite="${draft.savedEpisodeProfileId ? "true" : "false"}">${draft.savedEpisodeProfileId ? "Update Format" : "Save Format"}</button></div></div>`).join("") : '<p class="muted">Generate plan to create format drafts.</p>';
-      renderFormatBulkControls();
       activePlannedEpisodeId = plan.episodes.some((episode) => episode.id === activePlannedEpisodeId) ? activePlannedEpisodeId : plan.episodes[0]?.id || "";
       $("plannedEpisodeSidebar").innerHTML = plan.episodes.map((episode) => `<button type="button" data-planned-nav="${escapeHtml(episode.id)}" class="${episode.id === activePlannedEpisodeId ? "active" : ""}" title="${escapeHtml(episode.title)}">${episode.number}. ${escapeHtml(episode.title)}</button>`).join("");
       $("plannedEpisodes").innerHTML = plan.episodes.length ? plan.episodes.map((episode) => {
-        const selected = episode.formatDraftId ? `draft:${episode.formatDraftId}` : episode.episodeProfileId ? `saved:${episode.episodeProfileId}` : "";
-        const draftOptions = plan.formatDrafts.map((item) => option(`draft:${item.id}`, `Draft — ${item.name}`, selected === `draft:${item.id}`)).join("");
-        const savedOptions = state.profiles.episodeProfiles.filter((item) => item.speakerProfileId === plan.speakerProfileId).map((item) => option(`saved:${item.id}`, `Saved — ${item.name}`, selected === `saved:${item.id}`)).join("");
-        return `<div class="plan-card" data-planned-episode-id="${escapeHtml(episode.id)}"${episode.id === activePlannedEpisodeId ? "" : " hidden"}><div class="plan-card-head"><h3><label><input type="checkbox" data-plan-episode-check="${escapeHtml(episode.id)}"> ${episode.number}. ${escapeHtml(episode.title)}</label></h3><span class="badge">${episode.createdEpisodeId ? "Draft created" : "Not created"}</span></div>
-          <div class="grid"><label class="full" data-help="Names the future saved episode.">Title<input data-episode-field="title" value="${escapeHtml(episode.title)}"></label><label class="full" data-help="Defines this episode's unique story or argument.">Premise<textarea data-episode-field="premise">${escapeHtml(episode.premise)}</textarea></label><label class="full" data-help="Prevents overlap by limiting source material assigned here.">Knowledge scope<textarea data-episode-field="knowledgeScope">${escapeHtml(episode.knowledgeScope)}</textarea></label><label class="full" data-help="Lists facts or ideas the transcript must cover.">Key points, one per line<textarea data-episode-field="keyPoints">${escapeHtml(episode.keyPoints.join("\n"))}</textarea></label><label class="full" data-help="States what listeners should understand or do afterward.">Listener outcome<textarea data-episode-field="listenerOutcome">${escapeHtml(episode.listenerOutcome)}</textarea></label><label class="full" data-help="Supplies structure, speakers, models, language, and duration.">Episode Format<select data-episode-format>${option("", "Select saved format", !selected)}${draftOptions}${savedOptions}</select></label><label class="full" data-help="Adds episode-specific editorial constraints.">Additional instructions<textarea data-episode-field="additionalInstructions">${escapeHtml(episode.additionalInstructions)}</textarea></label><label class="full" data-help="Adds creative script direction without replacing provider rules.">Transcript Prompt Guidance<textarea data-episode-field="transcriptPromptGuidance">${escapeHtml(episode.transcriptPromptGuidance)}</textarea></label></div>
-          <div class="actions"><button data-create-episode="${escapeHtml(episode.id)}"${episode.createdEpisodeId ? " disabled" : ""}>Create draft</button>${episode.createdEpisodeId ? `<button data-open-created="${escapeHtml(episode.createdEpisodeId)}">Open in Transcript Generator</button>` : ""}</div></div>`;
+        const selected = episode.episodeProfileId || plan.episodeFormatId || "";
+        const savedOptions = state.profiles.episodeProfiles.filter((item) => item.speakerProfileId === plan.speakerProfileId).map((item) => option(item.id, item.name, item.id === selected)).join("");
+        const detailed = Boolean(episode.premise.trim());
+        return `<div class="plan-card" data-planned-episode-id="${escapeHtml(episode.id)}"${episode.id === activePlannedEpisodeId ? "" : " hidden"}><div class="plan-card-head"><h3><label class="bulk-check"><input type="checkbox" data-plan-episode-check="${escapeHtml(episode.id)}"> ${episode.number}. ${escapeHtml(episode.title)}</label></h3><div class="actions" style="margin:0"><span class="badge">${detailed ? "Detailed" : "Titles only"}</span><span class="badge">${episode.createdEpisodeId ? "Draft created" : "Not created"}</span></div></div>
+          <div class="grid"><label class="full" data-help="Names the future saved episode.">Title<input data-episode-field="title" value="${escapeHtml(episode.title)}"></label><label class="full" data-help="Defines this episode's unique story or argument.">Premise<textarea data-episode-field="premise">${escapeHtml(episode.premise)}</textarea></label><label class="full" data-help="Prevents overlap by limiting source material assigned here.">Knowledge scope<textarea data-episode-field="knowledgeScope">${escapeHtml(episode.knowledgeScope)}</textarea></label><label class="full" data-help="Lists facts or ideas the transcript must cover.">Key points, one per line<textarea data-episode-field="keyPoints">${escapeHtml(episode.keyPoints.join("\n"))}</textarea></label><label class="full" data-help="States what listeners should understand or do afterward.">Listener outcome<textarea data-episode-field="listenerOutcome">${escapeHtml(episode.listenerOutcome)}</textarea></label><label class="full" data-help="Supplies structure, speakers, models, language, and duration.">Episode Format<select data-episode-format>${option("", "Select saved format", !selected)}${savedOptions}</select></label><label class="full" data-help="Adds episode-specific editorial constraints.">Additional instructions<textarea data-episode-field="additionalInstructions">${escapeHtml(episode.additionalInstructions)}</textarea></label><label class="full" data-help="Adds creative script direction without replacing provider rules.">Transcript Prompt Guidance<textarea data-episode-field="transcriptPromptGuidance">${escapeHtml(episode.transcriptPromptGuidance)}</textarea></label></div>
+          <div class="actions">${detailed ? "" : `<button data-detail-episode="${escapeHtml(episode.id)}">Generate details</button>`}<button data-create-episode="${escapeHtml(episode.id)}"${episode.createdEpisodeId ? " disabled" : ""}>Create draft</button>${episode.createdEpisodeId ? `<button data-open-created="${escapeHtml(episode.createdEpisodeId)}">Open in Transcript Generator</button>` : ""}</div></div>`;
       }).join("") : '<p class="muted">Generate plan to create episodes.</p>';
     }
 
-    async function saveFormatDrafts(ids, overwriteExisting = false) {
-      if (!ids.length) throw new Error("Select at least one format draft.");
+    async function generatePlanEpisodeDetails(id) {
+      if (!id) throw new Error("Select a planned episode first.");
       await saveActivePlan();
-      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/save-formats`, { method: "POST", body: JSON.stringify({ formatDraftIds: ids, overwriteExisting }) });
-      state.profiles = data.profiles;
-      profilesDirty = false;
+      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/detail-episode`, { method: "POST", body: JSON.stringify({ plannedEpisodeId: id }) });
       loadPlanForm(data.plan);
-      renderProfileOptions(); renderBuildOptions();
-      notify(data.skipped?.length ? "Already-saved formats skipped." : "Episode Formats saved.", data.skipped?.length ? "warning" : "ok");
+      notify("Episode details generated.", "ok");
     }
 
     async function createEpisodeDrafts(ids) {
@@ -1864,9 +1870,6 @@
       rememberViewSelection("episodeId", "");
       transcriptPromptState = null;
       transcriptPromptDirty = false;
-      transcriptChatThread = null;
-      transcriptChatThreads = [];
-      activeTranscriptChatThreadId = "";
       $("savedEpisodeSelect").value = "";
       $("ttsEpisodeSelect").value = "";
       $("ttsLanguageOverride").value = "";
@@ -1879,7 +1882,6 @@
       $("episodePlayerActions").innerHTML = "";
       updateWordCount();
       renderTranscriptSections();
-      renderTranscriptChatMessages();
       renderTtsView();
       renderJobIndicators();
       if (!preserveDirty) {
@@ -1909,7 +1911,6 @@
       }
       updateWordCount();
       await resolveTranscriptPrompt();
-      await loadTranscriptChatThreads();
       renderTtsView();
       renderJobIndicators();
       renderPodcastAssistant();
@@ -1947,10 +1948,11 @@
     }
 
     async function saveEpisode() {
+      if (!currentEpisode) throw new Error("Create the episode from the Content Planner first.");
       const value = await api("/api/episodes", {
         method: "POST",
         body: JSON.stringify({
-          id: currentEpisode?.id,
+          id: currentEpisode.id,
           name: $("episodeName").value,
           episodeProfileId: $("buildEpisodeProfile").value,
           knowledgeBaseId: $("buildKnowledge").value,
@@ -1966,7 +1968,7 @@
     }
 
     async function saveTranscript() {
-      if (!currentEpisode) await saveEpisode();
+      if (!currentEpisode) throw new Error("Create the episode from the Content Planner first.");
       currentEpisode = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcript").value }) });
       episodeDraftDirty = false;
       transcriptDirty = false;
@@ -2066,7 +2068,8 @@
       } else {
         $("episodePlayerActions").innerHTML = "";
       }
-      $("renderAudio").disabled = errors.length > 0 || !currentEpisode.transcript;
+      const episodeBusy = episodeIsBusy();
+      $("renderAudio").disabled = episodeBusy || errors.length > 0 || !currentEpisode.transcript;
     }
 
     function renderedEpisodes() {
@@ -2204,7 +2207,7 @@
       const episodes = renderedEpisodes();
       const audio = $("playerAudio");
       $("playerLibrary").innerHTML = !state
-        ? '<p class="muted">Loading rendered episodesâ€¦</p>'
+        ? '<p class="muted">Loading rendered episodes…</p>'
         : episodes.length ? episodes.map((episode) => {
           const current = episode.id === playingEpisodeId;
           const queued = playerQueue.includes(episode.id);
@@ -2378,128 +2381,6 @@
         : '<p class="muted">Select an Episode Format to resolve provider rules.</p>';
       $("transcriptLockedPrompt").value = transcriptPromptState?.lockedPrompt || "";
 
-      const models = discoveredModels("text");
-      const profileModel = state?.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value)?.transcriptModel || "";
-      const selectedModel = transcriptChatThread?.lastModel || $("transcriptChatModel").value || profileModel;
-      let modelOptions = models.map((item) => option(item.id, item.label, item.id === selectedModel)).join("");
-      if (selectedModel && !models.some((item) => item.id === selectedModel)) modelOptions += option(selectedModel, `${selectedModel} · unavailable`, true, true);
-      $("transcriptChatModel").innerHTML = modelOptions || option("", "No text models available", true, true);
-
-      const selectedKb = transcriptChatThread?.kbId ?? currentEpisode?.knowledgeBaseId ?? $("buildKnowledge").value;
-      $("transcriptChatKb").innerHTML = option("", "None", !selectedKb)
-        + (state?.knowledgeBases || []).map((item) => option(item.id, `${item.name} (${item.characters.toLocaleString()} chars)`, item.id === selectedKb)).join("");
-      $("transcriptChatHistory").innerHTML = [option("", "New chat", !activeTranscriptChatThreadId), ...transcriptChatThreads.map((thread) => option(thread.threadId, `${thread.title || "Untitled"} (${thread.messageCount || 0})`, thread.threadId === activeTranscriptChatThreadId))].join("");
-
-      const disabled = !currentEpisode || transcriptChatBusy || !$("transcriptChatModel").value;
-      $("transcriptChatInput").disabled = disabled;
-      $("transcriptChatSend").disabled = disabled || !$("transcriptChatInput").value.trim();
-      $("transcriptChatDelete").disabled = transcriptChatBusy || !activeTranscriptChatThreadId;
-    }
-
-    function renderTranscriptChatMessages() {
-      if (!transcriptChatThread?.messages?.length) {
-        $("transcriptChatMessages").innerHTML = '<div class="chat-msg system">Paste documentation or describe desired transcript guidance.</div>';
-        return;
-      }
-      $("transcriptChatMessages").innerHTML = transcriptChatThread.messages.map((message, index) => {
-        if (message.role === "user") return `<div class="chat-msg user" style="white-space:pre-wrap">${escapeHtml(message.content)}</div>`;
-        if (message.role === "system") return `<div class="chat-msg system">${escapeHtml(message.content)}</div>`;
-        try {
-          const parsed = JSON.parse(message.content);
-          let html = `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>`;
-          if (parsed.questions?.length) html += `<div class="chat-questions"><ol>${parsed.questions.map((question) => `<li>${escapeHtml(question)}</li>`).join("")}</ol></div>`;
-          const guidance = parsed.proposal?.transcriptPromptGuidance;
-          if (guidance) html += `<div class="chat-proposal"><strong>Revised guidance</strong><div class="chat-proposal-diff">${escapeHtml(guidance.slice(0, 600))}${guidance.length > 600 ? "…" : ""}</div><div class="actions" style="margin-top:8px"><button class="primary" data-use-transcript-prompt="${index}">Use guidance</button></div></div>`;
-          return html;
-        } catch {
-          return `<div class="chat-msg assistant">${escapeHtml(message.content)}</div>`;
-        }
-      }).join("");
-      $("transcriptChatMessages").scrollTop = $("transcriptChatMessages").scrollHeight;
-    }
-
-    async function loadTranscriptChatThreads() {
-      if (!currentEpisode) {
-        transcriptChatThreads = [];
-        activeTranscriptChatThreadId = "";
-        transcriptChatThread = null;
-        renderTranscriptPrompt();
-        return renderTranscriptChatMessages();
-      }
-      const data = await api(`/api/chats?kind=transcript&episodeId=${encodeURIComponent(currentEpisode.id)}`);
-      transcriptChatThreads = data.chats || [];
-      if (activeTranscriptChatThreadId && !transcriptChatThreads.some((thread) => thread.threadId === activeTranscriptChatThreadId)) activeTranscriptChatThreadId = "";
-      renderTranscriptPrompt();
-      if (!activeTranscriptChatThreadId) {
-        transcriptChatThread = null;
-        renderTranscriptChatMessages();
-      }
-    }
-
-    async function loadTranscriptChatThread() {
-      if (!activeTranscriptChatThreadId) {
-        transcriptChatThread = null;
-        renderTranscriptPrompt();
-        return renderTranscriptChatMessages();
-      }
-      transcriptChatThread = await api(`/api/chat?threadId=${encodeURIComponent(activeTranscriptChatThreadId)}`);
-      renderTranscriptPrompt();
-      renderTranscriptChatMessages();
-    }
-
-    async function sendTranscriptChatMessage() {
-      if (transcriptChatBusy) return;
-      if (!currentEpisode || episodeDraftDirty || transcriptPromptDirty) await saveEpisode();
-      const text = $("transcriptChatInput").value.trim();
-      if (!text) return;
-      transcriptChatBusy = true;
-      $("transcriptChatBusy").hidden = false;
-      $("transcriptChatInput").value = "";
-      renderTranscriptPrompt();
-      try {
-        const sent = await api("/api/chat", {
-          method: "POST",
-          body: JSON.stringify({
-            mode: "transcript",
-            threadId: activeTranscriptChatThreadId,
-            episodeId: currentEpisode.id,
-            model: $("transcriptChatModel").value,
-            text,
-            kbId: $("transcriptChatKb").value || "",
-            transcriptPromptGuidance: $("transcriptPromptGuidance").value,
-          }),
-        });
-        activeTranscriptChatThreadId = sent.threadId;
-        await loadTranscriptChatThreads();
-        await loadTranscriptChatThread();
-      } finally {
-        transcriptChatBusy = false;
-        $("transcriptChatBusy").hidden = true;
-        renderTranscriptPrompt();
-      }
-    }
-
-    async function deleteTranscriptChatThread() {
-      if (!activeTranscriptChatThreadId || !confirm("Delete this transcript prompt chat?")) return;
-      await api(`/api/chat?threadId=${encodeURIComponent(activeTranscriptChatThreadId)}`, { method: "DELETE" });
-      activeTranscriptChatThreadId = "";
-      transcriptChatThread = null;
-      await loadTranscriptChatThreads();
-      renderTranscriptChatMessages();
-    }
-
-    function useTranscriptPromptProposal(messageIndex) {
-      const message = transcriptChatThread?.messages?.[messageIndex];
-      if (!message) return;
-      try {
-        const guidance = JSON.parse(message.content).proposal?.transcriptPromptGuidance;
-        if (!guidance) return;
-        $("transcriptPromptGuidance").value = guidance;
-        transcriptPromptDirty = true;
-        episodeDraftDirty = true;
-        resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error"));
-        notify("Assistant guidance loaded. Review and save it.", "ok");
-      } catch {}
     }
 
     async function applyLatestProfiles() {
@@ -2569,8 +2450,8 @@
 
     document.querySelectorAll("nav button").forEach((button) => button.addEventListener("click", () => { location.hash = button.dataset.view; }));
     window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
-    $("speakerProfileSelect").addEventListener("change", (event) => { syncSpeakerForm(); loadSpeakerForm(event.target.value); loadChatThread(); });
-    $("episodeProfileSelect").addEventListener("change", (event) => { syncEpisodeProfileForm(); loadEpisodeProfileForm(event.target.value); loadChatThread(); });
+    $("speakerProfileSelect").addEventListener("change", (event) => { syncSpeakerForm(); loadSpeakerForm(event.target.value); });
+    $("episodeProfileSelect").addEventListener("change", (event) => { syncEpisodeProfileForm(); loadEpisodeProfileForm(event.target.value); });
     $("spVoiceModel").addEventListener("change", () => { syncSpeakerForm(); renderSpeakerCards(state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId)); });
     $("newSpeakerProfile").addEventListener("click", () => addSpeakerProfile(false));
     $("duplicateSpeakerProfile").addEventListener("click", () => addSpeakerProfile(true));
@@ -2597,18 +2478,14 @@
       state.profiles.speakerProfiles = state.profiles.speakerProfiles.filter((item) => item.id !== activeSpeakerProfileId);
       profilesDirty = true;
       activeSpeakerProfileId = state.profiles.speakerProfiles[0]?.id || "";
-      activeProfileSection = "speakers";
       renderProfileOptions();
-      renderProfileSections();
     }));
     $("deleteEpisodeProfile").addEventListener("click", guard(async () => {
       if (state.episodes.some((item) => item.episodeProfileId === activeEpisodeProfileId)) throw new Error("Episode Format is used by a saved episode.");
       state.profiles.episodeProfiles = state.profiles.episodeProfiles.filter((item) => item.id !== activeEpisodeProfileId);
       profilesDirty = true;
       activeEpisodeProfileId = state.profiles.episodeProfiles[0]?.id || "";
-      activeProfileSection = "episodes";
       renderProfileOptions();
-      renderProfileSections();
     }));
     $("saveProfiles").addEventListener("click", guard(saveProfiles));
     $("saveEpisodeFormats").addEventListener("click", guard(saveProfiles));
@@ -2616,6 +2493,7 @@
     $("saveConfig").addEventListener("click", guard(saveConfig));
     $("view-config").addEventListener("input", (event) => {
       configDirty = true;
+      updateSaveButtons();
       if (event.target.dataset.field === "apiKey" && event.target.value.trim()) {
         const row = event.target.closest("[data-provider-id], [data-compatible-id]");
         const target = row?.dataset.providerId ? configState.providers[row.dataset.providerId] : configState.compatibleConnections.find((connection) => connection.id === row?.dataset.compatibleId);
@@ -2633,23 +2511,10 @@
     $("ttsLanguageOverride").addEventListener("change", renderTtsView);
     $("transcriptScriptTab").addEventListener("click", () => { activeTranscriptSection = "script"; rememberViewSelection("transcriptSection", "script"); renderTranscriptSections(); });
     $("transcriptPromptTab").addEventListener("click", guard(async () => { activeTranscriptSection = "prompt"; rememberViewSelection("transcriptSection", "prompt"); await resolveTranscriptPrompt(); renderTranscriptSections(); }));
-    $("transcriptPromptGuidance").addEventListener("input", () => { transcriptPromptDirty = true; episodeDraftDirty = true; renderTranscriptPrompt(); });
-    $("resetTranscriptPrompt").addEventListener("click", () => { $("transcriptPromptGuidance").value = ""; transcriptPromptDirty = true; episodeDraftDirty = true; resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); });
+    $("transcriptPromptGuidance").addEventListener("input", () => { transcriptPromptDirty = true; episodeDraftDirty = true; renderTranscriptPrompt(); updateSaveButtons(); });
+    $("resetTranscriptPrompt").addEventListener("click", () => { $("transcriptPromptGuidance").value = ""; transcriptPromptDirty = true; episodeDraftDirty = true; updateSaveButtons(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); });
     $("saveTranscriptPrompt").addEventListener("click", guard(async () => { await saveEpisode(); notify("Transcript guidance saved.", "ok"); }));
     $("generateTranscriptFromPrompt").addEventListener("click", guard(generateTranscript));
-    $("transcriptChatSend").addEventListener("click", guard(sendTranscriptChatMessage));
-    $("transcriptChatInput").addEventListener("input", renderTranscriptPrompt);
-    $("transcriptChatInput").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); guard(sendTranscriptChatMessage)(); } });
-    $("transcriptChatReset").addEventListener("click", () => { activeTranscriptChatThreadId = ""; transcriptChatThread = null; renderTranscriptPrompt(); renderTranscriptChatMessages(); });
-    $("transcriptChatDelete").addEventListener("click", guard(deleteTranscriptChatThread));
-    $("transcriptChatHistory").addEventListener("change", guard(async () => { activeTranscriptChatThreadId = $("transcriptChatHistory").value; await loadTranscriptChatThread(); }));
-    $("transcriptChatKb").addEventListener("change", () => { if (transcriptChatThread) transcriptChatThread.kbId = $("transcriptChatKb").value; });
-    $("transcriptChatModel").addEventListener("change", () => { if (transcriptChatThread) transcriptChatThread.lastModel = $("transcriptChatModel").value; });
-    $("transcriptChatMessages").addEventListener("click", (event) => { const button = event.target.closest("[data-use-transcript-prompt]"); if (button) useTranscriptPromptProposal(Number(button.dataset.useTranscriptPrompt)); });
-    $("newEpisode").addEventListener("click", () => {
-      if ((episodeDraftDirty || transcriptDirty || transcriptPromptDirty) && !confirm("Discard unsaved episode changes?")) return;
-      resetEpisodeForm();
-    });
     $("saveEpisode").addEventListener("click", guard(async () => { await saveEpisode(); notify("Episode draft saved.", "ok"); }));
     $("generateTranscript").addEventListener("click", guard(generateTranscript));
     $("saveTranscript").addEventListener("click", guard(saveTranscript));
@@ -2754,16 +2619,15 @@
     $("addCustomModel").addEventListener("click", guard(addCustomModelRow));
     $("applyModelSelection").addEventListener("click", applyModelSelection);
     for (const id of ["buildEpisodeProfile", "buildKnowledge", "episodeName", "additionalInstructions"]) {
-      $(id).addEventListener("input", () => { episodeDraftDirty = true; });
-      $(id).addEventListener("change", () => { episodeDraftDirty = true; if (id === "buildEpisodeProfile") { updateWordCount(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); } });
+      $(id).addEventListener("input", () => { episodeDraftDirty = true; updateSaveButtons(); });
+      $(id).addEventListener("change", () => { episodeDraftDirty = true; updateSaveButtons(); if (id === "buildEpisodeProfile") { updateWordCount(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); } });
     }
     $("view-speakers").addEventListener("input", (event) => {
-      if (event.target.closest("#chatPane")) return;
       if (event.target.id !== "speakerProfileSelect") profilesDirty = true;
-      updateChatDisabledState();
+      updateSaveButtons();
     });
-    $("profiles-episodes").addEventListener("input", (event) => { if (event.target.id !== "episodeProfileSelect") profilesDirty = true; });
-    $("transcript").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); });
+    $("profiles-episodes").addEventListener("input", (event) => { if (event.target.id !== "episodeProfileSelect") profilesDirty = true; updateSaveButtons(); });
+    $("transcript").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); updateSaveButtons(); });
     window.addEventListener("beforeunload", (event) => {
       if (!configDirty && !profilesDirty && !planDirty && !episodeDraftDirty && !transcriptDirty && !transcriptPromptDirty) return;
       event.preventDefault();
@@ -2778,315 +2642,15 @@
       notify(`Imported ${file.name}. Save transcript to validate it.`, "ok");
     }));
 
+    $("rightbarToggle").addEventListener("click", () => setRightbarOpen(true));
+    $("rightbarClose").addEventListener("click", () => setRightbarOpen(false));
+    $("toasts").addEventListener("click", () => setRightbarOpen(true));
+    setRightbarOpen(rightbarOpen);
+
     setView(location.hash.slice(1));
     Promise.all([loadModelCatalog(), refreshState(rememberedEpisodeId), refreshJobs()])
       .then(() => rememberedPlanId && activePlanId === rememberedPlanId && !activePlan ? loadPlan(rememberedPlanId, true) : null)
       .catch((error) => notify(error.message || String(error), "error"));
-
-    // --- Chat ---
-    function currentChatTarget() {
-      const sp = activeSpeakerProfileId;
-      return sp ? { speakerProfileId: sp } : null;
-    }
-
-    function savedChatTarget() {
-      const target = currentChatTarget();
-      if (!target) return null;
-      const sp = state?.profiles.speakerProfiles.find((p) => p.id === target.speakerProfileId);
-      if (!sp) return null;
-      return target;
-    }
-
-    function renderChatHistoryOptions() {
-      const opts = [option("", "New chat", !activeChatThreadId)];
-      opts.push(...chatThreads.map((thread) => option(thread.threadId, `${thread.title || "Untitled"} (${thread.messageCount || 0})`, thread.threadId === activeChatThreadId)));
-      $("chatHistory").innerHTML = opts.join("");
-    }
-
-    function renderChatControls() {
-      renderChatHistoryOptions();
-      const models = discoveredModels("text");
-      const selected = $("chatModel").value || state?.profiles.episodeProfiles.find((p) => p.id === activeEpisodeProfileId)?.transcriptModel || "";
-      let opts = models.map((m) => option(m.id, m.label, m.id === selected)).join("");
-      if (selected && !models.some((m) => m.id === selected)) opts += option(selected, `${selected} · unavailable`, true, true);
-      if (!opts) opts = option("", "No text models available", true, true);
-      $("chatModel").innerHTML = opts;
-
-      const kbs = state?.knowledgeBases || [];
-      const currentKb = chatThread?.kbId || "";
-      let kbOpts = option("", "None", !currentKb);
-      kbOpts += kbs.map((k) => option(k.id, `${k.name} (${k.characters.toLocaleString()} chars)`, k.id === currentKb)).join("");
-      $("chatKb").innerHTML = kbOpts;
-    }
-
-    function renderChatMessages() {
-      const container = $("chatMessages");
-      if (!chatThread || chatThread.messages.length === 0) {
-        container.innerHTML = '<div class="chat-msg system">Start a conversation to get profile suggestions.</div>';
-        return;
-      }
-      container.innerHTML = chatThread.messages.map((msg, index) => {
-        if (msg.role === "user") return `<div class="chat-msg user">${escapeHtml(msg.content)}</div>`;
-        if (msg.role === "system") return `<div class="chat-msg system">${escapeHtml(msg.content)}</div>`;
-        try {
-          const parsed = JSON.parse(msg.content);
-          return renderAssistantMessage(parsed, index);
-        } catch {
-          return `<div class="chat-msg assistant">${escapeHtml(msg.content)}</div>`;
-        }
-      }).join("");
-      container.scrollTop = container.scrollHeight;
-    }
-
-    function flattenProposal(value, prefix = "", result = {}) {
-      if (value && typeof value === "object") {
-        for (const [key, nested] of Object.entries(value)) flattenProposal(nested, prefix ? `${prefix}.${key}` : key, result);
-      } else {
-        result[prefix] = value;
-      }
-      return result;
-    }
-
-    function renderProposalDiff(type, proposal) {
-      const current = type === "speaker"
-        ? state?.profiles.speakerProfiles.find((profile) => profile.id === activeSpeakerProfileId)
-        : state?.profiles.episodeProfiles.find((profile) => profile.id === activeEpisodeProfileId);
-      const before = flattenProposal(current || {});
-      const after = flattenProposal(proposal);
-      const rows = Object.keys(after).filter((key) => key !== "id" && JSON.stringify(before[key]) !== JSON.stringify(after[key]));
-      return rows.length
-        ? rows.map((key) => `<div><strong>${escapeHtml(key)}</strong>: ${escapeHtml(JSON.stringify(before[key]) ?? "unset")} → ${escapeHtml(JSON.stringify(after[key]) ?? "unset")}</div>`).join("")
-        : "<div>No value changes.</div>";
-    }
-
-    function renderAssistantMessage(parsed, messageIndex) {
-      let html = `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>`;
-      if (parsed.questions?.length) {
-        html += `<div class="chat-questions"><strong>Questions:</strong><ol>${parsed.questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ol></div>`;
-      }
-      if (parsed.proposal?.speaker || parsed.proposal?.episode) {
-        html += `<div class="chat-proposal">`;
-        html += `<div class="chat-proposal-header"><strong>Proposed changes</strong><button type="button" class="chat-proposal-toggle" data-toggle-proposal aria-expanded="false">Expand</button></div>`;
-        html += `<div class="chat-proposal-diff">`;
-        if (parsed.proposal.speaker) html += renderProposalDiff("speaker", parsed.proposal.speaker);
-        if (parsed.proposal.episode) html += renderProposalDiff("episode", parsed.proposal.episode);
-        html += `</div>`;
-        html += `<div class="actions" style="margin-top:8px">`;
-        if (parsed.proposal.speaker) html += `<button class="primary" data-message-index="${messageIndex}" data-apply-proposal="speaker">Apply Speaker</button>`;
-        if (parsed.proposal.episode) html += `<button class="primary" data-message-index="${messageIndex}" data-apply-proposal="episode">Apply Episode</button>`;
-        html += `</div></div>`;
-      }
-      return html;
-    }
-
-    function updateChatDisabledState() {
-      const target = savedChatTarget();
-      const notice = $("chatDisabledNotice");
-      const input = $("chatInput");
-      const send = $("chatSend");
-      const targetLabel = $("chatTargetLabel");
-
-      if (!target) {
-        notice.textContent = "Save a Speaker Profile to start chatting.";
-        notice.hidden = false;
-        input.disabled = true;
-        send.disabled = true;
-        targetLabel.textContent = "";
-        $("chatReset").disabled = chatBusy;
-        $("chatDelete").disabled = chatBusy || !activeChatThreadId;
-        return false;
-      }
-
-      const sp = state.profiles.speakerProfiles.find((p) => p.id === target.speakerProfileId);
-      targetLabel.textContent = sp?.name || "?";
-      $("chatReset").disabled = chatBusy;
-      $("chatDelete").disabled = chatBusy || !activeChatThreadId;
-
-      if (profilesDirty) {
-        notice.textContent = "Save profile changes before using the assistant.";
-        notice.hidden = false;
-        input.disabled = true;
-        send.disabled = true;
-        return false;
-      }
-
-      const hasModel = $("chatModel").value;
-      if (!hasModel) {
-        notice.textContent = "No text model available. Activate a text model in Config.";
-        notice.hidden = false;
-        input.disabled = true;
-        send.disabled = true;
-        return false;
-      }
-
-      notice.hidden = true;
-      input.disabled = chatBusy;
-      send.disabled = chatBusy || !input.value.trim();
-      return true;
-    }
-
-    async function loadChatThreads(render = true) {
-      const data = await api(`/api/chats?kind=profile&speakerProfileId=${encodeURIComponent(activeSpeakerProfileId)}`);
-      chatThreads = data.chats || [];
-      if (activeChatThreadId && !chatThreads.some((thread) => thread.threadId === activeChatThreadId)) activeChatThreadId = "";
-      if (render) renderChatControls();
-    }
-
-    async function loadChatThread() {
-      const version = ++chatLoadVersion;
-      chatThread = null;
-      $("chatModel").innerHTML = "";
-      renderChatMessages();
-      await loadChatThreads(false);
-      if (!activeChatThreadId) { renderChatControls(); updateChatDisabledState(); return; }
-      try {
-        const data = await api(`/api/chat?threadId=${encodeURIComponent(activeChatThreadId)}`);
-        if (version !== chatLoadVersion) return;
-        chatThread = data;
-        renderChatMessages();
-        renderChatControls();
-        updateChatDisabledState();
-      } catch (error) {
-        if (version === chatLoadVersion) notify(error.message, "error");
-      }
-    }
-
-    async function sendChatMessage() {
-      const target = savedChatTarget();
-      if (!target || chatBusy) return;
-      if (profilesDirty) { notify("Save profile changes before using the assistant.", "error"); return; }
-      const version = chatLoadVersion;
-      const text = $("chatInput").value.trim();
-      if (!text) return;
-      const model = $("chatModel").value;
-      if (!model) { notify("Select a text model first.", "error"); return; }
-      const kbId = $("chatKb").value || "";
-      const mode = "speaker";
-
-      chatBusy = true;
-      updateChatDisabledState();
-      $("chatBusy").hidden = false;
-      $("chatBusyText").textContent = "Thinking…";
-      $("chatInput").value = "";
-
-      try {
-        const sent = await api("/api/chat", {
-          method: "POST",
-          body: JSON.stringify({
-            threadId: activeChatThreadId,
-            speakerProfileId: target.speakerProfileId,
-            text,
-            model,
-            kbId,
-            mode,
-            voiceIds: [...new Set([...mimoVoices, ...openaiVoices, ...elevenVoices.map((voice) => voice.id), ...chatterboxVoices.map((voice) => voice.id)])],
-          }),
-        });
-        activeChatThreadId = sent.threadId;
-        await loadChatThreads(false);
-        const threadData = await api(`/api/chat?threadId=${encodeURIComponent(activeChatThreadId)}`);
-        if (version !== chatLoadVersion) return;
-        chatThread = threadData;
-        renderChatMessages();
-      } catch (error) {
-        notify(error.message || String(error), "error");
-      } finally {
-        chatBusy = false;
-        $("chatBusy").hidden = true;
-        updateChatDisabledState();
-      }
-    }
-
-    async function resetChatThread() {
-      activeChatThreadId = "";
-      chatThread = null;
-      renderChatControls();
-      renderChatMessages();
-      updateChatDisabledState();
-      notify("New chat ready.", "ok");
-    }
-
-    async function deleteChatThread() {
-      if (!activeChatThreadId) return;
-      if (!confirm("Delete this chat history?")) return;
-      try {
-        await api(`/api/chat?threadId=${encodeURIComponent(activeChatThreadId)}`, { method: "DELETE" });
-        activeChatThreadId = "";
-        chatThread = null;
-        await loadChatThreads();
-        renderChatMessages();
-        updateChatDisabledState();
-        notify("Chat deleted.", "ok");
-      } catch (error) {
-        notify(error.message, "error");
-      }
-    }
-
-    async function applyChatProposal(type, messageIndex) {
-      const target = savedChatTarget();
-      if (!target || !chatThread) return;
-      if (profilesDirty) { notify("Save profile changes before applying a proposal.", "error"); return; }
-      const assistantMessage = chatThread.messages[messageIndex];
-      if (assistantMessage?.role !== "assistant") return;
-      const original = assistantMessage.context || {};
-      if (original.speakerProfileId && original.speakerProfileId !== target.speakerProfileId) {
-        const currentSp = state.profiles.speakerProfiles.find((p) => p.id === target.speakerProfileId)?.name || target.speakerProfileId;
-        const originalLabel = original.speakerProfileName || original.speakerProfileId || "unknown speaker";
-        if (!confirm(`This proposal was generated for ${originalLabel}. Apply it to ${currentSp} instead?`)) return;
-      }
-      let parsed;
-      try { parsed = JSON.parse(assistantMessage.content); } catch { return; }
-      const proposal = {};
-      if (type === "speaker" && parsed.proposal?.speaker) proposal.speaker = parsed.proposal.speaker;
-      if (type === "episode" && parsed.proposal?.episode) proposal.episode = parsed.proposal.episode;
-      if (!proposal.speaker && !proposal.episode) return;
-
-      try {
-        const result = await api("/api/chat/apply", {
-          method: "POST",
-          body: JSON.stringify({ threadId: activeChatThreadId, speakerProfileId: target.speakerProfileId, proposal }),
-        });
-        if (result.errors?.length) {
-          notify(`Apply failed: ${result.errors.join("; ")}`, "error");
-          return;
-        }
-        await refreshState();
-        const applied = [];
-        if (result.speakerApplied) applied.push("speaker");
-        if (result.episodeApplied) applied.push("episode");
-        if (result.warnings?.length) notify(`Applied ${applied.join(" and ")} profile changes with warnings: ${result.warnings.join(" ")}`, "warning");
-        else notify(`Applied ${applied.join(" and ")} profile changes.`, "ok");
-        await loadChatThread();
-      } catch (error) {
-        notify(error.message, "error");
-      }
-    }
-
-    $("chatSend").addEventListener("click", guard(sendChatMessage));
-    $("chatInput").addEventListener("input", () => { $("chatSend").disabled = chatBusy || !$("chatInput").value.trim(); });
-    $("chatInput").addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); guard(sendChatMessage)(); }
-    });
-    $("chatReset").addEventListener("click", guard(resetChatThread));
-    $("chatDelete").addEventListener("click", guard(deleteChatThread));
-    $("chatHistory").addEventListener("change", guard(async () => {
-      activeChatThreadId = $("chatHistory").value;
-      await loadChatThread();
-    }));
-    $("chatModel").addEventListener("change", updateChatDisabledState);
-    $("chatMode").addEventListener("change", updateChatDisabledState);
-    $("chatKb").addEventListener("change", () => { if (chatThread) chatThread.kbId = $("chatKb").value; });
-    $("chatMessages").addEventListener("click", (event) => {
-      const toggle = event.target.closest("[data-toggle-proposal]");
-      if (toggle) {
-        const expanded = toggle.closest(".chat-proposal").classList.toggle("expanded");
-        toggle.textContent = expanded ? "Collapse" : "Expand";
-        toggle.setAttribute("aria-expanded", String(expanded));
-        return;
-      }
-      const btn = event.target.closest("[data-apply-proposal]");
-      if (btn) guard(() => applyChatProposal(btn.dataset.applyProposal, Number(btn.dataset.messageIndex)))();
-    });
 
     function renderPlannerChatHistory() {
       if (!$("plannerChatHistory")) return;
@@ -3105,10 +2669,10 @@
           const parsed = JSON.parse(message.content);
           const proposalType = parsed.proposal ? Object.keys(parsed.proposal)[0] : "";
           const proposal = proposalType ? parsed.proposal[proposalType] : null;
-          const labels = { planPatch: "Plan setup", speakerProfile: "Speaker Profile", episodeFormat: "Episode Format", formatDraftPatches: "Generated formats", plannedEpisodePatches: "Planned episodes", episodePatch: "Episode guidance" };
+          const labels = { planPatch: "Plan setup", speakerProfile: "Speaker Profile", episodeFormat: "Episode Format", plannedEpisodePatches: "Planned episodes", episodePatch: "Episode guidance" };
           const impact = proposal?.impact && (proposal.impact.plans || proposal.impact.episodes) ? `<div class="assistant-impact">Shared by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s).</div>` : "";
           const next = parsed.nextStep;
-          const actionLabels = { generatePlan: "generate plan", saveFormats: "save formats", createEpisodes: "create episode drafts", generateTranscript: "generate transcript", generateTts: "generate TTS", openPlayer: "open Player", none: "continue" };
+          const actionLabels = { generatePlan: "generate plan", generateDetails: "generate episode details", createEpisodes: "create episode drafts", generateTranscript: "generate transcript", generateTts: "generate TTS", openPlayer: "open Player", none: "continue" };
           const nextLabel = next ? actionLabels[next.action] || "continue" : "";
           const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff"><div>${escapeHtml(JSON.stringify(proposal, null, 2))}</div></div>${impact}<div class="actions"><button data-apply-assistant="${index}" data-continue="false">Apply only</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div></div>` : "";
           const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}">${escapeHtml(nextLabel)}</button></div>` : "";
@@ -3164,7 +2728,7 @@
       openAssistantTarget(step.target);
       const ids = step.targetIds || [];
       if (step.action === "generatePlan") return generateActivePlan();
-      if (step.action === "saveFormats") return saveFormatDrafts(ids.length ? ids : (activePlan?.formatDrafts || []).filter((item) => !item.savedEpisodeProfileId).map((item) => item.id));
+      if (step.action === "generateDetails") return generatePlanEpisodeDetails(ids[0] || activePlannedEpisodeId);
       if (step.action === "createEpisodes") return createEpisodeDrafts(ids.length ? ids : (activePlan?.episodes || []).filter((item) => !item.createdEpisodeId).map((item) => item.id));
       const episodeId = ids[0] || currentEpisode?.id || activePlan?.episodes.find((item) => item.createdEpisodeId)?.createdEpisodeId || "";
       if (["generateTranscript", "generateTts", "openPlayer"].includes(step.action) && episodeId && currentEpisode?.id !== episodeId) await selectEpisode(episodeId);
@@ -3196,31 +2760,25 @@
     $("savePlan").addEventListener("click", guard(saveActivePlan));
     $("generatePlan").addEventListener("click", guard(generateActivePlan));
     document.querySelectorAll("[data-planner-section]").forEach((button) => button.addEventListener("click", () => { activePlannerSection = button.dataset.plannerSection; rememberViewSelection("plannerSection", activePlannerSection); renderPlannerSections(); }));
-    for (const id of ["planName", "planKnowledge", "planSpeakerProfile", "planModel", "planEpisodeCount", "planAudience", "planGoal", "planTheme"]) $(id).addEventListener("input", () => { if (activePlan) planDirty = true; });
-    $("planFormatDrafts").addEventListener("input", () => { planDirty = true; renderFormatBulkControls(); });
+    for (const id of ["planName", "planKnowledge", "planSpeakerProfile", "planEpisodeFormat", "planModel", "planEpisodeCount", "planLanguage", "planMinutes", "planAudience", "planGoal", "planTheme"]) $(id).addEventListener("input", () => {
+      if (activePlan) planDirty = true;
+      updateSaveButtons();
+      if (id === "planSpeakerProfile") renderPlannerOptions();
+      if (id === "planEpisodeFormat") $("planAutoFormatFields").hidden = Boolean($("planEpisodeFormat").value);
+    });
     $("plannedEpisodes").addEventListener("input", (event) => {
       planDirty = true;
+      updateSaveButtons();
       if (event.target.dataset.episodeField !== "title") return;
       const id = event.target.closest("[data-planned-episode-id]").dataset.plannedEpisodeId;
       const episode = activePlan?.episodes.find((item) => item.id === id);
       const button = $("plannedEpisodeSidebar").querySelector(`[data-planned-nav="${id}"]`);
       if (button && episode) button.textContent = `${episode.number}. ${event.target.value}`;
     });
-    $("planFormatDrafts").addEventListener("click", (event) => {
-      const focus = event.target.closest("[data-focus-format]");
-      if (focus) { activeFormatDraftId = focus.dataset.focusFormat; renderPlanCollections(); renderPodcastAssistant(); return; }
-      const button = event.target.closest("[data-save-format]");
-      if (button) guard(() => saveFormatDrafts([button.dataset.saveFormat], button.dataset.overwrite === "true"))();
-    });
-    $("selectAllUnsavedFormats").addEventListener("change", (event) => {
-      const unsaved = new Set((activePlan?.formatDrafts || []).filter((draft) => !draft.savedEpisodeProfileId).map((draft) => draft.id));
-      document.querySelectorAll("[data-format-check]").forEach((checkbox) => { if (unsaved.has(checkbox.dataset.formatCheck)) checkbox.checked = event.target.checked; });
-      renderFormatBulkControls();
-    });
-    $("saveSelectedFormats").addEventListener("click", guard(() => saveFormatDrafts([...document.querySelectorAll("[data-format-check]:checked")].map((item) => item.dataset.formatCheck))));
-    $("saveAllUnsavedFormats").addEventListener("click", guard(() => saveFormatDrafts((activePlan?.formatDrafts || []).filter((draft) => !draft.savedEpisodeProfileId).map((draft) => draft.id))));
     $("plannedEpisodeSidebar").addEventListener("click", (event) => { const button = event.target.closest("[data-planned-nav]"); if (button) showPlannedEpisode(button.dataset.plannedNav); });
     $("plannedEpisodes").addEventListener("click", (event) => {
+      const detail = event.target.closest("[data-detail-episode]");
+      if (detail) return guard(() => generatePlanEpisodeDetails(detail.dataset.detailEpisode))();
       const create = event.target.closest("[data-create-episode]");
       if (create) return guard(() => createEpisodeDrafts([create.dataset.createEpisode]))();
       const open = event.target.closest("[data-open-created]");

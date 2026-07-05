@@ -9,6 +9,7 @@ import {
   clipCacheKey,
   createPodcastServer,
   parseTranscript,
+  sanitizeProposalEpisode,
   transcriptSpeakerRule,
   transcriptToMarkdown,
   validateOutline,
@@ -57,7 +58,10 @@ function longText(label, words = 225) {
 }
 
 test("default profiles are valid", () => {
-  assert.equal(validateProfileData(structuredClone(DEFAULT_DATA)), true);
+  const profiles = structuredClone(DEFAULT_DATA);
+  assert.equal(validateProfileData(profiles), true);
+  assert.equal(profiles.episodeProfiles[0].numSegments, 5);
+  assert.equal(Object.hasOwn(profiles.episodeProfiles[0], "defaultBriefing"), false);
 });
 
 test("speaker profiles accept 1 to 4 speakers", () => {
@@ -107,6 +111,30 @@ test("speaker profiles accept 1 to 4 speakers", () => {
   spacedName.speakerProfiles[0].speakers[0].name = "  Valeria  ";
   validateProfileData(spacedName);
   assert.equal(spacedName.speakerProfiles[0].speakers[0].name, "Valeria");
+});
+
+test("assistant Episode Format proposal derives segments from target duration", () => {
+  const current = { numSegments: 20, targetMinutes: 18, defaultBriefing: "Legacy" };
+  assert.equal(sanitizeProposalEpisode({ numSegments: 99 }, current).numSegments, 5);
+  assert.equal(sanitizeProposalEpisode({ targetMinutes: 60 }, current).numSegments, 17);
+  assert.equal(sanitizeProposalEpisode({ targetMinutes: 5 }, current).numSegments, 3);
+  assert.equal(Object.hasOwn(sanitizeProposalEpisode({}, current), "defaultBriefing"), false);
+});
+
+test("saving Episode Formats derives segment count from target duration", async (t) => {
+  const { baseUrl } = await startTestServer(t, "podcast-derived-segments-");
+  let profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
+  for (const [targetMinutes, numSegments] of [[18, 5], [60, 17], [5, 3]]) {
+    profiles.episodeProfiles[0].targetMinutes = targetMinutes;
+    profiles.episodeProfiles[0].numSegments = 99;
+    profiles.episodeProfiles[0].defaultBriefing = "Legacy";
+    const response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles) });
+    const saved = await response.json();
+    assert.equal(response.status, 200, saved.error);
+    profiles = saved.profiles;
+    assert.equal(profiles.episodeProfiles[0].numSegments, numSegments);
+    assert.equal(Object.hasOwn(profiles.episodeProfiles[0], "defaultBriefing"), false);
+  }
 });
 
 test("transcript leadership follows configured speaker count", () => {
@@ -306,8 +334,6 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   response = await fetch(`${baseUrl}/api/state`);
   let state = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(state.profiles.episodeSeeds.length, 68);
-
   response = await fetch(`${baseUrl}/api/knowledge`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
@@ -491,7 +517,7 @@ test("saved episode explicitly applies latest profiles atomically", async (t) =>
   assert.equal(ttsChanged.episode.status, "transcript_ready");
   assert.equal((await readFile(join(rootDir, "data", "episodes", episode.id, "episode.mp3"), "utf8")), "existing-audio");
 
-  state.profiles.episodeProfiles[0].numSegments = 6;
+  state.profiles.episodeProfiles[0].targetMinutes = 21;
   response = await fetch(`${baseUrl}/api/profiles`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -698,7 +724,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   });
   let ttsCalls = 0;
   const ttsRequests = [];
-  let wav = silentWav(24_000, 1, 45).toString("base64");
+  let wav = silentWav(24_000, 1, 70).toString("base64");
   const fetchImpl = async (url, options = {}) => {
     if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
     if (String(url).endsWith("/chat/completions")) {
@@ -715,12 +741,18 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Grounded" }),
   });
   const knowledge = await response.json();
+  const profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
+  profiles.episodeProfiles[0].targetMinutes = 5;
+  response = await fetch(`${baseUrl}/api/profiles`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles),
+  });
+  assert.equal(response.status, 200);
   response = await fetch(`${baseUrl}/api/episodes`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
   });
   const episode = await response.json();
-  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria [${index === 0 ? "quick" : "warm"}]: Idea ${index + 1}.${index === 0 ? "[pause]\nDiego [warm]: Quick reaction." : ""}`).join("\n\n");
+  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nValeria [${index === 0 ? "quick" : "warm"}]: Idea ${index + 1}.${index === 0 ? "[pause]\nDiego [warm]: Quick reaction." : ""}`).join("\n\n");
   await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }),
   });
@@ -729,9 +761,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /MiMo preset TTS does not support Spanish/);
 
-  const profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   profiles.episodeProfiles[0].language = "en-US";
-  profiles.episodeProfiles[0].targetMinutes = 5;
   profiles.speakerProfiles[0].speakers[0].voiceId = "custom-mimo";
   profiles.speakerProfiles[0].speakers[0].accent = "British";
   profiles.speakerProfiles[0].speakers[0].mimoTemperature = 0.4;
@@ -761,8 +791,8 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
     return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
   }, 30_000);
   const job = finished.jobs.find((item) => item.episodeId === episode.id);
-  assert.equal(job.completed, 6);
-  assert.equal(ttsCalls, 6);
+  assert.equal(job.completed, 4);
+  assert.equal(ttsCalls, 4);
   assert.match(ttsRequests[0].messages[0].content, /Required spoken language: English \(United States\) \(en-US\)/);
   assert.match(ttsRequests[0].messages[0].content, /Required accent: British/);
   assert.match(ttsRequests[0].messages[0].content, /more expressive delivery/);
@@ -802,7 +832,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   assert.equal(response.status, 416);
 });
 
-test("transcript prompt adds cues, supports no KB, renames placeholder, and isolates chat", { concurrency: false }, async (t) => {
+test("transcript prompt adds cues, supports no KB, and renames placeholder", { concurrency: false }, async (t) => {
   const oldMimo = process.env.MIMO_API_KEY;
   process.env.MIMO_API_KEY = "test-mimo-key";
   t.after(() => { if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo; });
@@ -813,16 +843,13 @@ test("transcript prompt adds cues, supports no KB, renames placeholder, and isol
       const request = JSON.parse(options.body);
       requests.push(request);
       const system = request.messages[0].content;
-      if (system.includes("transcript prompt editor")) {
-        return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Use restrained pauses.", questions: [], proposal: { transcriptPromptGuidance: "Use one meaningful [pause] near the opening." } }) } }] });
-      }
       if (system.includes("create grounded podcast outlines")) {
-        return Response.json({ choices: [{ message: { content: JSON.stringify({ segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Segment ${index + 1}`, purpose: "Discuss", points: ["Point"], closingBeat: "Close" })) }) } }] });
+        return Response.json({ choices: [{ message: { content: JSON.stringify({ segments: Array.from({ length: 3 }, (_, index) => ({ number: index + 1, title: `Segment ${index + 1}`, purpose: "Discuss", points: ["Point"], closingBeat: "Close" })) }) } }] });
       }
       const words = Array.from({ length: 130 }, (_, index) => `word${index}`).join(" ");
       return Response.json({ choices: [{ message: { content: JSON.stringify({
         title: "Generated Title",
-        segments: Array.from({ length: 5 }, (_, index) => ({
+        segments: Array.from({ length: 3 }, (_, index) => ({
           number: index + 1,
           title: `Segment ${index + 1}`,
           turns: [{ speaker: "Valeria", delivery: "warm", text: `${words}${index === 0 ? " [pause]" : ""}` }],
@@ -885,23 +912,6 @@ test("transcript prompt adds cues, supports no KB, renames placeholder, and isol
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /does not support SSML break tags/);
 
-  response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode: "transcript",
-      episodeId: episode.id,
-      model: "mimo-v2.5-pro",
-      text: "Use these pasted docs.",
-      transcriptPromptGuidance: episode.transcriptPromptGuidance,
-    }),
-  });
-  const chat = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(chat.message.proposal.transcriptPromptGuidance, "Use one meaningful [pause] near the opening.");
-  const transcriptChats = await (await fetch(`${baseUrl}/api/chats?kind=transcript&episodeId=${episode.id}`)).json();
-  assert.equal(transcriptChats.chats.length, 1);
-  assert.equal(transcriptChats.chats[0].lastModel, "mimo-v2.5-pro");
-  assert.equal((await (await fetch(`${baseUrl}/api/chats`)).json()).chats.length, 0);
 });
 
 test("server restart marks active jobs interrupted", { concurrency: false }, async (t) => {
@@ -1332,151 +1342,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   assert.equal(JSON.parse(ttsCalls.at(-1).options.body).language, "en");
 });
 
-test("profile assistant validates context and persists structured turns", { concurrency: false }, async (t) => {
-  const previousKeys = {
-    MIMO_API_KEY: process.env.MIMO_API_KEY,
-    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-    CHATTERBOX_API_KEY: process.env.CHATTERBOX_API_KEY,
-  };
-  process.env.MIMO_API_KEY = "test-mimo-key";
-  delete process.env.ELEVENLABS_API_KEY;
-  delete process.env.OPENAI_API_KEY;
-  delete process.env.CHATTERBOX_API_KEY;
-  t.after(() => {
-    for (const [name, value] of Object.entries(previousKeys)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  });
-
-  const chatRequests = [];
-  const fetchImpl = async (url, options = {}) => {
-    if (String(url).endsWith("/models")) {
-      return Response.json({ data: [
-        { id: "mimo-v2.5-pro" },
-        { id: "mimo-v2.5-tts" },
-      ] });
-    }
-    if (String(url).endsWith("/chat/completions")) {
-      chatRequests.push(JSON.parse(options.body));
-      return Response.json({ choices: [{ message: { content: JSON.stringify({
-        message: "Proposal ready.",
-        questions: [],
-        proposal: { speaker: { name: "Updated profile", speakers: [{ name: "Speaker 1", voiceId: "custom-voice" }, { name: "Speaker 1" }] } },
-      }) } }] });
-    }
-    throw new Error(`Unexpected request: ${url}`);
-  };
-
-  const { baseUrl } = await startTestServer(t, "podcast-chat-", { fetchImpl });
-  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
-
-  const kbContent = `# Context\n${"x".repeat(50_100)}\nFULL_CONTEXT_END`;
-  let response = await fetch(`${baseUrl}/api/knowledge`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "assistant.md", content: kbContent }),
-  });
-  const kb = await response.json();
-  assert.equal(response.status, 201);
-
-  const requestBody = {
-    speakerProfileId: "speaker-chisme-crianza",
-    episodeProfileId: "episode-chisme-crianza",
-    text: "Make the host warmer.",
-    model: "mimo-v2.5-pro",
-    kbId: kb.id,
-    voiceIds: ["custom-voice"],
-  };
-  response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...requestBody, kbId: "../../README" }),
-  });
-  assert.equal(response.status, 400);
-  assert.equal(chatRequests.length, 0);
-
-  response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...requestBody, model: "inactive-model" }),
-  });
-  assert.equal(response.status, 400);
-  assert.equal(chatRequests.length, 0);
-
-  response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...requestBody, threadId: "missing-thread" }),
-  });
-  assert.equal(response.status, 404);
-  assert.equal(chatRequests.length, 0);
-
-  response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...requestBody, episodeProfileId: "", mode: "speaker" }),
-  });
-  const sent = await response.json();
-  assert.equal(response.status, 200);
-  assert.match(sent.threadId, /^[a-zA-Z0-9_-]+$/);
-  const prompt = chatRequests[0].messages[1].content;
-  assert.match(chatRequests[0].messages[0].content, /Replace them with unique natural names/);
-  assert.match(prompt, /AVAILABLE ACTIVE TEXT MODELS/);
-  assert.match(prompt, /REQUESTED MODE:\nspeaker/);
-  assert.match(prompt, /CURRENT EPISODE PROFILE: None/);
-  assert.match(prompt, /custom-voice/);
-  assert.match(prompt, /FULL_CONTEXT_END/);
-
-  response = await fetch(`${baseUrl}/api/chats`);
-  const chats = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(chats.chats[0].threadId, sent.threadId);
-
-  response = await fetch(`${baseUrl}/api/chat?threadId=${sent.threadId}`);
-  const thread = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(thread.messages.length, 2);
-  assert.equal(thread.messages[0].context.mode, "speaker");
-  assert.equal(JSON.parse(thread.messages[1].content).proposal.speaker.speakers[0].voiceId, "custom-voice");
-  assert.deepEqual(JSON.parse(thread.messages[1].content).proposal.speaker.speakers.map((speaker) => speaker.name), ["Valeria", "Diego"]);
-
-  response = await fetch(`${baseUrl}/api/chat/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      threadId: sent.threadId,
-      speakerProfileId: "speaker-chisme-crianza",
-      proposal: { speaker: { name: "Applied profile" } },
-    }),
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).speakerApplied, true);
-
-  const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  const currentSpeaker = state.profiles.speakerProfiles.find((profile) => profile.id === "speaker-chisme-crianza");
-  response = await fetch(`${baseUrl}/api/chat/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      speakerProfileId: currentSpeaker.id,
-      proposal: { speaker: { ...currentSpeaker, description: "Duplicate names repaired.", speakers: currentSpeaker.speakers.map((speaker) => ({ ...speaker, name: "Speaker 1" })) } },
-    }),
-  });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).speakerApplied, true);
-  const repaired = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles.speakerProfiles.find((profile) => profile.id === currentSpeaker.id);
-  assert.equal(repaired.description, "Duplicate names repaired.");
-  assert.deepEqual(repaired.speakers.map((speaker) => speaker.name), ["Valeria", "Diego"]);
-
-  response = await fetch(`${baseUrl}/api/chat?threadId=${sent.threadId}`);
-  const appliedThread = await response.json();
-  assert.equal(appliedThread.messages.at(-1).role, "system");
-  assert.match(appliedThread.messages.at(-1).content, /Applied speaker changes/);
-});
-
-test("profile saves and proposal apply warn for existing unavailable saved models", { concurrency: false }, async (t) => {
+test("profile saves warn for existing unavailable saved models", { concurrency: false }, async (t) => {
   const previousKeys = {
     MIMO_API_KEY: process.env.MIMO_API_KEY,
     ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
@@ -1516,20 +1382,6 @@ test("profile saves and proposal apply warn for existing unavailable saved model
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /Unsupported TTS model/);
 
-  response = await fetch(`${baseUrl}/api/chat/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      speakerProfileId: "speaker-chisme-crianza",
-      episodeProfileId: "episode-chisme-crianza",
-      proposal: { episode: { name: "Updated while TTS is unavailable" } },
-    }),
-  });
-  const applied = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(applied.episodeApplied, true);
-  assert.deepEqual(applied.errors, []);
-  assert.match(applied.warnings.join(" "), /compat:chatterbox:chatterbox-multilingual-v3/);
 });
 
 test("content plans support CRUD and appear in state", async (t) => {
@@ -1544,6 +1396,18 @@ test("content plans support CRUD and appear in state", async (t) => {
   assert.notEqual(plan.id, "../../escape");
   assert.deepEqual(plan.episodes, []);
   assert.equal(plan.status, "draft");
+  assert.equal(plan.episodeFormatId, "");
+  assert.equal(plan.language, "es-419");
+  assert.equal(plan.targetMinutes, 18);
+  assert.equal(Object.hasOwn(plan, "formatDrafts"), false);
+  const storedPlanPath = join(rootDir, "data", "plans", `${plan.id}.json`);
+  const legacyPlan = JSON.parse(await readFile(storedPlanPath, "utf8"));
+  legacyPlan.formatDrafts = [{ id: "legacy-format" }];
+  legacyPlan.episodeSeeds = [{ title: "Legacy seed" }];
+  await writeFile(storedPlanPath, JSON.stringify(legacyPlan, null, 2));
+  plan = (await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan;
+  assert.equal(Object.hasOwn(plan, "formatDrafts"), false);
+  assert.equal(Object.hasOwn(plan, "episodeSeeds"), false);
   response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...plan, theme: "Updated" }) });
   assert.equal(response.status, 200);
   plan = (await response.json()).plan;
@@ -1574,20 +1438,24 @@ test("startup removes replaced assistant histories and keeps Podcast Assistant c
 
 test("content planner validates generation inputs", async (t) => {
   const { baseUrl } = await startTestServer(t, "podcast-plans-validation-");
-  let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Invalid", planningModel: "" }) });
-  const plan = (await response.json()).plan;
-  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: "Theme", planningModel: "" }) });
+  let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Invalid" }) });
+  let plan = (await response.json()).plan;
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...plan, theme: "Theme", planningModel: "" }) });
+  plan = (await response.json()).plan;
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "Planning model is required.");
-  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: "Theme", planningModel: "inactive-model" }) });
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...plan, planningModel: "inactive-model" }) });
+  plan = (await response.json()).plan;
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /Unsupported or inactive text model/);
-  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: "Theme", knowledgeBaseId: "missing" }) });
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...plan, knowledgeBaseId: "missing" }) });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "Knowledge base does not exist.");
 });
 
-test("planner generates plans, saves formats, creates drafts, and chats", { concurrency: false }, async (t) => {
+test("planner generates plans, creates formats and drafts, details episodes, and chats", { concurrency: false }, async (t) => {
   const oldKey = process.env.MIMO_API_KEY;
   process.env.MIMO_API_KEY = "planner-test-key";
   t.after(() => {
@@ -1596,22 +1464,26 @@ test("planner generates plans, saves formats, creates drafts, and chats", { conc
   });
   const generated = {
     seriesTitle: "Ignored title",
-    formatDrafts: [{ name: "Interview", description: "Focused format", numSegments: 5, targetMinutes: 18, language: "es-419", defaultBriefing: "Ask clear questions." }],
+    episodeFormat: { name: "Interview", description: "Focused format" },
     episodes: [
-      { number: 1, title: "First", premise: "First premise", knowledgeScope: "Chapter one", keyPoints: ["Point A"], listenerOutcome: "Learn A", formatDraftName: "Interview", additionalInstructions: "Stay focused", transcriptPromptGuidance: "Use a concise opening." },
-      { number: 2, title: "Second", premise: "Second premise", knowledgeScope: "Chapter two", keyPoints: ["Point B"], listenerOutcome: "Learn B", formatDraftName: "Interview", additionalInstructions: "Avoid overlap", transcriptPromptGuidance: "End with a recap." },
+      { number: 1, title: "First" },
+      { number: 2, title: "Second" },
     ],
+    detailedEpisode: { number: 1, premise: "First premise", knowledgeScope: "Chapter one", keyPoints: ["Point A"], listenerOutcome: "Learn A", additionalInstructions: "Stay focused", transcriptPromptGuidance: "Use a concise opening." },
   };
+  const secondDetail = { detailedEpisode: { number: 2, premise: "Second premise", knowledgeScope: "Chapter two", keyPoints: ["Point B"], listenerOutcome: "Learn B", additionalInstructions: "Avoid overlap", transcriptPromptGuidance: "End with a recap." } };
   const fetchImpl = async (url, options = {}) => {
     if (String(url).endsWith("/chat/completions")) {
       const request = JSON.parse(options.body);
       const system = request.messages?.[0]?.content || "";
       const prompt = request.messages?.[1]?.content || "";
       const content = system.includes("content planning assistant")
-        ? prompt.includes('"plannerSection":"formats"')
-          ? JSON.stringify({ message: "Make this format more focused.", questions: [], proposal: { episodeFormat: { mode: "update", targetId: "episode-chisme-crianza", value: { name: "Assistant Format", description: "Focused by the Podcast Assistant" } } }, nextStep: { target: "planner:format-drafts", action: "none", targetIds: [], reason: "Continue to generated formats." } })
+        ? prompt.includes("Create a speaker")
+          ? JSON.stringify({ message: "Create a focused host profile.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Assistant Speaker" } } } })
+          : prompt.includes("Improve this format")
+          ? JSON.stringify({ message: "Make this format more focused.", questions: [], proposal: { episodeFormat: { mode: "update", targetId: "episode-chisme-crianza", value: { name: "Assistant Format", description: "Focused by the Podcast Assistant", targetMinutes: 21 } } }, nextStep: { target: "planner:episodes", action: "none", targetIds: [], reason: "Continue to planned episodes." } })
           : JSON.stringify({ message: "Narrow audience.", questions: [], proposal: { planPatch: { audience: "Developers", episodeCount: 2 } } })
-        : JSON.stringify(generated);
+        : JSON.stringify(prompt.includes("Add full planning detail") ? secondDetail : generated);
       return Response.json({ choices: [{ message: { content } }] });
     }
     return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
@@ -1623,23 +1495,29 @@ test("planner generates plans, saves formats, creates drafts, and chats", { conc
   const planningModel = state.profiles.episodeProfiles[0].outlineModel;
   let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Kept name", speakerProfileId, planningModel, theme: "Build reliable software", audience: "Engineers", goal: "Teach", episodeCount: 2 }) });
   let plan = (await response.json()).plan;
-  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ generateFormats: true, formatCount: 1 }) });
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   const generatedBody = await response.json();
   assert.equal(response.status, 200, generatedBody.error);
   plan = generatedBody.plan;
   assert.equal(plan.name, "Kept name");
-  assert.equal(plan.formatDrafts.length, 1);
+  assert.ok(plan.episodeFormatId);
   assert.equal(plan.episodes.length, 2);
   assert.equal(plan.episodes[0].title, "First");
+  assert.equal(plan.episodes[0].premise, "First premise");
+  assert.equal(plan.episodes[1].premise, "");
+  assert.ok(plan.episodes.every((item) => item.episodeProfileId === plan.episodeFormatId));
+  const autoFormat = generatedBody.profiles.episodeProfiles.find((item) => item.id === plan.episodeFormatId);
+  assert.equal(autoFormat.name, "Interview");
+  assert.equal(autoFormat.language, "es-419");
+  assert.equal(autoFormat.targetMinutes, 18);
+  assert.equal(autoFormat.numSegments, 5);
 
-  response = await fetch(`${baseUrl}/api/plans/${plan.id}/save-formats`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ formatDraftIds: [plan.formatDrafts[0].id] }) });
-  assert.equal(response.status, 200);
-  let saved = await response.json();
-  plan = saved.plan;
-  assert.equal(saved.saved.length, 1);
-  assert.ok(plan.formatDrafts[0].savedEpisodeProfileId);
-  assert.equal(plan.episodes[0].episodeProfileId, plan.formatDrafts[0].savedEpisodeProfileId);
-  assert.ok(saved.profiles.episodeProfiles.some((item) => item.id === plan.formatDrafts[0].savedEpisodeProfileId));
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/detail-episode`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plannedEpisodeId: plan.episodes[1].id }) });
+  const detailedBody = await response.json();
+  assert.equal(response.status, 200, detailedBody.error);
+  plan = detailedBody.plan;
+  assert.equal(plan.episodes[1].premise, "Second premise");
+  assert.deepEqual(plan.episodes[1].keyPoints, ["Point B"]);
 
   response = await fetch(`${baseUrl}/api/plans/${plan.id}/create-episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plannedEpisodeIds: plan.episodes.map((item) => item.id) }) });
   assert.equal(response.status, 200);
@@ -1661,11 +1539,11 @@ test("planner generates plans, saves formats, creates drafts, and chats", { conc
   assert.equal(response.status, 200, appliedProposal.error);
   assert.equal(appliedProposal.appliedType, "plan");
   assert.equal(appliedProposal.plan.audience, "Developers");
-  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Improve this format", model: planningModel, activeContext: { view: "planner", plannerSection: "formats", episodeProfileId: "episode-chisme-crianza" }, workspaceDraft: { name: "Current unsaved format" } }) });
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Improve this format", model: planningModel, activeContext: { view: "planner", plannerSection: "plan", episodeProfileId: "episode-chisme-crianza" }, workspaceDraft: { name: "Current unsaved format" } }) });
   const formatChat = await response.json();
   assert.equal(response.status, 200, formatChat.error);
   assert.equal(formatChat.message.proposal.episodeFormat.value.name, "Assistant Format");
-  assert.equal(formatChat.message.nextStep.target, "planner:format-drafts");
+  assert.equal(formatChat.message.nextStep.target, "planner:episodes");
   const formatThread = await (await fetch(`${baseUrl}/api/chat?threadId=${formatChat.threadId}`)).json();
   const formatProposalIndex = formatThread.messages.findIndex((message) => message.role === "assistant");
   response = await fetch(`${baseUrl}/api/plans/chat/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: formatChat.threadId, messageIndex: formatProposalIndex }) });
@@ -1673,19 +1551,41 @@ test("planner generates plans, saves formats, creates drafts, and chats", { conc
   assert.equal(response.status, 200, appliedFormat.error);
   assert.equal(appliedFormat.appliedType, "episodeFormat");
   assert.equal(appliedFormat.profiles.episodeProfiles.find((item) => item.id === "episode-chisme-crianza").name, "Assistant Format");
+  assert.equal(appliedFormat.profiles.episodeProfiles.find((item) => item.id === "episode-chisme-crianza").numSegments, 6);
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Create a speaker", model: planningModel, activeContext: { view: "planner", plannerSection: "plan" } }) });
+  const speakerChat = await response.json();
+  assert.equal(response.status, 200, speakerChat.error);
+  const speakerThread = await (await fetch(`${baseUrl}/api/chat?threadId=${speakerChat.threadId}`)).json();
+  const speakerProposalIndex = speakerThread.messages.findIndex((message) => message.role === "assistant");
+  response = await fetch(`${baseUrl}/api/plans/chat/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: speakerChat.threadId, messageIndex: speakerProposalIndex }) });
+  const appliedSpeaker = await response.json();
+  assert.equal(response.status, 200, appliedSpeaker.error);
+  const createdSpeaker = appliedSpeaker.profiles.speakerProfiles.find((item) => item.name === "Assistant Speaker");
+  assert.ok(createdSpeaker);
+  assert.equal(appliedSpeaker.plan.speakerProfileId, createdSpeaker.id);
+  const stateAfterSpeakerApply = await (await fetch(`${baseUrl}/api/state`)).json();
+  assert.ok(stateAfterSpeakerApply.profiles.speakerProfiles.some((item) => item.id === createdSpeaker.id));
+  assert.equal(stateAfterSpeakerApply.plans.find((item) => item.id === plan.id).speakerProfileId, createdSpeaker.id);
   const chats = await (await fetch(`${baseUrl}/api/chats?kind=planner&planId=${plan.id}`)).json();
   assert.equal(chats.chats[0].kind, "planner");
   assert.equal(chats.chats[0].lastPlanId, plan.id);
 
-  response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Auto count", speakerProfileId, planningModel, theme: "Choose a useful series length", audience: "Engineers", goal: "Teach" }) });
+  const savedEpisodeFormatId = state.profiles.episodeProfiles[0].id;
+  response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Auto count", speakerProfileId, episodeFormatId: savedEpisodeFormatId, planningModel, theme: "Choose a useful series length", audience: "Engineers", goal: "Teach" }) });
   let autoPlan = (await response.json()).plan;
   assert.equal(response.status, 201);
   assert.equal(autoPlan.episodeCount, null);
-  response = await fetch(`${baseUrl}/api/plans/${autoPlan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ generateFormats: true, formatCount: 1 }) });
+  response = await fetch(`${baseUrl}/api/plans/${autoPlan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   autoPlan = (await response.json()).plan;
   assert.equal(response.status, 200);
   assert.equal(autoPlan.episodeCount, 2);
   assert.equal(autoPlan.episodes.length, 2);
+  assert.equal(autoPlan.episodeFormatId, savedEpisodeFormatId);
+  assert.equal(autoPlan.episodes[1].premise, "");
+  response = await fetch(`${baseUrl}/api/plans/${autoPlan.id}/create-episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plannedEpisodeIds: [autoPlan.episodes[1].id] }) });
+  const titleOnlyDraft = await response.json();
+  assert.equal(response.status, 200, titleOnlyDraft.error);
+  assert.match(titleOnlyDraft.episodes[0].additionalInstructions, /Planned episode:\nNone\./);
   await fetch(`${baseUrl}/api/plans/${autoPlan.id}`, { method: "DELETE" });
 
   response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "DELETE" });
@@ -1697,13 +1597,14 @@ test("browser model fields and loading surfaces are present", async () => {
   const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(join(process.cwd(), "package-lock.json"), "utf8"));
-  assert.match(html, /Local UI · cloud generation · v0\.6\.2/);
-  assert.equal(manifest.version, "0.6.2");
-  assert.equal(lock.version, "0.6.2");
-  assert.equal(lock.packages[""].version, "0.6.2");
+  assert.match(html, /Local UI · cloud generation · v0\.8\.0/);
+  assert.equal(manifest.version, "0.8.0");
+  assert.equal(lock.version, "0.8.0");
+  assert.equal(lock.packages[""].version, "0.8.0");
   assert.match(html, /<select id="epOutlineModel"><\/select>/);
   assert.match(html, /<select id="epTranscriptModel"><\/select>/);
   assert.match(html, /<select id="epLanguage"><\/select>/);
+  assert.doesNotMatch(html, /id="epSegments"|id="epBriefing"|data-draft-field="numSegments"|data-draft-field="defaultBriefing"/);
   assert.match(html, /<label class="full" data-help="Grounds this episode in uploaded source material\.">Knowledge Base<select id="buildKnowledge"><\/select><\/label>/);
   assert.match(html, /id="serverActivity"/);
   assert.match(html, /id="notificationFeed"/);
@@ -1718,21 +1619,26 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /\.notice-item summary, \.job-item summary \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
   assert.match(html, /class="notice-detail"/);
   assert.match(html, /class="job-detail"/);
-  assert.match(html, /id="chatHistory"/);
-  assert.match(html, /id="chatMode"/);
-  assert.match(html, /id="chatDelete"/);
-  assert.match(html, /id="chatTargetLabel"/);
+  assert.doesNotMatch(html, /id="chatPane"|id="chatHistory"|id="chatMode"|id="chatDelete"|id="chatTargetLabel"/);
   assert.doesNotMatch(html, /id="status" class="status"/);
   assert.match(html, /id="transcriptJob"/);
-  assert.match(html, /grid-template-columns: 320px minmax\(0, 1fr\)/);
+  assert.match(html, /grid-template-columns: 240px minmax\(0, 1fr\) auto/);
   assert.match(html, /\.loading-line\[hidden\] \{ display: none; \}/);
   assert.match(html, /data-field="accent"/);
   assert.match(html, /--accent: #FFB900/);
-  assert.match(html, /id="view-speakers"/);
+  assert.match(html, /id="view-speakers" class="view" hidden/);
+  assert.match(html, /id="view-formats" class="view" hidden/);
+  assert.match(html, /data-view="speakers"/);
+  assert.match(html, /data-view="formats"/);
+  assert.doesNotMatch(html, /data-planner-panel="plan"[^>]*id="view-speakers"|id="view-speakers"[^>]*data-planner-panel/);
   assert.match(html, /id="view-planner"/);
   assert.match(html, /data-view="planner"/);
   assert.match(html, /id="planSelect"/);
   assert.match(html, /id="generatePlan"/);
+  assert.match(html, /id="planEpisodeFormat"/);
+  assert.match(html, /id="planLanguage"/);
+  assert.match(html, /id="planMinutes"/);
+  assert.doesNotMatch(html, /id="planGenerateFormats"|id="planFormatCount"|id="planFormatDrafts"/);
   assert.match(html, /id="podcastAssistant" class="chat-pane" hidden/);
   assert.match(html, />Podcast Assistant</);
   assert.match(html, /id="assistantContext"/);
@@ -1740,18 +1646,17 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /id="assistantPlanSelect"/);
   assert.match(html, /main\.assistant-active \{[^}]*grid-template-columns: 400px minmax\(0, 1fr\)/);
   assert.match(html, /label\[data-help\]::after/);
-  assert.match(html, /data-planner-section="knowledge"/);
-  assert.match(html, /data-planner-section="setup"/);
-  assert.match(html, /data-planner-section="formats"/);
-  assert.match(html, /data-planner-section="format-drafts"/);
+  assert.match(html, /data-planner-section="plan"/);
   assert.match(html, /data-planner-section="episodes"/);
-  assert.match(html, /Define series goals, choose source material, speakers, and planning model/);
+  assert.doesNotMatch(html, /data-planner-section="knowledge"/);
+  assert.doesNotMatch(html, /data-planner-section="setup"/);
+  assert.doesNotMatch(html, /data-planner-section="format-drafts"/);
+  assert.match(html, /Define series goals, source material, speakers, and format/);
   assert.match(html, /Upload and manage source material used by plans, assistants, and transcript generation/);
   assert.match(html, /Create reusable episode structures with language, duration, speaker, and generation-model defaults/);
-  assert.match(html, /Review format proposals from this plan, then save selected drafts as reusable Episode Formats/);
   assert.match(html, /Review generated episode outlines, choose formats, and create saved drafts for transcript generation/);
-  assert.match(html, /id="selectAllUnsavedFormats"/);
-  assert.match(html, /id="saveAllUnsavedFormats"/);
+  assert.doesNotMatch(html, /id="selectAllUnsavedFormats"|id="saveAllUnsavedFormats"|id="newEpisode"/);
+  assert.match(html, /data-detail-episode=/);
   assert.match(html, /id="plannedEpisodeSidebar"/);
   assert.match(html, /id="speakerSidebar"/);
   assert.match(html, /placeholder="Auto - LLM chooses"/);
@@ -1766,20 +1671,20 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /Episode Format/);
   assert.match(html, /id="ttsLanguageOverride"/);
   assert.match(html, /id="applyLatestProfiles">Apply latest profiles/);
+  assert.match(html, /function episodeIsBusy\(\)/);
+  assert.match(html, /renderAudio"\)\.disabled = episodeBusy \|\| errors\.length > 0/);
   assert.match(html, /id="transcriptPromptTab"/);
   assert.match(html, /id="transcriptLockedPrompt" readonly/);
   assert.match(html, /id="transcriptPromptGuidance"/);
   assert.match(html, /id="autoGenerateTts" type="checkbox"> Generate TTS after transcript/);
-  assert.match(html, /id="saveTranscriptAndTts">Save \+ go to TTS/);
+  assert.match(html, /id="saveTranscriptAndTts" disabled>Save \+ go to TTS/);
   assert.match(html, /async function saveTranscriptAndGoToTts\(\)/);
   assert.match(html, /location\.hash = "tts"/);
   assert.match(html, /autoTtsTranscriptJobs\.add\(job\.id\)/);
   assert.match(html, /await queueTts\(job\.episodeId\)/);
   assert.match(html, /if \(job\.status !== "completed"\) continue/);
   assert.match(html, /api\(`\/api\/episodes\/\$\{episodeId\}\/render`/);
-  assert.match(html, /id="transcriptChatHistory"/);
-  assert.match(html, /id="transcriptChatModel"/);
-  assert.match(html, /id="transcriptChatPane"[^>]* hidden/);
+  assert.doesNotMatch(html, /id="transcriptChatPane"|id="transcriptChatHistory"|id="transcriptChatModel"/);
   assert.match(html, /None — use LLM knowledge/);
   assert.doesNotMatch(html, /id="episodeSeed"|Suggested episode/);
   assert.doesNotMatch(html, /id="ttsPromptTab"/);
@@ -1804,7 +1709,7 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /data-episode-player="play"/);
   assert.doesNotMatch(html, /id="episodeAudio"/);
   assert.match(html, /id="view-config"/);
-  assert.match(html, /id="saveProfiles" class="primary">Save speaker profiles/);
+  assert.match(html, /id="saveProfiles" class="primary" disabled>Save speaker profiles/);
   assert.match(html, /id="speakerProfilePills"/);
   assert.match(html, /id="episodeProfilePills" class="profile-pills" aria-label="Selected Episode Format details"/);
   assert.match(html, /const selectedEpisode = episodes\.find/);
@@ -1821,15 +1726,7 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /data-field="elevenlabsTextNormalization"/);
   assert.match(html, /class="model-refresh-row"/);
   assert.match(html, /overflow-y: auto/);
-  assert.match(html, /data-message-index/);
-  assert.match(html, /event\.target\.closest\("#chatPane"\)/);
-  assert.match(html, /speakerProfileSelect"\)\.addEventListener\("change"[^\n]+loadChatThread/);
-  assert.match(html, /chatThread\.messages\[messageIndex\]/);
-  assert.match(html, /version !== chatLoadVersion/);
-  assert.match(html, /Save profile changes before using the assistant/);
-  assert.match(html, /function renderProposalDiff/);
-  assert.match(html, /data-toggle-proposal/);
-  assert.match(html, /aria-expanded="false">Expand/);
+  assert.doesNotMatch(html, /event\.target\.closest\("#chatPane"\)|function renderProposalDiff|version !== chatLoadVersion|Save profile changes before using the assistant/);
   assert.doesNotMatch(html, /const lastAssistant/);
   assert.match(html, /id="transcriptLengthWarning"/);
   assert.doesNotMatch(html, /Render anyway\?/);
@@ -1861,9 +1758,17 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /\/api\/plans\/chat\/apply/);
   assert.match(html, /if \(!activePlan\) await createNewPlan\(false\)/);
   assert.match(html, /\? candidate : "planner"/);
-  assert.match(html, /\["planner", "transcript", "tts"\]\.includes\(view\)/);
+  assert.match(html, /\["planner", "speakers", "formats", "transcript", "tts"\]\.includes\(view\)/);
+  assert.match(html, /class="assistant-steps"/);
+  assert.match(html, /data-state="\$\{stepState\}"/);
+  assert.match(html, /id="rightbar" class="rightbar"/);
+  assert.match(html, /id="rightbarToggle"/);
+  assert.match(html, /id="rightbarBadge"/);
+  assert.match(html, /id="toasts" class="toasts"/);
+  assert.match(html, /podcast-builder\.rightbar\.v1/);
+  assert.match(html, /function updateSaveButtons\(\)/);
+  assert.match(html, /function showToast\(entry\)/);
   assert.match(html, /data-assistant-target=/);
-  assert.match(html, /data-focus-format=/);
   assert.match(html, /podcast-builder\.view-selections\.v1/);
   assert.match(html, /sessionStorage\.getItem\(VIEW_SELECTIONS_KEY\)/);
   assert.match(html, /sessionStorage\.setItem\(VIEW_SELECTIONS_KEY, JSON\.stringify\(viewSelections\)\)/);
