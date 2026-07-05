@@ -1478,7 +1478,9 @@ test("planner generates plans, creates formats and drafts, details episodes, and
       const system = request.messages?.[0]?.content || "";
       const prompt = request.messages?.[1]?.content || "";
       const content = system.includes("content planning assistant")
-        ? prompt.includes("Create a speaker")
+        ? prompt.includes("Improve shared speaker")
+          ? JSON.stringify({ message: "Improve the shared host profile.", questions: [], proposal: { speakerProfile: { mode: "update", targetId: "speaker-chisme-crianza", value: { description: "Revised without changing existing references." } } } })
+          : prompt.includes("Create a speaker")
           ? JSON.stringify({ message: "Create a focused host profile.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Assistant Speaker" } } } })
           : prompt.includes("Improve this format")
           ? JSON.stringify({ message: "Make this format more focused.", questions: [], proposal: { episodeFormat: { mode: "update", targetId: "episode-chisme-crianza", value: { name: "Assistant Format", description: "Focused by the Podcast Assistant", targetMinutes: 21 } } }, nextStep: { target: "planner:episodes", action: "none", targetIds: [], reason: "Continue to planned episodes." } })
@@ -1552,6 +1554,23 @@ test("planner generates plans, creates formats and drafts, details episodes, and
   assert.equal(appliedFormat.appliedType, "episodeFormat");
   assert.equal(appliedFormat.profiles.episodeProfiles.find((item) => item.id === "episode-chisme-crianza").name, "Assistant Format");
   assert.equal(appliedFormat.profiles.episodeProfiles.find((item) => item.id === "episode-chisme-crianza").numSegments, 6);
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Improve shared speaker", model: planningModel, activeContext: { view: "speakers" } }) });
+  const sharedSpeakerChat = await response.json();
+  assert.equal(response.status, 200, sharedSpeakerChat.error);
+  assert.equal(sharedSpeakerChat.message.proposal.speakerProfile.impact.plans, 1);
+  assert.equal(sharedSpeakerChat.message.proposal.speakerProfile.impact.episodes, 2);
+  const sharedSpeakerThread = await (await fetch(`${baseUrl}/api/chat?threadId=${sharedSpeakerChat.threadId}`)).json();
+  const sharedSpeakerProposalIndex = sharedSpeakerThread.messages.findIndex((message) => message.role === "assistant");
+  response = await fetch(`${baseUrl}/api/plans/chat/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: sharedSpeakerChat.threadId, messageIndex: sharedSpeakerProposalIndex, createNew: true }) });
+  const appliedSharedSpeaker = await response.json();
+  assert.equal(response.status, 200, appliedSharedSpeaker.error);
+  const revisedSpeaker = appliedSharedSpeaker.profiles.speakerProfiles.find((item) => item.name === `${state.profiles.speakerProfiles[0].name} — Copy`);
+  assert.ok(revisedSpeaker);
+  assert.equal(revisedSpeaker.description, "Revised without changing existing references.");
+  assert.notEqual(revisedSpeaker.id, speakerProfileId);
+  assert.equal(appliedSharedSpeaker.profiles.speakerProfiles.find((item) => item.id === speakerProfileId).name, state.profiles.speakerProfiles[0].name);
+  assert.equal(appliedSharedSpeaker.plan.speakerProfileId, revisedSpeaker.id);
+  assert.equal(JSON.parse(await readFile(join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json"), "utf8")).speakerProfile.id, speakerProfileId);
   response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Create a speaker", model: planningModel, activeContext: { view: "planner", plannerSection: "plan" } }) });
   const speakerChat = await response.json();
   assert.equal(response.status, 200, speakerChat.error);
@@ -1597,7 +1616,6 @@ test("browser model fields and loading surfaces are present", async () => {
   const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(join(process.cwd(), "package-lock.json"), "utf8"));
-  assert.match(html, /Local UI · cloud generation · v0\.8\.0/);
   assert.equal(manifest.version, "0.8.0");
   assert.equal(lock.version, "0.8.0");
   assert.equal(lock.packages[""].version, "0.8.0");
@@ -1622,7 +1640,10 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.doesNotMatch(html, /id="chatPane"|id="chatHistory"|id="chatMode"|id="chatDelete"|id="chatTargetLabel"/);
   assert.doesNotMatch(html, /id="status" class="status"/);
   assert.match(html, /id="transcriptJob"/);
-  assert.match(html, /grid-template-columns: 240px minmax\(0, 1fr\) auto/);
+  assert.doesNotMatch(html, /grid-template-columns: 240px|min-width: 240px|<h1>Podcast Builder<\/h1>/);
+  assert.match(html, /class="assistant-sidebar"/);
+  assert.match(html, /class="assistant-chat"/);
+  assert.match(html, /<nav class="assistant-nav" aria-label="Builder views">/);
   assert.match(html, /\.loading-line\[hidden\] \{ display: none; \}/);
   assert.match(html, /data-field="accent"/);
   assert.match(html, /--accent: #FFB900/);
@@ -1644,7 +1665,8 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /id="assistantContext"/);
   assert.match(html, /id="assistantProgress"/);
   assert.match(html, /id="assistantPlanSelect"/);
-  assert.match(html, /main\.assistant-active \{[^}]*grid-template-columns: 400px minmax\(0, 1fr\)/);
+  assert.match(html, /main\.assistant-active \{[^}]*grid-template-columns: minmax\(680px, 760px\) minmax\(0, 1fr\)/);
+  assert.match(html, /\.chat-pane \{[^}]*grid-template-columns: 280px minmax\(0, 1fr\)/);
   assert.match(html, /label\[data-help\]::after/);
   assert.match(html, /data-planner-section="plan"/);
   assert.match(html, /data-planner-section="episodes"/);
@@ -1754,11 +1776,13 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /function deleteKnowledgeBase\(id\)/);
   assert.match(html, /activeContext: assistantContext\(\)/);
   assert.match(html, /workspaceDraft: assistantWorkspaceDraft\(\)/);
-  assert.match(html, /function applyAssistantProposal\(index, continueWorkflow\)/);
+  assert.match(html, /function applyAssistantProposal\(index, continueWorkflow, createNew = false\)/);
+  assert.match(html, /data-create-new="true">Apply to new profile/);
+  assert.match(html, /messageIndex: index, createNew/);
   assert.match(html, /\/api\/plans\/chat\/apply/);
   assert.match(html, /if \(!activePlan\) await createNewPlan\(false\)/);
   assert.match(html, /\? candidate : "planner"/);
-  assert.match(html, /\["planner", "speakers", "formats", "transcript", "tts"\]\.includes\(view\)/);
+  assert.match(html, /\$\("podcastAssistant"\)\.hidden = false/);
   assert.match(html, /class="assistant-steps"/);
   assert.match(html, /data-state="\$\{stepState\}"/);
   assert.match(html, /id="rightbar" class="rightbar"/);

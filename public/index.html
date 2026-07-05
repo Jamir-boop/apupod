@@ -52,14 +52,12 @@
     p { margin: 8px 0; }
     code { color: var(--accent); background: var(--surface-1); border: 1px solid var(--line); padding: 1px 5px; border-radius: 2px; }
     .muted, small { color: var(--muted); }
-    .app { min-height: 100vh; display: grid; grid-template-columns: 240px minmax(0, 1fr) auto; }
-    aside { position: sticky; top: 0; display: flex; flex-direction: column; min-width: 0; height: 100vh; padding: 22px 18px; background: var(--surface-1); border-right: 1px solid var(--line); overflow: hidden; }
-    aside p { margin-bottom: 22px; }
-    nav { display: grid; gap: 7px; }
-    nav button { min-width: 0; width: 100%; overflow-wrap: anywhere; text-align: left; background: transparent; border-color: transparent; color: var(--muted); }
-    nav button.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+    .assistant-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+    .assistant-nav button { min-width: 0; width: 100%; padding: 6px 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; }
+    .assistant-nav button.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
     main { width: min(1120px, calc(100% - 36px)); margin: 24px auto 60px; }
-    main.assistant-active { width: min(1440px, calc(100% - 36px)); display: grid; grid-template-columns: 400px minmax(0, 1fr); gap: 18px; align-items: start; }
+    main.assistant-active { width: min(1800px, calc(100% - 36px)); display: grid; grid-template-columns: minmax(680px, 760px) minmax(0, 1fr); gap: 18px; align-items: start; }
     main.assistant-active > .view:not([hidden]) { grid-column: 2; min-width: 0; }
     .view { display: grid; gap: 18px; }
     .view[hidden] { display: none; }
@@ -213,9 +211,10 @@
     .player-bottom button { padding: 6px 10px; font-size: 13px; }
     .player-bottom select { padding: 6px; font-size: 13px; }
     body.player-active { padding-bottom: 56px; }
-    body.player-active aside { height: calc(100vh - 56px); }
-    .chat-pane { position: sticky; top: 24px; display: flex; flex-direction: column; max-height: calc(100vh - 48px); background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
+    .chat-pane { position: sticky; top: 24px; display: grid; grid-template-columns: 280px minmax(0, 1fr); max-height: calc(100vh - 48px); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
     body.player-active .chat-pane { max-height: calc(100vh - 48px - 56px); }
+    .assistant-sidebar { min-width: 0; overflow-y: auto; border-right: 1px solid var(--line); }
+    .assistant-chat { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .chat-pane-header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .chat-pane-header h3 { margin: 0; font-size: 14px; }
     .chat-controls { padding: 10px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
@@ -262,10 +261,6 @@
     #podcastAssistant { grid-column: 1; grid-row: 1; }
     @media (max-width: 820px) {
       .app { display: block; }
-      aside { position: sticky; z-index: 10; height: auto; max-height: 60vh; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-      aside h1, aside p { display: none; }
-      nav { display: flex; overflow-x: auto; }
-      nav button { width: auto; white-space: nowrap; }
       .rightbar { position: fixed; top: 0; right: 0; z-index: 45; width: min(340px, 92vw); box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
       main { width: min(100% - 24px, 1120px); margin-top: 14px; }
       .grid, .grid.three { grid-template-columns: 1fr; }
@@ -277,49 +272,50 @@
       .internal-nav-layout { grid-template-columns: 1fr; }
       .internal-sidebar { position: static; display: flex; max-height: none; overflow-x: auto; overflow-y: hidden; }
       .internal-sidebar button { width: auto; flex: 0 0 auto; }
-      .chat-pane { position: static; max-height: none; order: -1; }
-      body.player-active aside { height: auto; }
+      .chat-pane { position: static; grid-template-columns: 1fr; max-height: none; order: -1; overflow: visible; }
+      .assistant-sidebar { overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
+      .assistant-chat { min-height: 70vh; }
       .player-bottom { padding-inline: 10px; }
       .player-bottom button { padding-inline: 9px; }
     }
     @media (max-width: 1200px) {
       main.assistant-active { display: block; width: min(1120px, calc(100% - 36px)); }
       main.assistant-active > .view:not([hidden]) { margin-top: 18px; }
-      #podcastAssistant { position: static; max-height: 80vh; }
+      #podcastAssistant { position: static; max-height: none; }
     }
   </style>
 </head>
 <body>
   <div class="app">
-    <aside>
-      <h1>Podcast Builder</h1>
-      <p class="muted">Local UI · cloud generation · v0.8.0</p>
-      <nav aria-label="Builder views">
-        <button data-view="config">Config</button>
-        <button data-view="speakers">Speakers</button>
-        <button data-view="formats">Formats</button>
-        <button data-view="planner">Content Planner</button>
-        <button data-view="transcript">Transcript Generator</button>
-        <button data-view="tts">TTS Generator</button>
-        <button data-view="player">Player</button>
-      </nav>
-    </aside>
-
     <main id="appMain">
       <div id="podcastAssistant" class="chat-pane" hidden>
-        <div class="chat-pane-header"><h3>Podcast Assistant</h3><div class="chat-input-actions"><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
-        <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
-        <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
-        <div class="chat-controls">
-          <label data-help="Project context shared across planning and generation.">Plan<select id="assistantPlanSelect"><option value="">New plan on first message</option></select></label>
-          <label>Chat history<select id="plannerChatHistory"></select></label>
-          <label data-help="Model used only for this assistant conversation.">Model<select id="plannerChatModel"></select></label>
-          <label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label>
+        <div class="assistant-sidebar">
+          <div class="chat-pane-header"><h3>Podcast Assistant</h3></div>
+          <nav class="assistant-nav" aria-label="Builder views">
+            <button data-view="config">Config</button>
+            <button data-view="speakers">Speakers</button>
+            <button data-view="formats">Formats</button>
+            <button data-view="planner">Content Planner</button>
+            <button data-view="transcript">Transcript Generator</button>
+            <button data-view="tts">TTS Generator</button>
+            <button data-view="player">Player</button>
+          </nav>
+          <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
+          <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
+          <div class="chat-controls">
+            <label data-help="Project context shared across planning and generation.">Plan<select id="assistantPlanSelect"><option value="">New plan on first message</option></select></label>
+            <label>Chat history<select id="plannerChatHistory"></select></label>
+            <label data-help="Model used only for this assistant conversation.">Model<select id="plannerChatModel"></select></label>
+            <label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label>
+          </div>
+          <div id="assistantPrompts" class="assistant-prompts"></div>
         </div>
-        <div id="assistantPrompts" class="assistant-prompts"></div>
-        <div id="plannerChatMessages" class="chat-messages"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
-        <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span>Thinking…</span></div>
-        <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary">Send</button></div></div>
+        <div class="assistant-chat">
+          <div class="chat-pane-header"><h3>Chat</h3><div class="chat-input-actions"><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
+          <div id="plannerChatMessages" class="chat-messages"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
+          <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span>Thinking…</span></div>
+          <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary">Send</button></div></div>
+        </div>
       </div>
 
       <div id="view-planner" class="view" hidden>
@@ -814,16 +810,16 @@
 
     function renderPodcastAssistant() {
       const view = activeViewName();
-      const visible = ["planner", "speakers", "formats", "transcript", "tts"].includes(view);
-      $("podcastAssistant").hidden = !visible;
-      $("appMain").classList.toggle("assistant-active", visible);
-      if (!visible) return;
+      $("podcastAssistant").hidden = false;
+      $("appMain").classList.add("assistant-active");
       const sectionLabels = { plan: "Plan Setup", episodes: "Planned Episodes", script: "Transcript Script", prompt: "Prompt & Cues" };
       const focus = view === "planner" ? sectionLabels[activePlannerSection]
         : view === "speakers" ? "Speaker Profiles"
         : view === "formats" ? "Episode Formats"
         : view === "transcript" ? sectionLabels[activeTranscriptSection]
-        : "TTS Generation";
+        : view === "tts" ? "TTS Generation"
+        : view === "player" ? "Player"
+        : "Model Connections";
       $("assistantContext").textContent = `Helping with: ${focus}`;
       const plans = state?.plans || [];
       $("assistantPlanSelect").innerHTML = option("", plans.length ? "Select plan" : "New plan on first message", !activePlanId) + plans.map((item) => option(item.id, item.name, item.id === activePlanId)).join("");
@@ -855,7 +851,9 @@
         : view === "speakers" ? ["Design the hosts", "Improve speaker personalities", "Check voice setup"]
         : view === "formats" ? ["Improve this format", "Suggest target duration", "What is the next step?"]
         : view === "transcript" ? ["Improve episode guidance", "Check transcript readiness", "What should I do next?"]
-          : ["Check voice readiness", "Help choose language", "What should I render next?"];
+        : view === "tts" ? ["Check voice readiness", "Help choose language", "What should I render next?"]
+        : view === "player" ? ["What should I play next?", "Review production progress", "What is the next step?"]
+        : ["Check model setup", "Which models do I need?", "What is the next step?"];
       $("assistantPrompts").innerHTML = prompts.map((text) => `<button type="button" data-assistant-prompt="${escapeHtml(text)}">${escapeHtml(text)}</button>`).join("");
     }
 
@@ -2670,11 +2668,13 @@
           const proposalType = parsed.proposal ? Object.keys(parsed.proposal)[0] : "";
           const proposal = proposalType ? parsed.proposal[proposalType] : null;
           const labels = { planPatch: "Plan setup", speakerProfile: "Speaker Profile", episodeFormat: "Episode Format", plannedEpisodePatches: "Planned episodes", episodePatch: "Episode guidance" };
-          const impact = proposal?.impact && (proposal.impact.plans || proposal.impact.episodes) ? `<div class="assistant-impact">Shared by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s).</div>` : "";
+          const sharedSpeaker = proposalType === "speakerProfile" && proposal?.mode === "update" && proposal.impact && (proposal.impact.plans || proposal.impact.episodes);
+          const impact = proposal?.impact && (proposal.impact.plans || proposal.impact.episodes) ? `<div class="assistant-impact">Shared by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s).${sharedSpeaker ? " Apply to a new profile to preserve them." : ""}</div>` : "";
           const next = parsed.nextStep;
           const actionLabels = { generatePlan: "generate plan", generateDetails: "generate episode details", createEpisodes: "create episode drafts", generateTranscript: "generate transcript", generateTts: "generate TTS", openPlayer: "open Player", none: "continue" };
           const nextLabel = next ? actionLabels[next.action] || "continue" : "";
-          const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff"><div>${escapeHtml(JSON.stringify(proposal, null, 2))}</div></div>${impact}<div class="actions"><button data-apply-assistant="${index}" data-continue="false">Apply only</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div></div>` : "";
+          const newProfileButton = sharedSpeaker ? `<button class="primary" data-apply-assistant="${index}" data-continue="false" data-create-new="true">Apply to new profile</button>` : "";
+          const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff"><div>${escapeHtml(JSON.stringify(proposal, null, 2))}</div></div>${impact}<div class="actions">${newProfileButton}<button data-apply-assistant="${index}" data-continue="false">${sharedSpeaker ? "Update shared profile" : "Apply only"}</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div></div>` : "";
           const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}">${escapeHtml(nextLabel)}</button></div>` : "";
           return `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>${parsed.questions?.length ? `<div class="chat-questions"><ol>${parsed.questions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : ""}${proposalHtml}${nextHtml}`;
         } catch { return `<div class="chat-msg assistant">${escapeHtml(message.content)}</div>`; }
@@ -2737,14 +2737,14 @@
       if (step.action === "openPlayer" && episodeId) { selectPlayerEpisode(episodeId); location.hash = "player"; }
     }
 
-    async function applyAssistantProposal(index, continueWorkflow) {
+    async function applyAssistantProposal(index, continueWorkflow, createNew = false) {
       const message = plannerChatThread?.messages?.[index];
       if (message?.role !== "assistant") return;
       const parsed = JSON.parse(message.content);
       const proposal = parsed.proposal && parsed.proposal[Object.keys(parsed.proposal)[0]];
       if (!proposal) return;
-      if (proposal.impact && (proposal.impact.plans || proposal.impact.episodes) && !confirm(`This shared item is used by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s). Apply changes anyway?`)) return;
-      const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index }) });
+      if (!createNew && proposal.impact && (proposal.impact.plans || proposal.impact.episodes) && !confirm(`This shared item is used by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s). Apply changes anyway?`)) return;
+      const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index, createNew }) });
       await refreshState(data.episode?.id || currentEpisode?.id);
       if (data.plan?.id) loadPlanForm(data.plan);
       await refreshPlanIndex();
@@ -2795,7 +2795,7 @@
     $("assistantProgress").addEventListener("click", (event) => { const button = event.target.closest("[data-assistant-target]"); if (button) openAssistantTarget(button.dataset.assistantTarget); });
     $("plannerChatMessages").addEventListener("click", (event) => {
       const apply = event.target.closest("[data-apply-assistant]");
-      if (apply) return guard(() => applyAssistantProposal(Number(apply.dataset.applyAssistant), apply.dataset.continue === "true"))();
+      if (apply) return guard(() => applyAssistantProposal(Number(apply.dataset.applyAssistant), apply.dataset.continue === "true", apply.dataset.createNew === "true"))();
       const run = event.target.closest("[data-run-assistant-step]");
       if (run) {
         const parsed = JSON.parse(plannerChatThread.messages[Number(run.dataset.runAssistantStep)].content);

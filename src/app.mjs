@@ -3377,7 +3377,7 @@ function normalizeAssistantContext(value) {
     return id;
   };
   return {
-    view: ["planner", "speakers", "formats", "transcript", "tts"].includes(raw.view) ? raw.view : "planner",
+    view: ["planner", "speakers", "formats", "transcript", "tts", "player", "config"].includes(raw.view) ? raw.view : "planner",
     plannerSection: ["plan", "episodes"].includes(raw.plannerSection) ? raw.plannerSection : "plan",
     transcriptSection: ["script", "prompt"].includes(raw.transcriptSection) ? raw.transcriptSection : "script",
     episodeProfileId: safeId(raw.episodeProfileId),
@@ -3461,6 +3461,7 @@ async function applyPlannerChatProposal(req, res, context) {
   const body = await readJsonBody(req);
   const threadId = String(body.threadId || "").trim();
   const messageIndex = Number(body.messageIndex);
+  const createNew = body.createNew === true;
   if (!threadId) throw badRequest("threadId is required.");
   assertSafeId(threadId);
   if (!Number.isInteger(messageIndex) || messageIndex < 0) throw badRequest("messageIndex is invalid.");
@@ -3471,6 +3472,7 @@ async function applyPlannerChatProposal(req, res, context) {
   if (message?.role !== "assistant") throw badRequest("Selected message is not an assistant proposal.");
   const parsed = parsePlannerChatResponse(message.content);
   if (!parsed.proposal) throw badRequest("Selected message has no proposal.");
+  if (createNew && parsed.proposal.speakerProfile?.mode !== "update") throw badRequest("createNew is only supported for Speaker Profile updates.");
   const plan = await loadPlan(context.paths, thread.lastPlanId);
   const result = { appliedType: "", plan, profiles: null, episode: null, warnings: [], nextStep: parsed.nextStep };
 
@@ -3486,8 +3488,10 @@ async function applyPlannerChatProposal(req, res, context) {
     mergeSavedProfileSelections(models, currentProfiles);
     if (parsed.proposal.speakerProfile) {
       const proposal = parsed.proposal.speakerProfile;
-      if (proposal.mode === "create") {
+      if (proposal.mode === "create" || createNew) {
         const value = { ...proposal.value, id: randomUUID() };
+        const source = nextProfiles.speakerProfiles.find((item) => item.id === proposal.targetId);
+        if (createNew && source && value.name === source.name) value.name += " — Copy";
         nextProfiles.speakerProfiles.push(value);
         result.plan = normalizePlanInput({ ...plan, speakerProfileId: value.id, episodes: plan.episodes }, plan);
       } else {
