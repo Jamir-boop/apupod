@@ -34,7 +34,13 @@
     button.danger:hover:not(:disabled) { color: #FFFFFF; background: #7A1F1F; border-color: #B53C3C; }
     button:disabled { color: var(--disabled); border-color: var(--line); cursor: not-allowed; }
     input, select, textarea { width: 100%; color: var(--text); background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: 2px; padding: 9px 10px; }
-    input[type="checkbox"] { width: auto; justify-self: start; }
+    input[type="checkbox"] { appearance: none; width: 18px; height: 18px; flex: 0 0 18px; justify-self: start; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface-0); cursor: pointer; }
+    input[type="checkbox"]::after { content: ""; display: block; width: 9px; height: 5px; margin: 4px 3px; border: solid var(--text-on-accent); border-width: 0 0 2px 2px; opacity: 0; transform: rotate(-45deg); }
+    input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); }
+    input[type="checkbox"]:checked::after { opacity: 1; }
+    input[type="checkbox"]:indeterminate { border-color: var(--accent); background: var(--accent); }
+    input[type="checkbox"]:indeterminate::after { width: 10px; height: 0; margin: 7px 3px; border-width: 0 0 2px; opacity: 1; transform: none; }
+    input[type="checkbox"]:disabled { border-color: var(--line); background: var(--surface-3); cursor: not-allowed; opacity: .65; }
     button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     textarea { min-height: 90px; resize: vertical; line-height: 1.45; }
     textarea.transcript { min-height: 520px; font: 14px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -54,6 +60,8 @@
     nav button { min-width: 0; width: 100%; overflow-wrap: anywhere; text-align: left; background: transparent; border-color: transparent; color: var(--muted); }
     nav button.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
     main { width: min(1120px, calc(100% - 36px)); margin: 24px auto 60px; }
+    main.assistant-active { width: min(1440px, calc(100% - 36px)); display: grid; grid-template-columns: 400px minmax(0, 1fr); gap: 18px; align-items: start; }
+    main.assistant-active > .view:not([hidden]) { grid-column: 2; min-width: 0; }
     .view { display: grid; gap: 18px; }
     .view[hidden] { display: none; }
     .panel { padding: 20px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
@@ -110,7 +118,11 @@
     .provider-group > .connection-row { margin: 8px 10px 10px; border: 1px solid var(--line); }
     .provider-group > .muted { margin: 8px 12px 10px; }
     .connection-row { margin-top: 8px; border: 1px solid var(--line); background: var(--surface-0); }
-    .connection-row > summary { padding: 10px 12px; cursor: pointer; }
+    .connection-row > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; list-style: none; cursor: pointer; }
+    .connection-row > summary::-webkit-details-marker { display: none; }
+    .connection-row > summary::before { content: "›"; flex: 0 0 auto; color: var(--accent); font-size: 20px; line-height: 1; transition: transform .15s ease; }
+    .connection-row[open] > summary::before { transform: rotate(90deg); }
+    .connection-row > summary .connection-head { flex: 1; min-width: 0; }
     .connection-row > summary:hover { background: var(--surface-3); }
     .connection-row > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .connection-body { padding: 0 12px 12px; }
@@ -136,6 +148,7 @@
     .notice-list, .activity-list { display: grid; grid-auto-rows: max-content; align-content: start; min-width: 0; max-width: 100%; min-height: 0; gap: 7px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
     .notice-list { margin-bottom: 12px; }
     .notice-item, .job-item { min-width: 0; max-width: 100%; overflow: hidden; border: 1px solid var(--line); background: var(--surface-0); font-size: 12px; }
+    button.job-item { width: 100%; padding: 6px 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
     .notice-item[data-type="ok"] { border-color: var(--success); }
     .notice-item[data-type="warning"] { border-color: var(--accent); }
     .notice-item[data-type="error"] { border-color: var(--danger); }
@@ -151,6 +164,7 @@
     .spinner { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid var(--disabled); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .profiles-layout, .planner-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; }
+    #view-speakers .profiles-layout, .planner-layout { grid-template-columns: 1fr; }
     .profiles-main, .planner-main { min-width: 0; display: grid; gap: 18px; }
     .plan-list { display: grid; gap: 10px; }
     .plan-card { padding: 12px; border: 1px solid var(--line); background: var(--surface-1); }
@@ -159,6 +173,8 @@
     .plan-card-head h3 { margin: 0; }
     .player-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, .7fr); gap: 18px; align-items: start; }
     .player-list { display: grid; gap: 8px; }
+    #playerLibrary { max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+    .playlist-controls { display: grid; gap: 8px; margin-bottom: 14px; }
     .player-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 12px; border: 1px solid var(--line); background: var(--surface-1); }
     .player-row strong, .player-bottom-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .player-row-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
@@ -171,6 +187,7 @@
     .player-bottom[hidden] { display: none; }
     .player-bottom-meta { display: flex; min-width: 0; align-items: center; gap: 8px; }
     .player-bottom-title { min-width: 0; flex: 1; padding: 5px 8px; text-align: left; border-color: transparent; background: transparent; font-size: 13px; }
+    .player-bottom-title:hover:not(:disabled) { color: var(--text); border-color: transparent; background: transparent; }
     .player-bottom-time { flex: 0 0 auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
     .player-bottom-seek { position: absolute; top: -6px; left: 0; width: 100%; height: 13px; margin: 0; padding: 0; appearance: none; border: 0; border-radius: 0; background: linear-gradient(to right, var(--accent) 0 var(--player-progress, 0%), var(--disabled) var(--player-progress, 0%) 100%); cursor: pointer; }
     .player-bottom-seek:disabled { cursor: default; }
@@ -216,6 +233,16 @@
     .chat-disabled-notice { padding: 20px 16px; text-align: center; color: var(--muted); font-size: 13px; }
     .chat-busy { display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: var(--accent); font-size: 12px; border-top: 1px solid var(--line); }
     .chat-busy[hidden] { display: none; }
+    .chat-pane[hidden] { display: none; }
+    label[data-help]::after { content: attr(data-help); color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
+    .assistant-context { margin: 10px 16px 0; padding: 7px 9px; color: var(--accent); border: 1px solid var(--line); background: var(--surface-1); font-size: 12px; }
+    .assistant-progress { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+    .assistant-progress button { padding: 5px 7px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .assistant-progress button.complete { color: var(--success); border-color: var(--success); }
+    .assistant-prompts { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+    .assistant-prompts button { padding: 4px 7px; color: var(--muted); font-size: 11px; }
+    .assistant-impact { margin-top: 6px; color: var(--accent); }
+    #podcastAssistant { grid-column: 1; grid-row: 1; }
     @media (max-width: 820px) {
       .app { display: block; }
       aside { position: sticky; z-index: 10; height: auto; max-height: 60vh; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -238,13 +265,18 @@
       .player-bottom { padding-inline: 10px; }
       .player-bottom button { padding-inline: 9px; }
     }
+    @media (max-width: 1200px) {
+      main.assistant-active { display: block; width: min(1120px, calc(100% - 36px)); }
+      main.assistant-active > .view:not([hidden]) { margin-top: 18px; }
+      #podcastAssistant { position: static; max-height: none; }
+    }
   </style>
 </head>
 <body>
   <div class="app">
     <aside>
       <h1>Podcast Builder</h1>
-      <p class="muted">Local UI · cloud generation · v0.4.0</p>
+      <p class="muted">Local UI · cloud generation · v0.6.2</p>
       <nav aria-label="Builder views">
         <button data-view="config">Config</button>
         <button data-view="speakers">Speaker Profiles</button>
@@ -262,7 +294,23 @@
       </section>
     </aside>
 
-    <main>
+    <main id="appMain">
+      <div id="podcastAssistant" class="chat-pane" hidden>
+        <div class="chat-pane-header"><h3>Podcast Assistant</h3><div class="chat-input-actions"><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
+        <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
+        <div id="assistantProgress" class="assistant-progress" aria-label="Podcast workflow progress"></div>
+        <div class="chat-controls">
+          <label data-help="Project context shared across planning and generation.">Plan<select id="assistantPlanSelect"><option value="">New plan on first message</option></select></label>
+          <label>Chat history<select id="plannerChatHistory"></select></label>
+          <label data-help="Model used only for this assistant conversation.">Model<select id="plannerChatModel"></select></label>
+          <label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label>
+        </div>
+        <div id="assistantPrompts" class="assistant-prompts"></div>
+        <div id="plannerChatMessages" class="chat-messages"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
+        <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span>Thinking…</span></div>
+        <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary">Send</button></div></div>
+      </div>
+
       <div id="view-speakers" class="view">
         <div class="view-header">
           <div><h2>Speaker Profiles</h2><p class="muted">Define hosts, voices, and delivery rules.</p></div>
@@ -299,7 +347,7 @@
 
           </div>
 
-          <div id="chatPane" class="chat-pane">
+          <div id="chatPane" class="chat-pane" hidden>
             <div class="chat-pane-header">
               <h3>Speaker Profile Assistant</h3>
               <div class="chat-input-actions">
@@ -340,54 +388,49 @@
           <div class="planner-main">
             <section class="panel planner-section" data-planner-panel="setup">
               <h3>Plan Setup</h3>
-              <div class="toolbar"><label>Plan<select id="planSelect"></select></label><button id="newPlan">New</button><button id="duplicatePlan">Duplicate</button><button id="deletePlan" class="danger">Delete</button></div>
+              <p class="muted">Define series goals, choose source material, speakers, and planning model, then generate formats and episode outlines.</p>
+              <div class="toolbar"><label data-help="Selects the project this setup and assistant conversation belong to.">Plan<select id="planSelect"></select></label><button id="newPlan">New</button><button id="duplicatePlan">Duplicate</button><button id="deletePlan" class="danger">Delete</button></div>
               <div class="grid">
-                <label class="full">Name<input id="planName"></label>
-                <label>Knowledge Base<select id="planKnowledge"></select></label>
-                <label>Speaker Profile<select id="planSpeakerProfile"></select></label>
-                <label>Planning model<select id="planModel"></select></label>
-                <label>Episode count (optional)<input id="planEpisodeCount" type="number" min="1" max="100" placeholder="Auto - LLM chooses"></label>
-                <label class="full">Audience<textarea id="planAudience"></textarea></label>
-                <label class="full">Goal<textarea id="planGoal"></textarea></label>
-                <label class="full">Theme<textarea id="planTheme" style="min-height:180px"></textarea></label>
-                <label><input id="planGenerateFormats" type="checkbox" checked> Generate Episode Formats</label>
-                <label>Format count<input id="planFormatCount" type="number" min="1" max="20" value="1"></label>
+                <label class="full" data-help="Names the project in selectors, histories, and generated drafts.">Name<input id="planName"></label>
+                <label data-help="Grounds planning and transcripts in uploaded source material.">Knowledge Base<select id="planKnowledge"></select></label>
+                <label data-help="Defines hosts, voices, and delivery style used by generated formats.">Speaker Profile<select id="planSpeakerProfile"></select></label>
+                <label data-help="Creates format proposals and episode outlines; it does not generate audio.">Planning model<select id="planModel"></select></label>
+                <label data-help="Fixes series length, or leaves it empty so the model chooses without padding.">Episode count (optional)<input id="planEpisodeCount" type="number" min="1" max="100" placeholder="Auto - LLM chooses"></label>
+                <label class="full" data-help="Sets listener knowledge level, interests, and expected tone.">Audience<textarea id="planAudience"></textarea></label>
+                <label class="full" data-help="Defines the useful outcome listeners should reach.">Goal<textarea id="planGoal"></textarea></label>
+                <label class="full" data-help="Sets the subject, boundaries, and central promise for the series.">Theme<textarea id="planTheme" style="min-height:180px"></textarea></label>
+                <label data-help="Creates reusable format drafts together with episode outlines."><input id="planGenerateFormats" type="checkbox" checked> Generate Episode Formats</label>
+                <label data-help="Controls how many distinct structures the generated series may use.">Format count<input id="planFormatCount" type="number" min="1" max="20" value="1"></label>
               </div>
               <div class="actions"><button id="generatePlan" class="primary">Generate plan</button></div>
             </section>
 
             <section class="panel planner-section" data-planner-panel="knowledge" hidden>
               <h3>Knowledge Base</h3>
-              <p class="muted">Upload Markdown used by planning and transcript generation.</p>
-              <div class="grid"><label>Markdown file<input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain"></label><div class="actions"><button id="uploadKnowledge" class="primary">Upload knowledge base</button></div></div>
+              <p class="muted">Upload and manage source material used by plans, assistants, and transcript generation.</p>
+              <div class="grid"><label data-help="Provides trusted source material; embedded instructions are ignored.">Markdown file<input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain"></label><div class="actions"><button id="uploadKnowledge" class="primary">Upload knowledge base</button></div></div>
               <div class="separator"></div><div id="knowledgeSummary" class="speaker-summary"><p class="muted">No knowledge base loaded.</p></div>
             </section>
 
             <section id="profiles-episodes" class="panel planner-section" data-planner-panel="formats" hidden>
               <h3>Saved Episode Formats</h3>
-              <div class="toolbar"><label>Format<select id="episodeProfileSelect"></select></label><button id="newEpisodeProfile">New</button><button id="duplicateEpisodeProfile">Duplicate</button><button id="deleteEpisodeProfile" class="danger">Delete</button></div>
+              <p class="muted">Create reusable episode structures with language, duration, speaker, and generation-model defaults.</p>
+              <div class="toolbar"><label data-help="Selects the reusable structure being reviewed or edited.">Format<select id="episodeProfileSelect"></select></label><button id="newEpisodeProfile">New</button><button id="duplicateEpisodeProfile">Duplicate</button><button id="deleteEpisodeProfile" class="danger">Delete</button></div>
               <div id="episodeProfilePills" class="profile-pills" aria-label="Selected Episode Format details"></div>
               <div class="grid">
-                <label class="full">Name<input id="epName"></label><label class="full">Description<textarea id="epDescription"></textarea></label>
-                <label>Speaker Profile<select id="epSpeakerProfile"></select></label><label>Segments<input id="epSegments" type="number" min="3" max="20"></label>
-                <label>Outline model<select id="epOutlineModel"></select></label><label>Transcript model<select id="epTranscriptModel"></select></label>
-                <label>Language<select id="epLanguage"></select></label><label>Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
-                <label class="full">Default briefing<textarea id="epBriefing" style="min-height:240px"></textarea></label>
+                <label class="full" data-help="Identifies this reusable format.">Name<input id="epName"></label><label class="full" data-help="Explains when this structure should be chosen.">Description<textarea id="epDescription"></textarea></label>
+                <label data-help="Supplies hosts and voice behavior.">Speaker Profile<select id="epSpeakerProfile"></select></label><label data-help="Defines the required outline and transcript section count.">Segments<input id="epSegments" type="number" min="3" max="20"></label>
+                <label data-help="Builds the episode outline.">Outline model<select id="epOutlineModel"></select></label><label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="epTranscriptModel"></select></label>
+                <label data-help="Controls transcript language and compatible voices.">Language<select id="epLanguage"></select></label><label data-help="Sets expected transcript length and duration checks.">Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
+                <label class="full" data-help="Provides reusable structural and editorial instructions for every episode using this format.">Default briefing<textarea id="epBriefing" style="min-height:240px"></textarea></label>
               </div>
               <div class="actions"><button id="saveEpisodeFormats">Save Episode Formats</button></div>
             </section>
 
-            <section class="panel planner-section" data-planner-panel="format-drafts" hidden><div class="view-header"><h3>Generated Episode Format Drafts</h3><div class="actions" style="margin:0"><label class="bulk-check"><input id="selectAllUnsavedFormats" type="checkbox"> Select all unsaved</label><button id="saveSelectedFormats">Save selected</button><button id="saveAllUnsavedFormats">Save all unsaved</button></div></div><div id="planFormatDrafts" class="plan-list"><p class="muted">Generate plan to create format drafts.</p></div></section>
-            <section class="panel planner-section" data-planner-panel="episodes" hidden><div class="view-header"><h3>Planned Episodes</h3><button id="createSelectedEpisodes">Create selected drafts</button></div><div class="internal-nav-layout"><div id="plannedEpisodeSidebar" class="internal-sidebar" role="navigation" aria-label="Planned episodes"></div><div id="plannedEpisodes" class="plan-list"><p class="muted">Generate plan to create episodes.</p></div></div></section>
+            <section class="panel planner-section" data-planner-panel="format-drafts" hidden><div class="view-header"><h3>Generated Episode Format Drafts</h3><div class="actions" style="margin:0"><label class="bulk-check"><input id="selectAllUnsavedFormats" type="checkbox"> Select all unsaved</label><button id="saveSelectedFormats">Save selected</button><button id="saveAllUnsavedFormats">Save all unsaved</button></div></div><p class="muted">Review format proposals from this plan, then save selected drafts as reusable Episode Formats.</p><div id="planFormatDrafts" class="plan-list"><p class="muted">Generate plan to create format drafts.</p></div></section>
+            <section class="panel planner-section" data-planner-panel="episodes" hidden><div class="view-header"><h3>Planned Episodes</h3><button id="createSelectedEpisodes">Create selected drafts</button></div><p class="muted">Review generated episode outlines, choose formats, and create saved drafts for transcript generation.</p><div class="internal-nav-layout"><div id="plannedEpisodeSidebar" class="internal-sidebar" role="navigation" aria-label="Planned episodes"></div><div id="plannedEpisodes" class="plan-list"><p class="muted">Generate plan to create episodes.</p></div></div></section>
           </div>
 
-          <div id="plannerChatPane" class="chat-pane">
-            <div class="chat-pane-header"><h3>Planner Assistant</h3><div class="chat-input-actions"><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
-            <div class="chat-controls"><label>Chat history<select id="plannerChatHistory"></select></label><label>Model<select id="plannerChatModel"></select></label><label>Knowledge base (optional)<select id="plannerChatKb"><option value="">None</option></select></label></div>
-            <div id="plannerChatMessages" class="chat-messages"><div class="chat-msg system">Describe series, book, audience, or single episode you want to plan.</div></div>
-            <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span>Thinkingâ€¦</span></div>
-            <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe what you want to plan."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary">Send</button></div></div>
-          </div>
         </div>
       </div>
 
@@ -396,7 +439,7 @@
           <h2>Transcript Generator</h2>
           <p class="muted">For one-off episodes, use this view directly. For books or series, start in Content Planner.</p>
           <div class="toolbar">
-            <label>Saved episode<select id="savedEpisodeSelect"><option value="">New episode</option></select></label>
+            <label data-help="Loads the episode draft and keeps Transcript and TTS on the same selection.">Saved episode<select id="savedEpisodeSelect"><option value="">New episode</option></select></label>
             <button id="newEpisode">New Single Episode</button>
             <span></span><span></span>
           </div>
@@ -404,12 +447,13 @@
             <button id="transcriptScriptTab" type="button">Script</button>
             <button id="transcriptPromptTab" type="button">Prompt &amp; Cues</button>
           </div>
+          <div class="actions"><label class="bulk-check" data-help="Queues audio automatically only after transcript generation succeeds."><input id="autoGenerateTts" type="checkbox"> Generate TTS after transcript</label></div>
           <section id="transcript-script-panel">
             <div class="grid three">
-              <label class="full">Episode Format<select id="buildEpisodeProfile"></select></label>
-              <label class="full">Knowledge Base<select id="buildKnowledge"></select></label>
-              <label class="full">Episode name<input id="episodeName" placeholder="Ep. 01 — Title"></label>
-              <label class="full">Additional instructions<textarea id="additionalInstructions" style="min-height:190px"></textarea></label>
+              <label class="full" data-help="Provides structure, speakers, models, language, and target duration.">Episode Format<select id="buildEpisodeProfile"></select></label>
+              <label class="full" data-help="Grounds this episode in uploaded source material.">Knowledge Base<select id="buildKnowledge"></select></label>
+              <label class="full" data-help="Names the saved draft, jobs, rendered file, and player entry.">Episode name<input id="episodeName" placeholder="Ep. 01 — Title"></label>
+              <label class="full" data-help="Adds episode-specific facts, boundaries, and editorial direction.">Additional instructions<textarea id="additionalInstructions" style="min-height:190px"></textarea></label>
             </div>
             <div class="actions">
               <button id="saveEpisode">Save draft</button>
@@ -419,21 +463,21 @@
             <div class="separator"></div>
             <p class="muted">Format: <code>## Segmento</code>, then <code>Speaker [optional delivery cue]: spoken text</code>. One turn per line.</p>
             <div class="actions">
-              <label style="display:inline-grid">Import transcript<input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
+              <label style="display:inline-grid" data-help="Loads an existing Markdown script instead of generating one.">Import transcript<input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
               <span id="wordCount" class="muted">0 words</span>
             </div>
             <p id="transcriptLengthWarning" class="warning" hidden></p>
             <textarea id="transcript" class="transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
-            <div class="actions"><button id="saveTranscript" class="primary">Save transcript</button></div>
+            <div class="actions"><button id="saveTranscript" class="primary">Save transcript</button><button id="saveTranscriptAndTts">Save + go to TTS</button></div>
           </section>
           <section id="transcript-prompt-panel" hidden>
             <p class="muted">Rules resolve from each speaker's TTS model. References: <a href="https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/speech-synthesis-v2.5" target="_blank" rel="noreferrer">MiMo</a> · <a href="https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices" target="_blank" rel="noreferrer">ElevenLabs</a> · <a href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noreferrer">Chatterbox</a>.</p>
             <div id="transcriptCapabilitySummary" class="speaker-summary"></div>
-            <label>Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly style="min-height:240px"></textarea></label>
-            <label>Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" style="min-height:160px" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
+            <label data-help="Shows non-editable syntax and capability constraints resolved from selected models.">Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly style="min-height:240px"></textarea></label>
+            <label data-help="Adds reviewed creative direction without replacing provider rules.">Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" style="min-height:160px" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
             <div class="actions"><button id="resetTranscriptPrompt">Clear guidance</button><button id="saveTranscriptPrompt">Save draft</button><button id="generateTranscriptFromPrompt" class="primary">Generate transcript</button></div>
             <div class="separator"></div>
-            <div id="transcriptChatPane" class="chat-pane" style="position:static;max-height:none">
+            <div id="transcriptChatPane" class="chat-pane" style="position:static;max-height:none" hidden>
               <div class="chat-pane-header"><h3>Transcript Prompt Assistant</h3><div class="chat-input-actions"><button id="transcriptChatReset">New Chat</button><button id="transcriptChatDelete" class="danger">Delete</button></div></div>
               <div class="chat-controls">
                 <label>Chat history<select id="transcriptChatHistory"></select></label>
@@ -451,8 +495,8 @@
       <div id="view-tts" class="view" hidden>
         <section class="panel">
           <h2>TTS Generator</h2>
-          <label>Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
-          <label>TTS language override<select id="ttsLanguageOverride"><option value="">Use episode profile language</option></select></label>
+          <label data-help="Chooses the saved transcript and frozen profile snapshot to render.">Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
+          <label data-help="Overrides pronunciation language for this render without changing the Episode Format.">TTS language override<select id="ttsLanguageOverride"><option value="">Use episode profile language</option></select></label>
           <div id="ttsSummary" class="speaker-summary"><p class="muted">Select a saved episode with a transcript.</p></div>
           <div id="previewButtons" class="actions"></div>
           <p class="warning">Preview every voice before rendering. MiMo preset TTS is blocked outside English/Chinese; other languages require a compatible ElevenLabs model and <code>ELEVENLABS_API_KEY</code>.</p>
@@ -489,6 +533,10 @@
           </section>
           <section class="panel">
             <div class="view-header"><div><h3>Up Next</h3><p class="muted">Upcoming episodes only.</p></div><button id="clearPlayerQueue" type="button" disabled>Clear queue</button></div>
+            <div class="playlist-controls">
+              <label>Playlist<select id="playerPlaylistSelect"><option value="">No saved playlists</option></select></label>
+              <div class="actions"><button id="savePlayerPlaylist" type="button">Save as</button><button id="loadPlayerPlaylist" type="button">Load</button><button id="updatePlayerPlaylist" type="button">Update</button><button id="renamePlayerPlaylist" type="button">Rename</button><button id="deletePlayerPlaylist" type="button" class="danger">Delete</button></div>
+            </div>
             <div id="playerQueue" class="player-list"><p class="muted">Queue is empty.</p></div>
           </section>
         </div>
@@ -510,6 +558,7 @@
         <div class="dialog-body">
           <div class="view-header"><div><h2 id="modelDialogTitle">Active models</h2><p id="modelDialogStatus" class="muted"></p></div><button id="closeModelDialog" type="button">Close</button></div>
           <label>Search models<input id="modelSearch" type="search" placeholder="Search discovered models"></label>
+          <label class="bulk-check"><input id="modelSelectedOnly" type="checkbox"> Selected only</label>
           <div class="actions"><button id="toggleFilteredModels" type="button">Select all filtered</button><span id="modelSelectionCount" class="muted"></span></div>
           <div id="modelSelectionList" class="model-list"></div>
           <div class="grid">
@@ -537,13 +586,17 @@
     const openaiLegacyVoices = new Set(["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]);
     const ttsCueRe = /\[[^\]\r\n]{1,80}\]|<break\b[^>]*\/?>/gi;
     const $ = (id) => document.getElementById(id);
+    const VIEW_SELECTIONS_KEY = "podcast-builder.view-selections.v1";
+    const viewSelections = loadViewSelections();
+    const rememberedEpisodeId = viewSelections.episodeId || "";
+    const rememberedPlanId = viewSelections.planId || "";
     let state;
     let modelCatalog = { status: "loading", languages: [], providers: { mimo: { textModels: [], ttsModels: [], discoveredModels: [] }, elevenlabs: { ttsModels: [], discoveredModels: [] }, openai: { textModels: [], ttsModels: [], discoveredModels: [] }, chatterbox: { textModels: [], ttsModels: [], discoveredModels: [] }, compatible: [] } };
     let jobsState = { activeJobId: null, jobs: [] };
     let currentEpisode = null;
     let configState = null;
-    let activeSpeakerProfileId = "";
-    let activeEpisodeProfileId = "";
+    let activeSpeakerProfileId = viewSelections.speakerProfileId || "";
+    let activeEpisodeProfileId = viewSelections.episodeProfileId || "";
     let activeProfileSection = "speakers";
     let previewUrl = "";
     let elevenVoices = [];
@@ -557,8 +610,9 @@
     let jobPollTimer = null;
     let modelPollTimer = null;
     let hadActiveJobs = false;
+    const autoTtsTranscriptJobs = new Set();
     let notifications = [];
-    let activeTranscriptSection = "script";
+    let activeTranscriptSection = ["script", "prompt"].includes(viewSelections.transcriptSection) ? viewSelections.transcriptSection : "script";
     let transcriptPromptState = null;
     let transcriptPromptDirty = false;
     let transcriptChatThread = null;
@@ -570,20 +624,38 @@
     let activeChatThreadId = "";
     let chatBusy = false;
     let chatLoadVersion = 0;
-    let activePlanId = "";
+    let activePlanId = rememberedPlanId;
     let activePlan = null;
     let planDirty = false;
     let plannerChatThreadId = "";
     let plannerChatThread = null;
     let plannerChatThreads = [];
     let plannerChatBusy = false;
-    let activePlannerSection = "setup";
+    let activePlannerSection = ["knowledge", "setup", "formats", "format-drafts", "episodes"].includes(viewSelections.plannerSection) ? viewSelections.plannerSection : "setup";
+    let activeFormatDraftId = "";
     let activePlannedEpisodeId = "";
     let activeSpeakerIndex = 0;
     let playingEpisodeId = "";
     let playerQueue = [];
     let playerFailed = false;
     let playerPlaybackRate = 1;
+    const PLAYER_PLAYLISTS_KEY = "podcast-builder.playlists.v1";
+    let playerPlaylists = loadPlayerPlaylists();
+    let activePlayerPlaylistId = playerPlaylists[0]?.id || "";
+
+    function loadViewSelections() {
+      try {
+        const value = JSON.parse(sessionStorage.getItem(VIEW_SELECTIONS_KEY) || "{}");
+        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function rememberViewSelection(key, value) {
+      viewSelections[key] = value || "";
+      try { sessionStorage.setItem(VIEW_SELECTIONS_KEY, JSON.stringify(viewSelections)); } catch {}
+    }
 
     function notify(message, type = "") {
       notifications = [{ message: String(message || ""), type: type || "info" }, ...notifications].slice(0, 5);
@@ -683,7 +755,7 @@
     function setView(view) {
       const aliases = { profiles: "speakers", knowledge: "planner" };
       const candidate = aliases[view] || view;
-      const selected = ["speakers", "planner", "transcript", "tts", "player", "config"].includes(candidate) ? candidate : "config";
+      const selected = ["speakers", "planner", "transcript", "tts", "player", "config"].includes(candidate) ? candidate : "planner";
       document.querySelectorAll(".view").forEach((node) => { node.hidden = node.id !== `view-${selected}`; });
       document.querySelectorAll("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === selected));
       if (location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
@@ -693,6 +765,80 @@
       if (selected === "config") renderConfigView();
       if (selected === "speakers") loadChatThread();
       if (selected === "planner") { renderPlannerSections(); loadPlannerChatThread(); }
+      renderPodcastAssistant();
+    }
+
+    function activeViewName() {
+      return document.querySelector(".view:not([hidden])")?.id.replace("view-", "") || "planner";
+    }
+
+    function assistantContext() {
+      const view = activeViewName();
+      return {
+        view,
+        plannerSection: view === "planner" ? activePlannerSection : "",
+        transcriptSection: view === "transcript" ? activeTranscriptSection : "",
+        episodeProfileId: activeEpisodeProfileId,
+        formatDraftIds: [...document.querySelectorAll("[data-format-check]:checked")].map((item) => item.dataset.formatCheck),
+        formatDraftId: activeFormatDraftId,
+        plannedEpisodeId: activePlannedEpisodeId,
+        episodeId: currentEpisode?.id || "",
+      };
+    }
+
+    function assistantWorkspaceDraft() {
+      const view = activeViewName();
+      if (view === "planner" && activePlannerSection === "formats") return {
+        id: activeEpisodeProfileId, name: $("epName").value, description: $("epDescription").value, speakerProfileId: $("epSpeakerProfile").value,
+        numSegments: Number($("epSegments").value), outlineModel: $("epOutlineModel").value, transcriptModel: $("epTranscriptModel").value,
+        language: $("epLanguage").value, targetMinutes: Number($("epMinutes").value), defaultBriefing: $("epBriefing").value,
+      };
+      if (view === "transcript") return {
+        id: currentEpisode?.id || "", name: $("episodeName").value, episodeProfileId: $("buildEpisodeProfile").value, knowledgeBaseId: $("buildKnowledge").value,
+        additionalInstructions: $("additionalInstructions").value, transcriptPromptGuidance: $("transcriptPromptGuidance").value,
+      };
+      if (view === "tts") return { episodeId: currentEpisode?.id || "", languageOverride: $("ttsLanguageOverride").value };
+      return null;
+    }
+
+    function renderPodcastAssistant() {
+      const view = activeViewName();
+      const visible = ["planner", "transcript", "tts"].includes(view);
+      $("podcastAssistant").hidden = !visible;
+      $("appMain").classList.toggle("assistant-active", visible);
+      if (!visible) return;
+      const sectionLabels = { knowledge: "Knowledge Base", setup: "Plan Setup", formats: "Saved Episode Formats", "format-drafts": "Generated Episode Format Drafts", episodes: "Planned Episodes", script: "Transcript Script", prompt: "Prompt & Cues" };
+      const focus = view === "planner" ? sectionLabels[activePlannerSection] : view === "transcript" ? sectionLabels[activeTranscriptSection] : "TTS Generation";
+      $("assistantContext").textContent = `Helping with: ${focus}`;
+      const plans = state?.plans || [];
+      $("assistantPlanSelect").innerHTML = option("", plans.length ? "Select plan" : "New plan on first message", !activePlanId) + plans.map((item) => option(item.id, item.name, item.id === activePlanId)).join("");
+      const planned = activePlan?.episodes || [];
+      const created = planned.map((item) => state?.episodes.find((episode) => episode.id === item.createdEpisodeId)).filter(Boolean);
+      const transcriptCount = created.filter((episode) => episode.transcriptWords > 0).length;
+      const audioCount = created.filter((episode) => episode.audioReady).length;
+      const selectedSpeaker = state?.profiles.speakerProfiles.find((item) => item.id === activePlan?.speakerProfileId);
+      const activeTtsModels = new Set(discoveredModels("tts").map((item) => item.id));
+      const profilesReady = Boolean(selectedSpeaker && activeTtsModels.has(selectedSpeaker.voiceModel) && selectedSpeaker.speakers.every((speaker) => !speaker.ttsModelOverride || activeTtsModels.has(speaker.ttsModelOverride)));
+      const formatsReady = Boolean(activePlan && (activePlan.formatDrafts.length ? activePlan.formatDrafts.every((item) => item.savedEpisodeProfileId) : planned.length && planned.every((item) => item.episodeProfileId)));
+      const stages = [
+        ["Setup", Boolean(activePlan?.theme && activePlan?.planningModel && activePlan?.speakerProfileId), "planner:setup"],
+        ["Profiles", profilesReady, "speakers"],
+        ["Plan", planned.length > 0, planned.length ? "planner:episodes" : "planner:setup"],
+        ["Formats", formatsReady, "planner:format-drafts"],
+        [`Episodes ${created.length}/${planned.length}`, Boolean(planned.length && created.length === planned.length), "planner:episodes"],
+        [`Transcript ${transcriptCount}/${created.length}`, Boolean(created.length && transcriptCount === created.length), "transcript"],
+        [`Audio ${audioCount}/${created.length}`, Boolean(created.length && audioCount === created.length), "tts"],
+      ];
+      $("assistantProgress").innerHTML = stages.map(([label, complete, target]) => `<button type="button" data-assistant-target="${target}" class="${complete ? "complete" : ""}">${complete ? "✓ " : ""}${escapeHtml(label)}</button>`).join("");
+      const prompts = view === "planner"
+        ? activePlannerSection === "formats" ? ["Improve this Episode Format", "Create a new format", "Explain missing fields"]
+          : activePlannerSection === "format-drafts" ? ["Review focused format", "Improve checked formats", "What should I save?"]
+          : activePlannerSection === "episodes" ? ["Improve this episode", "Review checked episodes", "What is the next step?"]
+          : activePlannerSection === "knowledge" ? ["How should I use this source?", "What source is missing?"]
+          : ["Help shape this podcast", "Fill missing setup fields", "What should I decide next?"]
+        : view === "transcript" ? ["Improve episode guidance", "Check transcript readiness", "What should I do next?"]
+          : ["Check voice readiness", "Help choose language", "What should I render next?"];
+      $("assistantPrompts").innerHTML = prompts.map((text) => `<button type="button" data-assistant-prompt="${escapeHtml(text)}">${escapeHtml(text)}</button>`).join("");
     }
 
     function modelProviders() {
@@ -748,10 +894,14 @@
       const jobs = [...activeJobs(), ...jobsState.jobs.filter((job) => !["queued", "running"].includes(job.status))]
         .filter((job, index, all) => all.findIndex((item) => item.id === job.id) === index)
         .slice(0, 4);
-      $("serverActivity").innerHTML = jobs.length ? jobs.map((job) => `<details class="job-item" data-job-id="${escapeHtml(job.id)}" data-status="${escapeHtml(job.status)}"${openJobs.has(job.id) ? " open" : ""}>
-        <summary>[${escapeHtml(job.type.toLowerCase())} - ${escapeHtml(job.status)} - ${escapeHtml(job.episodeName || job.episodeId)}]</summary>
-        <div class="job-detail"><strong>${escapeHtml(job.episodeName || job.episodeId)}</strong><span class="muted">${escapeHtml(job.type.toUpperCase())} · ${escapeHtml(job.status)}</span><br><span>${escapeHtml(job.message || job.phase)}</span></div>
-      </details>`).join("") : '<span class="muted">Idle</span>';
+      $("serverActivity").innerHTML = jobs.length ? jobs.map((job) => {
+        const label = `[${job.type.toLowerCase()} - ${job.status} - ${job.episodeName || job.episodeId}]`;
+        if (job.type === "tts" && job.status === "completed") return `<button type="button" class="job-item" data-job-player="${escapeHtml(job.episodeId)}" title="Open rendered MP3 in Player">${escapeHtml(label)}</button>`;
+        return `<details class="job-item" data-job-id="${escapeHtml(job.id)}" data-status="${escapeHtml(job.status)}"${openJobs.has(job.id) ? " open" : ""}>
+          <summary>${escapeHtml(label)}</summary>
+          <div class="job-detail"><strong>${escapeHtml(job.episodeName || job.episodeId)}</strong><span class="muted">${escapeHtml(job.type.toUpperCase())} · ${escapeHtml(job.status)}</span><br><span>${escapeHtml(job.message || job.phase)}</span></div>
+        </details>`;
+      }).join("") : '<span class="muted">Idle</span>';
     }
 
     function currentJob(type) {
@@ -770,6 +920,8 @@
       $("saveEpisode").disabled = episodeBusy;
       $("saveTranscriptPrompt").disabled = episodeBusy;
       $("saveTranscript").disabled = episodeBusy;
+      $("saveTranscriptAndTts").disabled = episodeBusy;
+      $("autoGenerateTts").disabled = episodeBusy;
       $("applyLatestProfiles").disabled = episodeBusy || !currentEpisode || episodeProfilesAreCurrent();
       $("renderAudio").disabled = episodeBusy || ttsCompatibilityErrors().length > 0 || !currentEpisode?.transcript;
 
@@ -801,7 +953,19 @@
         if (["failed", "interrupted"].includes(latest?.status)) notify(latest.error || latest.message, "error");
       }
       hadActiveJobs = running;
-      if (running) jobPollTimer = setTimeout(() => refreshJobs().catch((error) => notify(error.message, "error")), 1000);
+      for (const job of jobsState.jobs.filter((item) => autoTtsTranscriptJobs.has(item.id) && !["queued", "running"].includes(item.status))) {
+        autoTtsTranscriptJobs.delete(job.id);
+        if (job.status !== "completed") continue;
+        try {
+          await queueTts(job.episodeId);
+        } catch (error) {
+          notify(`Transcript saved, but automatic TTS could not start: ${error.message || String(error)}`, "error");
+        }
+      }
+      if (activeJobs().length > 0) {
+        clearTimeout(jobPollTimer);
+        jobPollTimer = setTimeout(() => refreshJobs().catch((error) => notify(error.message, "error")), 1000);
+      }
     }
 
     function trackJob(job) {
@@ -874,7 +1038,7 @@
       $("savedEpisodeSelect").innerHTML = '<option value="">New episode</option>' + episodeOptions;
       $("ttsEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
       $("knowledgeSummary").innerHTML = state.knowledgeBases.length
-        ? state.knowledgeBases.map((item) => `<div><strong>${escapeHtml(item.name)}</strong><br><span class="muted">${item.characters.toLocaleString()} characters</span></div>`).join("")
+        ? state.knowledgeBases.map((item) => `<div class="view-header"><div><strong>${escapeHtml(item.name)}</strong><br><span class="muted">${item.characters.toLocaleString()} characters</span></div><button type="button" class="danger" data-delete-knowledge="${escapeHtml(item.id)}">Delete</button></div>`).join("")
         : '<p class="muted">No knowledge base loaded.</p>';
     }
 
@@ -1072,6 +1236,7 @@
       $("modelDialogTitle").textContent = `${target.name} active models`;
       $("modelDialogStatus").textContent = providerStatus(target.provider);
       $("modelSearch").value = "";
+      $("modelSelectedOnly").checked = false;
       $("customModelId").value = "";
       $("customModelType").innerHTML = modelTypeOptions(target.onlyTts ? "tts" : "text", target.onlyTts);
       $("modelSelectionList").innerHTML = [...byId.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([rawId, model]) => modelSelectionRow(rawId, model.suggested, active[rawId], target.onlyTts)).join("") || '<p class="muted">No models discovered. Add a custom model ID below.</p>';
@@ -1086,7 +1251,10 @@
 
     function filterModelSelection() {
       const query = $("modelSearch").value.trim().toLowerCase();
-      $("modelSelectionList").querySelectorAll(".model-row").forEach((row) => { row.hidden = Boolean(query && !row.dataset.search.includes(query)); });
+      const selectedOnly = $("modelSelectedOnly").checked;
+      $("modelSelectionList").querySelectorAll(".model-row").forEach((row) => {
+        row.hidden = Boolean(query && !row.dataset.search.includes(query)) || selectedOnly && !row.querySelector('[data-model-active]').checked;
+      });
     }
 
     function toggleFilteredModels() {
@@ -1094,6 +1262,7 @@
       const checked = boxes.length > 0 && boxes.every((box) => box.checked);
       boxes.forEach((box) => { box.checked = !checked; });
       updateModelSelectionCount();
+      filterModelSelection();
     }
 
     function addCustomModelRow() {
@@ -1115,6 +1284,14 @@
         const mode = row.querySelector('[data-model-type]').value;
         activeModels[row.dataset.modelId] = { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) };
       });
+      const used = usedProfileModels();
+      const affected = [];
+      for (const [rawId, capability] of Object.entries(target.connection.activeModels || {})) {
+        const modelId = ["mimo", "elevenlabs"].includes(modelDialogTarget.id) ? rawId : `compat:${modelDialogTarget.id}:${rawId}`;
+        if (capability.text && !activeModels[rawId]?.text && used.text.has(modelId)) affected.push(modelId);
+        if (capability.tts && !activeModels[rawId]?.tts && used.tts.has(modelId)) affected.push(modelId);
+      }
+      if (affected.length) alert(`Warning: ${[...new Set(affected)].join(", ")} is used by a profile. It will remain saved but unavailable until reactivated or replaced.`);
       target.connection.activeModels = activeModels;
       configDirty = true;
       $("modelDialog").close();
@@ -1126,6 +1303,7 @@
       if (!profile) return;
       if (id !== activeSpeakerProfileId) activeSpeakerIndex = 0;
       activeSpeakerProfileId = id;
+      rememberViewSelection("speakerProfileId", id);
       $("spName").value = profile.name;
       $("spDescription").value = profile.description || "";
       $("spVoiceModel").innerHTML = modelOptions(profile.voiceModel);
@@ -1324,6 +1502,7 @@
       const profile = state.profiles.episodeProfiles.find((item) => item.id === id);
       if (!profile) return;
       activeEpisodeProfileId = id;
+      rememberViewSelection("episodeProfileId", id);
       $("epName").value = profile.name;
       $("epDescription").value = profile.description || "";
       $("epSpeakerProfile").innerHTML = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === profile.speakerProfileId)).join("");
@@ -1433,7 +1612,10 @@
       renderProfileOptions();
       renderBuildOptions();
       renderTtsView();
-      notify("Config saved.", "ok");
+      if (value.warnings?.length) {
+        alert(`Config saved with warnings:\n\n${value.warnings.join("\n")}`);
+        notify(`Config saved with warnings: ${value.warnings.join(" ")}`, "warning");
+      } else notify("Config saved.", "ok");
     }
 
     async function uploadKnowledge() {
@@ -1450,9 +1632,27 @@
       notify(`Uploaded ${item.name}.`, "ok");
     }
 
+    async function deleteKnowledgeBase(id) {
+      const item = state.knowledgeBases.find((knowledge) => knowledge.id === id);
+      if (!item) return;
+      const plans = state.plans.filter((plan) => plan.knowledgeBaseId === id).length;
+      const episodes = state.episodes.filter((episode) => episode.knowledgeBaseId === id).length;
+      if (!confirm(`Delete "${item.name}"?\n\nThis will clear it from ${plans} plan(s), ${episodes} episode(s), and any assistant chats using it. Cancel if you want to clear those references manually first.`)) return;
+      const result = await api(`/api/knowledge/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if ($("buildKnowledge").value === id) $("buildKnowledge").value = "";
+      if (currentEpisode?.knowledgeBaseId === id) currentEpisode.knowledgeBaseId = "";
+      if (activePlan?.knowledgeBaseId === id) { activePlan.knowledgeBaseId = ""; $("planKnowledge").value = ""; }
+      if (chatThread?.kbId === id) chatThread.kbId = "";
+      if (transcriptChatThread?.kbId === id) transcriptChatThread.kbId = "";
+      if (plannerChatThread?.kbId === id) plannerChatThread.kbId = "";
+      await refreshState(currentEpisode?.id);
+      notify(`Deleted ${item.name}. Cleared ${result.cleared.plans} plan(s), ${result.cleared.episodes} episode(s), and ${result.cleared.chats} chat(s).`, "ok");
+    }
+
     function renderPlannerSections() {
       document.querySelectorAll("[data-planner-panel]").forEach((panel) => { panel.hidden = panel.dataset.plannerPanel !== activePlannerSection; });
       document.querySelectorAll("[data-planner-section]").forEach((button) => button.classList.toggle("active", button.dataset.plannerSection === activePlannerSection));
+      renderPodcastAssistant();
     }
 
     function renderPlannerOptions() {
@@ -1461,6 +1661,7 @@
       if (activePlanId && !plans.some((item) => item.id === activePlanId)) {
         activePlanId = "";
         activePlan = null;
+        rememberViewSelection("planId", "");
       }
       if (!activePlanId && plans[0]) {
         activePlanId = plans[0].id;
@@ -1483,11 +1684,13 @@
       $("duplicatePlan").disabled = !activePlan;
       $("deletePlan").disabled = !activePlan;
       $("generatePlan").disabled = !activePlan;
+      renderPodcastAssistant();
     }
 
     function loadPlanForm(plan) {
       activePlan = structuredClone(plan);
       activePlanId = plan.id;
+      rememberViewSelection("planId", plan.id);
       $("planName").value = plan.name;
       $("planEpisodeCount").value = plan.episodeCount ?? "";
       $("planAudience").value = plan.audience;
@@ -1500,6 +1703,7 @@
       $("planModel").value = plan.planningModel;
       renderPlanCollections();
       planDirty = false;
+      renderPodcastAssistant();
     }
 
     function capturePlanDraft() {
@@ -1530,7 +1734,7 @@
     }
 
     async function loadPlan(id, force = false) {
-      if (!id) { activePlanId = ""; activePlan = null; renderPlannerOptions(); renderPlanCollections(); return; }
+      if (!id) { activePlanId = ""; activePlan = null; rememberViewSelection("planId", ""); renderPlannerOptions(); renderPlanCollections(); return; }
       if (!force && planDirty && id !== activePlanId && !confirm("Discard unsaved plan changes?")) { $("planSelect").value = activePlanId; return; }
       const data = await api(`/api/plans/${encodeURIComponent(id)}`);
       loadPlanForm(data.plan);
@@ -1601,6 +1805,7 @@
       activePlannedEpisodeId = id;
       document.querySelectorAll("[data-planned-nav]").forEach((button) => button.classList.toggle("active", button.dataset.plannedNav === id));
       document.querySelectorAll("[data-planned-episode-id]").forEach((card) => { card.hidden = card.dataset.plannedEpisodeId !== id; });
+      renderPodcastAssistant();
     }
 
     function renderPlanCollections() {
@@ -1612,12 +1817,13 @@
         renderFormatBulkControls();
         return;
       }
+      activeFormatDraftId = plan.formatDrafts.some((draft) => draft.id === activeFormatDraftId) ? activeFormatDraftId : plan.formatDrafts[0]?.id || "";
       $("planFormatDrafts").innerHTML = plan.formatDrafts.length ? plan.formatDrafts.map((draft) => `<div class="plan-card" data-format-draft-id="${escapeHtml(draft.id)}">
-        <div class="plan-card-head"><h3><label><input type="checkbox" data-format-check="${escapeHtml(draft.id)}"> ${escapeHtml(draft.name)}</label></h3><span class="badge">${draft.savedEpisodeProfileId ? `Saved as ${escapeHtml(draft.savedEpisodeProfileId)}` : "Unsaved"}</span></div>
-        <div class="grid"><label class="full">Name<input data-draft-field="name" value="${escapeHtml(draft.name)}"></label><label class="full">Description<textarea data-draft-field="description">${escapeHtml(draft.description)}</textarea></label>
-        <label>Speaker Profile<select data-draft-field="speakerProfileId">${state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === draft.speakerProfileId)).join("")}</select></label><label>Segments<input type="number" min="3" max="20" data-draft-field="numSegments" value="${draft.numSegments}"></label>
-        <label>Outline model<select data-draft-field="outlineModel">${textModelOptions(draft.outlineModel)}</select></label><label>Transcript model<select data-draft-field="transcriptModel">${textModelOptions(draft.transcriptModel)}</select></label>
-        <label>Language<select data-draft-field="language">${languageOptions(draft.language)}</select></label><label>Minutes<input type="number" min="5" max="60" data-draft-field="targetMinutes" value="${draft.targetMinutes}"></label><label class="full">Default briefing<textarea data-draft-field="defaultBriefing">${escapeHtml(draft.defaultBriefing)}</textarea></label></div>
+        <div class="plan-card-head"><h3><label><input type="checkbox" data-format-check="${escapeHtml(draft.id)}"> ${escapeHtml(draft.name)}</label></h3><div class="actions" style="margin:0"><button type="button" data-focus-format="${escapeHtml(draft.id)}"${draft.id === activeFormatDraftId ? " disabled" : ""}>${draft.id === activeFormatDraftId ? "Assistant focused" : "Focus assistant"}</button><span class="badge">${draft.savedEpisodeProfileId ? `Saved as ${escapeHtml(draft.savedEpisodeProfileId)}` : "Unsaved"}</span></div></div>
+        <div class="grid"><label class="full" data-help="Identifies this proposed reusable structure.">Name<input data-draft-field="name" value="${escapeHtml(draft.name)}"></label><label class="full" data-help="Explains when this format fits an episode.">Description<textarea data-draft-field="description">${escapeHtml(draft.description)}</textarea></label>
+        <label data-help="Provides hosts and delivery behavior.">Speaker Profile<select data-draft-field="speakerProfileId">${state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === draft.speakerProfileId)).join("")}</select></label><label data-help="Defines required episode sections.">Segments<input type="number" min="3" max="20" data-draft-field="numSegments" value="${draft.numSegments}"></label>
+        <label data-help="Creates outlines for this format.">Outline model<select data-draft-field="outlineModel">${textModelOptions(draft.outlineModel)}</select></label><label data-help="Writes scripts from approved outlines.">Transcript model<select data-draft-field="transcriptModel">${textModelOptions(draft.transcriptModel)}</select></label>
+        <label data-help="Controls transcript language and compatible voices.">Language<select data-draft-field="language">${languageOptions(draft.language)}</select></label><label data-help="Sets duration and transcript-length expectations.">Minutes<input type="number" min="5" max="60" data-draft-field="targetMinutes" value="${draft.targetMinutes}"></label><label class="full" data-help="Reusable editorial instructions for episodes using this format.">Default briefing<textarea data-draft-field="defaultBriefing">${escapeHtml(draft.defaultBriefing)}</textarea></label></div>
         <div class="actions"><button data-save-format="${escapeHtml(draft.id)}" data-overwrite="${draft.savedEpisodeProfileId ? "true" : "false"}">${draft.savedEpisodeProfileId ? "Update Format" : "Save Format"}</button></div></div>`).join("") : '<p class="muted">Generate plan to create format drafts.</p>';
       renderFormatBulkControls();
       activePlannedEpisodeId = plan.episodes.some((episode) => episode.id === activePlannedEpisodeId) ? activePlannedEpisodeId : plan.episodes[0]?.id || "";
@@ -1627,7 +1833,7 @@
         const draftOptions = plan.formatDrafts.map((item) => option(`draft:${item.id}`, `Draft — ${item.name}`, selected === `draft:${item.id}`)).join("");
         const savedOptions = state.profiles.episodeProfiles.filter((item) => item.speakerProfileId === plan.speakerProfileId).map((item) => option(`saved:${item.id}`, `Saved — ${item.name}`, selected === `saved:${item.id}`)).join("");
         return `<div class="plan-card" data-planned-episode-id="${escapeHtml(episode.id)}"${episode.id === activePlannedEpisodeId ? "" : " hidden"}><div class="plan-card-head"><h3><label><input type="checkbox" data-plan-episode-check="${escapeHtml(episode.id)}"> ${episode.number}. ${escapeHtml(episode.title)}</label></h3><span class="badge">${episode.createdEpisodeId ? "Draft created" : "Not created"}</span></div>
-          <div class="grid"><label class="full">Title<input data-episode-field="title" value="${escapeHtml(episode.title)}"></label><label class="full">Premise<textarea data-episode-field="premise">${escapeHtml(episode.premise)}</textarea></label><label class="full">Knowledge scope<textarea data-episode-field="knowledgeScope">${escapeHtml(episode.knowledgeScope)}</textarea></label><label class="full">Key points, one per line<textarea data-episode-field="keyPoints">${escapeHtml(episode.keyPoints.join("\n"))}</textarea></label><label class="full">Listener outcome<textarea data-episode-field="listenerOutcome">${escapeHtml(episode.listenerOutcome)}</textarea></label><label class="full">Episode Format<select data-episode-format>${option("", "Select saved format", !selected)}${draftOptions}${savedOptions}</select></label><label class="full">Additional instructions<textarea data-episode-field="additionalInstructions">${escapeHtml(episode.additionalInstructions)}</textarea></label><label class="full">Transcript Prompt Guidance<textarea data-episode-field="transcriptPromptGuidance">${escapeHtml(episode.transcriptPromptGuidance)}</textarea></label></div>
+          <div class="grid"><label class="full" data-help="Names the future saved episode.">Title<input data-episode-field="title" value="${escapeHtml(episode.title)}"></label><label class="full" data-help="Defines this episode's unique story or argument.">Premise<textarea data-episode-field="premise">${escapeHtml(episode.premise)}</textarea></label><label class="full" data-help="Prevents overlap by limiting source material assigned here.">Knowledge scope<textarea data-episode-field="knowledgeScope">${escapeHtml(episode.knowledgeScope)}</textarea></label><label class="full" data-help="Lists facts or ideas the transcript must cover.">Key points, one per line<textarea data-episode-field="keyPoints">${escapeHtml(episode.keyPoints.join("\n"))}</textarea></label><label class="full" data-help="States what listeners should understand or do afterward.">Listener outcome<textarea data-episode-field="listenerOutcome">${escapeHtml(episode.listenerOutcome)}</textarea></label><label class="full" data-help="Supplies structure, speakers, models, language, and duration.">Episode Format<select data-episode-format>${option("", "Select saved format", !selected)}${draftOptions}${savedOptions}</select></label><label class="full" data-help="Adds episode-specific editorial constraints.">Additional instructions<textarea data-episode-field="additionalInstructions">${escapeHtml(episode.additionalInstructions)}</textarea></label><label class="full" data-help="Adds creative script direction without replacing provider rules.">Transcript Prompt Guidance<textarea data-episode-field="transcriptPromptGuidance">${escapeHtml(episode.transcriptPromptGuidance)}</textarea></label></div>
           <div class="actions"><button data-create-episode="${escapeHtml(episode.id)}"${episode.createdEpisodeId ? " disabled" : ""}>Create draft</button>${episode.createdEpisodeId ? `<button data-open-created="${escapeHtml(episode.createdEpisodeId)}">Open in Transcript Generator</button>` : ""}</div></div>`;
       }).join("") : '<p class="muted">Generate plan to create episodes.</p>';
     }
@@ -1655,6 +1861,7 @@
     function resetEpisodeForm(preserveDirty = false) {
       activeTranscriptSection = "script";
       currentEpisode = null;
+      rememberViewSelection("episodeId", "");
       transcriptPromptState = null;
       transcriptPromptDirty = false;
       transcriptChatThread = null;
@@ -1684,6 +1891,7 @@
     async function selectEpisode(id, pendingDraft = null) {
       if (!id) return resetEpisodeForm();
       currentEpisode = await api(`/api/episodes/${id}`);
+      rememberViewSelection("episodeId", id);
       transcriptPromptDirty = false;
       $("savedEpisodeSelect").value = id;
       $("ttsEpisodeSelect").value = id;
@@ -1704,6 +1912,7 @@
       await loadTranscriptChatThreads();
       renderTtsView();
       renderJobIndicators();
+      renderPodcastAssistant();
     }
 
     function captureEpisodeDraft() {
@@ -1769,9 +1978,16 @@
 
     async function generateTranscript() {
       await saveEpisode();
+      const generateTts = $("autoGenerateTts").checked;
       const { job } = await api(`/api/episodes/${currentEpisode.id}/generate`, { method: "POST" });
+      if (generateTts) autoTtsTranscriptJobs.add(job.id);
       trackJob(job);
-      notify("Transcript job queued.");
+      notify(generateTts ? "Transcript job queued. TTS will start when it completes." : "Transcript job queued.");
+    }
+
+    async function saveTranscriptAndGoToTts() {
+      await saveTranscript();
+      location.hash = "tts";
     }
 
     function selectedSpeakerContext(index) {
@@ -1857,6 +2073,82 @@
       return (state?.episodes || []).filter((episode) => episode.audioReady && !episode.corrupt);
     }
 
+    function loadPlayerPlaylists() {
+      try {
+        const value = JSON.parse(localStorage.getItem(PLAYER_PLAYLISTS_KEY) || "[]");
+        if (!Array.isArray(value)) return [];
+        return value.filter((playlist) => playlist && typeof playlist.id === "string" && typeof playlist.name === "string" && Array.isArray(playlist.episodeIds)).map((playlist) => ({ id: playlist.id, name: playlist.name.trim(), episodeIds: playlist.episodeIds.filter((id) => typeof id === "string") })).filter((playlist) => playlist.name);
+      } catch { return []; }
+    }
+
+    function savePlayerPlaylists() {
+      localStorage.setItem(PLAYER_PLAYLISTS_KEY, JSON.stringify(playerPlaylists));
+    }
+
+    function currentPlayerOrder() {
+      const ready = new Set(renderedEpisodes().map((episode) => episode.id));
+      return [...new Set([playingEpisodeId, ...playerQueue].filter((id) => id && ready.has(id)))];
+    }
+
+    function renderPlaylistControls() {
+      if (activePlayerPlaylistId && !playerPlaylists.some((playlist) => playlist.id === activePlayerPlaylistId)) activePlayerPlaylistId = "";
+      $("playerPlaylistSelect").innerHTML = playerPlaylists.length
+        ? playerPlaylists.map((playlist) => option(playlist.id, `${playlist.name} (${playlist.episodeIds.length})`, playlist.id === activePlayerPlaylistId)).join("")
+        : option("", "No saved playlists", true, true);
+      const selected = Boolean(activePlayerPlaylistId);
+      $("savePlayerPlaylist").disabled = currentPlayerOrder().length === 0;
+      for (const id of ["loadPlayerPlaylist", "updatePlayerPlaylist", "renamePlayerPlaylist", "deletePlayerPlaylist"]) $(id).disabled = !selected;
+    }
+
+    function requestedPlaylistName(message, current = "", excludeId = "") {
+      const name = prompt(message, current)?.trim();
+      if (!name) return "";
+      if (playerPlaylists.some((playlist) => playlist.id !== excludeId && playlist.name.toLowerCase() === name.toLowerCase())) throw new Error("Playlist name already exists.");
+      return name;
+    }
+
+    function saveNewPlayerPlaylist() {
+      const episodeIds = currentPlayerOrder();
+      if (!episodeIds.length) throw new Error("Add or play an episode before saving a playlist.");
+      const name = requestedPlaylistName("Playlist name");
+      if (!name) return;
+      const playlist = { id: crypto.randomUUID(), name, episodeIds };
+      playerPlaylists.push(playlist);
+      activePlayerPlaylistId = playlist.id;
+      savePlayerPlaylists();
+      renderPlayer();
+      notify(`Saved playlist ${name}.`, "ok");
+    }
+
+    function updatePlayerPlaylist() {
+      const playlist = playerPlaylists.find((item) => item.id === activePlayerPlaylistId);
+      const episodeIds = currentPlayerOrder();
+      if (!playlist || !episodeIds.length) throw new Error("Select a playlist and add at least one episode.");
+      playlist.episodeIds = episodeIds;
+      savePlayerPlaylists();
+      renderPlayer();
+      notify(`Updated playlist ${playlist.name}.`, "ok");
+    }
+
+    function renamePlayerPlaylist() {
+      const playlist = playerPlaylists.find((item) => item.id === activePlayerPlaylistId);
+      if (!playlist) return;
+      const name = requestedPlaylistName("Rename playlist", playlist.name, playlist.id);
+      if (!name) return;
+      playlist.name = name;
+      savePlayerPlaylists();
+      renderPlayer();
+    }
+
+    function deletePlayerPlaylist() {
+      const playlist = playerPlaylists.find((item) => item.id === activePlayerPlaylistId);
+      if (!playlist || !confirm(`Delete playlist "${playlist.name}"?`)) return;
+      playerPlaylists = playerPlaylists.filter((item) => item.id !== playlist.id);
+      activePlayerPlaylistId = playerPlaylists[0]?.id || "";
+      savePlayerPlaylists();
+      renderPlayer();
+    }
+
     function playerEpisode(id) {
       return (state?.episodes || []).find((episode) => episode.id === id);
     }
@@ -1918,20 +2210,22 @@
           const queued = playerQueue.includes(episode.id);
           const date = episode.updatedAt ? ` - Updated ${new Date(episode.updatedAt).toLocaleString()}` : "";
           const detail = `${episode.episodeProfile?.name || "Rendered episode"}${date}`;
-          return `<div class="player-row"><div><strong>${escapeHtml(episode.name)}</strong><br><span class="muted">${escapeHtml(detail)}</span></div><div class="player-row-actions"><button type="button" data-play-episode="${escapeHtml(episode.id)}"${current && !audio.paused ? " disabled" : ""}>${current ? audio.paused ? "Resume" : "Playing" : "Play now"}</button><button type="button" data-queue-episode="${escapeHtml(episode.id)}"${current || queued ? " disabled" : ""}>${current ? "Current" : queued ? "Queued" : "Add to queue"}</button></div></div>`;
+          return `<div class="player-row"><div><strong>${escapeHtml(episode.name)}</strong><br><span class="muted">${escapeHtml(detail)}</span></div><div class="player-row-actions"><button type="button" data-rename-episode="${escapeHtml(episode.id)}">Rename</button><button type="button" data-play-episode="${escapeHtml(episode.id)}"${current && !audio.paused ? " disabled" : ""}>${current ? audio.paused ? "Resume" : "Playing" : "Play now"}</button><button type="button" data-queue-episode="${escapeHtml(episode.id)}"${current || queued ? " disabled" : ""}>${current ? "Current" : queued ? "Queued" : "Add to queue"}</button></div></div>`;
         }).join("") : '<p class="muted">No rendered episodes yet.</p>';
       $("playerQueue").innerHTML = playerQueue.length ? playerQueue.map((id, index) => {
         const episode = playerEpisode(id);
         return `<div class="player-row"><div><strong>${index + 1}. ${escapeHtml(episode.name)}</strong></div><div class="player-row-actions"><button type="button" data-move-queued="${escapeHtml(id)}" data-offset="-1" aria-label="Move ${escapeHtml(episode.name)} up"${index === 0 ? " disabled" : ""}>Up</button><button type="button" data-move-queued="${escapeHtml(id)}" data-offset="1" aria-label="Move ${escapeHtml(episode.name)} down"${index === playerQueue.length - 1 ? " disabled" : ""}>Down</button><button type="button" data-remove-queued="${escapeHtml(id)}" aria-label="Remove ${escapeHtml(episode.name)} from queue">Remove</button></div></div>`;
       }).join("") : '<p class="muted">Queue is empty.</p>';
       $("clearPlayerQueue").disabled = playerQueue.length === 0;
+      renderPlaylistControls();
       renderPlayerControls();
     }
 
-    async function playEpisode(id) {
+    function selectPlayerEpisode(id) {
       const episode = renderedEpisodes().find((item) => item.id === id);
       if (!episode) throw new Error("Rendered episode is unavailable.");
       const audio = $("playerAudio");
+      if (audio.dataset.episodeId !== id && !audio.paused) audio.pause();
       playerQueue = playerQueue.filter((queuedId) => queuedId !== id);
       playingEpisodeId = id;
       playerFailed = false;
@@ -1946,11 +2240,60 @@
       $("previewAudio").pause();
       audio.playbackRate = playerPlaybackRate;
       renderPlayer();
+      return episode;
+    }
+
+    async function playEpisode(id) {
+      selectPlayerEpisode(id);
+      const audio = $("playerAudio");
       try {
         await audio.play();
       } catch (error) {
         if (playingEpisodeId === id && !playerFailed) throw error;
       }
+    }
+
+    async function loadPlayerPlaylist() {
+      const playlist = playerPlaylists.find((item) => item.id === activePlayerPlaylistId);
+      if (!playlist) return;
+      const ready = new Set(renderedEpisodes().map((episode) => episode.id));
+      const episodeIds = [...new Set(playlist.episodeIds)].filter((id) => ready.has(id));
+      if (!episodeIds.length) throw new Error("Playlist has no available rendered episodes.");
+      const audio = $("playerAudio");
+      if (playingEpisodeId && !audio.ended && !playerFailed) playerQueue = episodeIds.filter((id) => id !== playingEpisodeId);
+      else {
+        playerQueue = episodeIds.slice(1);
+        selectPlayerEpisode(episodeIds[0]);
+      }
+      renderPlayer();
+      notify(`Loaded playlist ${playlist.name}.`, "ok");
+    }
+
+    async function renameRenderedEpisode(id) {
+      const episode = playerEpisode(id);
+      if (!episode) return;
+      const name = prompt("Podcast name", episode.name)?.trim();
+      if (!name || name === episode.name) return;
+      const updated = await api(`/api/episodes/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      const index = state.episodes.findIndex((item) => item.id === id);
+      const { transcript, audioUrl, ...summary } = updated;
+      if (index >= 0) state.episodes[index] = summary;
+      if (currentEpisode?.id === id) currentEpisode = updated;
+      renderBuildOptions();
+      renderPlayer();
+      renderTtsView();
+      notify(`Renamed podcast to ${name}.`, "ok");
+    }
+
+    async function openJobInPlayer(id) {
+      const episode = await api(`/api/episodes/${encodeURIComponent(id)}`);
+      const { transcript, audioUrl, ...summary } = episode;
+      const index = state.episodes.findIndex((item) => item.id === id);
+      if (index >= 0) state.episodes[index] = summary;
+      else state.episodes.push(summary);
+      $("playerAudio").pause();
+      selectPlayerEpisode(id);
+      location.hash = "player";
     }
 
     async function queueEpisode(id) {
@@ -2011,6 +2354,7 @@
       $("transcriptScriptTab").classList.toggle("active", activeTranscriptSection === "script");
       $("transcriptPromptTab").classList.toggle("active", activeTranscriptSection === "prompt");
       renderTranscriptPrompt();
+      renderPodcastAssistant();
     }
 
     async function resolveTranscriptPrompt() {
@@ -2172,9 +2516,14 @@
       const languageOverride = $("ttsLanguageOverride").value;
       await saveTranscript();
       const lengthWarning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
-      const { job } = await api(`/api/episodes/${currentEpisode.id}/render`, { method: "POST", body: JSON.stringify({ languageOverride }) });
+      await queueTts(currentEpisode.id, languageOverride, lengthWarning);
+    }
+
+    async function queueTts(episodeId, languageOverride = "", lengthWarning = "") {
+      const { job } = await api(`/api/episodes/${episodeId}/render`, { method: "POST", body: JSON.stringify({ languageOverride }) });
       trackJob(job);
       notify(lengthWarning ? `${lengthWarning} TTS job queued anyway.` : "TTS job queued.", lengthWarning ? "warning" : "");
+      return job;
     }
 
     function transcriptLengthMessage(words, episodeProfile) {
@@ -2278,11 +2627,12 @@
       }
     });
     $("uploadKnowledge").addEventListener("click", guard(uploadKnowledge));
+    $("knowledgeSummary").addEventListener("click", guard((event) => { const button = event.target.closest("[data-delete-knowledge]"); if (button) return deleteKnowledgeBase(button.dataset.deleteKnowledge); }));
     $("savedEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
     $("ttsEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
     $("ttsLanguageOverride").addEventListener("change", renderTtsView);
-    $("transcriptScriptTab").addEventListener("click", () => { activeTranscriptSection = "script"; renderTranscriptSections(); });
-    $("transcriptPromptTab").addEventListener("click", guard(async () => { activeTranscriptSection = "prompt"; await resolveTranscriptPrompt(); renderTranscriptSections(); }));
+    $("transcriptScriptTab").addEventListener("click", () => { activeTranscriptSection = "script"; rememberViewSelection("transcriptSection", "script"); renderTranscriptSections(); });
+    $("transcriptPromptTab").addEventListener("click", guard(async () => { activeTranscriptSection = "prompt"; rememberViewSelection("transcriptSection", "prompt"); await resolveTranscriptPrompt(); renderTranscriptSections(); }));
     $("transcriptPromptGuidance").addEventListener("input", () => { transcriptPromptDirty = true; episodeDraftDirty = true; renderTranscriptPrompt(); });
     $("resetTranscriptPrompt").addEventListener("click", () => { $("transcriptPromptGuidance").value = ""; transcriptPromptDirty = true; episodeDraftDirty = true; resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); });
     $("saveTranscriptPrompt").addEventListener("click", guard(async () => { await saveEpisode(); notify("Transcript guidance saved.", "ok"); }));
@@ -2303,6 +2653,7 @@
     $("saveEpisode").addEventListener("click", guard(async () => { await saveEpisode(); notify("Episode draft saved.", "ok"); }));
     $("generateTranscript").addEventListener("click", guard(generateTranscript));
     $("saveTranscript").addEventListener("click", guard(saveTranscript));
+    $("saveTranscriptAndTts").addEventListener("click", guard(saveTranscriptAndGoToTts));
     $("previewButtons").addEventListener("click", guard((event) => {
       const button = event.target.closest("button[data-preview-index]");
       if (button) return preview(Number(button.dataset.previewIndex));
@@ -2316,7 +2667,10 @@
       else await queueEpisode(currentEpisode.id);
       renderTtsView();
     }));
+    $("serverActivity").addEventListener("click", guard((event) => { const button = event.target.closest("[data-job-player]"); if (button) return openJobInPlayer(button.dataset.jobPlayer); }));
     $("view-player").addEventListener("click", guard(async (event) => {
+      const rename = event.target.closest("[data-rename-episode]");
+      if (rename) return renameRenderedEpisode(rename.dataset.renameEpisode);
       const play = event.target.closest("[data-play-episode]");
       if (play) return playEpisode(play.dataset.playEpisode);
       const queue = event.target.closest("[data-queue-episode]");
@@ -2330,6 +2684,12 @@
       }
     }));
     $("clearPlayerQueue").addEventListener("click", () => { playerQueue = []; renderPlayer(); });
+    $("playerPlaylistSelect").addEventListener("change", (event) => { activePlayerPlaylistId = event.target.value; renderPlaylistControls(); });
+    $("savePlayerPlaylist").addEventListener("click", guard(saveNewPlayerPlaylist));
+    $("loadPlayerPlaylist").addEventListener("click", guard(loadPlayerPlaylist));
+    $("updatePlayerPlaylist").addEventListener("click", guard(updatePlayerPlaylist));
+    $("renamePlayerPlaylist").addEventListener("click", guard(renamePlayerPlaylist));
+    $("deletePlayerPlaylist").addEventListener("click", guard(deletePlayerPlaylist));
     document.querySelectorAll("[data-player-action]").forEach((button) => button.addEventListener("click", guard(async () => {
       const audio = $("playerAudio");
       if (button.dataset.playerAction === "open") location.hash = "player";
@@ -2388,7 +2748,8 @@
     });
     $("closeModelDialog").addEventListener("click", () => $("modelDialog").close());
     $("modelSearch").addEventListener("input", filterModelSelection);
-    $("modelSelectionList").addEventListener("change", updateModelSelectionCount);
+    $("modelSelectedOnly").addEventListener("change", filterModelSelection);
+    $("modelSelectionList").addEventListener("change", () => { updateModelSelectionCount(); filterModelSelection(); });
     $("toggleFilteredModels").addEventListener("click", toggleFilteredModels);
     $("addCustomModel").addEventListener("click", guard(addCustomModelRow));
     $("applyModelSelection").addEventListener("click", applyModelSelection);
@@ -2418,7 +2779,9 @@
     }));
 
     setView(location.hash.slice(1));
-    Promise.all([loadModelCatalog(), refreshState(), refreshJobs()]).catch((error) => notify(error.message || String(error), "error"));
+    Promise.all([loadModelCatalog(), refreshState(rememberedEpisodeId), refreshJobs()])
+      .then(() => rememberedPlanId && activePlanId === rememberedPlanId && !activePlan ? loadPlan(rememberedPlanId, true) : null)
+      .catch((error) => notify(error.message || String(error), "error"));
 
     // --- Chat ---
     function currentChatTarget() {
@@ -2732,7 +3095,7 @@
 
     function renderPlannerChatMessages() {
       if (!plannerChatThread?.messages?.length) {
-        $("plannerChatMessages").innerHTML = '<div class="chat-msg system">Describe series, book, audience, or single episode you want to plan.</div>';
+        $("plannerChatMessages").innerHTML = '<div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div>';
         return;
       }
       $("plannerChatMessages").innerHTML = plannerChatThread.messages.map((message, index) => {
@@ -2740,7 +3103,16 @@
         if (message.role === "system") return `<div class="chat-msg system">${escapeHtml(message.content)}</div>`;
         try {
           const parsed = JSON.parse(message.content);
-          return `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>${parsed.questions?.length ? `<div class="chat-questions"><ol>${parsed.questions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : ""}${parsed.proposal?.planPatch ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>Plan setup proposal</strong><button data-apply-plan-patch="${index}">Apply Proposal</button></div><div class="chat-proposal-diff">${Object.entries(parsed.proposal.planPatch).map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong>: ${escapeHtml(JSON.stringify(value))}</div>`).join("")}</div></div>` : ""}`;
+          const proposalType = parsed.proposal ? Object.keys(parsed.proposal)[0] : "";
+          const proposal = proposalType ? parsed.proposal[proposalType] : null;
+          const labels = { planPatch: "Plan setup", speakerProfile: "Speaker Profile", episodeFormat: "Episode Format", formatDraftPatches: "Generated formats", plannedEpisodePatches: "Planned episodes", episodePatch: "Episode guidance" };
+          const impact = proposal?.impact && (proposal.impact.plans || proposal.impact.episodes) ? `<div class="assistant-impact">Shared by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s).</div>` : "";
+          const next = parsed.nextStep;
+          const actionLabels = { generatePlan: "generate plan", saveFormats: "save formats", createEpisodes: "create episode drafts", generateTranscript: "generate transcript", generateTts: "generate TTS", openPlayer: "open Player", none: "continue" };
+          const nextLabel = next ? actionLabels[next.action] || "continue" : "";
+          const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff"><div>${escapeHtml(JSON.stringify(proposal, null, 2))}</div></div>${impact}<div class="actions"><button data-apply-assistant="${index}" data-continue="false">Apply only</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div></div>` : "";
+          const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}">${escapeHtml(nextLabel)}</button></div>` : "";
+          return `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>${parsed.questions?.length ? `<div class="chat-questions"><ol>${parsed.questions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : ""}${proposalHtml}${nextHtml}`;
         } catch { return `<div class="chat-msg assistant">${escapeHtml(message.content)}</div>`; }
       }).join("");
       $("plannerChatMessages").scrollTop = $("plannerChatMessages").scrollHeight;
@@ -2757,14 +3129,15 @@
     }
 
     async function sendPlannerChat() {
-      if (!activePlan || plannerChatBusy) throw new Error("Create or select a plan first.");
+      if (plannerChatBusy) return;
       const text = $("plannerChatInput").value.trim();
       if (!text) return;
       const model = $("plannerChatModel").value;
       if (!model) throw new Error("Select a text model first.");
       plannerChatBusy = true; $("plannerChatBusy").hidden = false; $("plannerChatInput").value = "";
       try {
-        const data = await api("/api/plans/chat", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, planId: activePlan.id, text, model, kbId: $("plannerChatKb").value, mode: "plan", planDraft: capturePlanDraft() }) });
+        if (!activePlan) await createNewPlan(false);
+        const data = await api("/api/plans/chat", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, planId: activePlan.id, text, model, kbId: $("plannerChatKb").value, planDraft: capturePlanDraft(), activeContext: assistantContext(), workspaceDraft: assistantWorkspaceDraft() }) });
         plannerChatThreadId = data.threadId;
         await loadPlannerChatThread();
       } finally { plannerChatBusy = false; $("plannerChatBusy").hidden = true; }
@@ -2776,15 +3149,44 @@
       plannerChatThreadId = ""; plannerChatThread = null; await loadPlannerChatThread();
     }
 
-    async function applyPlannerPatch(index) {
+    function openAssistantTarget(target) {
+      if (!target) return;
+      if (target.startsWith("planner:")) {
+        activePlannerSection = target.slice(8);
+        rememberViewSelection("plannerSection", activePlannerSection);
+        location.hash = "planner";
+        renderPlannerSections();
+      } else location.hash = target;
+    }
+
+    async function runAssistantStep(step) {
+      if (!step) return;
+      openAssistantTarget(step.target);
+      const ids = step.targetIds || [];
+      if (step.action === "generatePlan") return generateActivePlan();
+      if (step.action === "saveFormats") return saveFormatDrafts(ids.length ? ids : (activePlan?.formatDrafts || []).filter((item) => !item.savedEpisodeProfileId).map((item) => item.id));
+      if (step.action === "createEpisodes") return createEpisodeDrafts(ids.length ? ids : (activePlan?.episodes || []).filter((item) => !item.createdEpisodeId).map((item) => item.id));
+      const episodeId = ids[0] || currentEpisode?.id || activePlan?.episodes.find((item) => item.createdEpisodeId)?.createdEpisodeId || "";
+      if (["generateTranscript", "generateTts", "openPlayer"].includes(step.action) && episodeId && currentEpisode?.id !== episodeId) await selectEpisode(episodeId);
+      if (step.action === "generateTranscript") return generateTranscript();
+      if (step.action === "generateTts") return renderAudio();
+      if (step.action === "openPlayer" && episodeId) { selectPlayerEpisode(episodeId); location.hash = "player"; }
+    }
+
+    async function applyAssistantProposal(index, continueWorkflow) {
       const message = plannerChatThread?.messages?.[index];
       if (message?.role !== "assistant") return;
-      const patch = JSON.parse(message.content)?.proposal?.planPatch;
-      if (!patch) return;
-      const ids = { name: "planName", theme: "planTheme", audience: "planAudience", goal: "planGoal", episodeCount: "planEpisodeCount", knowledgeBaseId: "planKnowledge", speakerProfileId: "planSpeakerProfile", planningModel: "planModel" };
-      for (const [key, value] of Object.entries(patch)) if (ids[key]) $(ids[key]).value = value ?? "";
-      planDirty = true;
-      await saveActivePlan();
+      const parsed = JSON.parse(message.content);
+      const proposal = parsed.proposal && parsed.proposal[Object.keys(parsed.proposal)[0]];
+      if (!proposal) return;
+      if (proposal.impact && (proposal.impact.plans || proposal.impact.episodes) && !confirm(`This shared item is used by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s). Apply changes anyway?`)) return;
+      const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index }) });
+      await refreshState(data.episode?.id || currentEpisode?.id);
+      if (data.plan?.id) loadPlanForm(data.plan);
+      await refreshPlanIndex();
+      await loadPlannerChatThread();
+      notify(data.warnings?.length ? `Proposal applied with warnings: ${data.warnings.join(" ")}` : "Proposal applied.", data.warnings?.length ? "warning" : "ok");
+      if (continueWorkflow) await runAssistantStep(parsed.nextStep);
     }
 
     $("planSelect").addEventListener("change", guard((event) => loadPlan(event.target.value)));
@@ -2793,7 +3195,7 @@
     $("deletePlan").addEventListener("click", guard(deleteActivePlan));
     $("savePlan").addEventListener("click", guard(saveActivePlan));
     $("generatePlan").addEventListener("click", guard(generateActivePlan));
-    document.querySelectorAll("[data-planner-section]").forEach((button) => button.addEventListener("click", () => { activePlannerSection = button.dataset.plannerSection; renderPlannerSections(); }));
+    document.querySelectorAll("[data-planner-section]").forEach((button) => button.addEventListener("click", () => { activePlannerSection = button.dataset.plannerSection; rememberViewSelection("plannerSection", activePlannerSection); renderPlannerSections(); }));
     for (const id of ["planName", "planKnowledge", "planSpeakerProfile", "planModel", "planEpisodeCount", "planAudience", "planGoal", "planTheme"]) $(id).addEventListener("input", () => { if (activePlan) planDirty = true; });
     $("planFormatDrafts").addEventListener("input", () => { planDirty = true; renderFormatBulkControls(); });
     $("plannedEpisodes").addEventListener("input", (event) => {
@@ -2805,6 +3207,8 @@
       if (button && episode) button.textContent = `${episode.number}. ${event.target.value}`;
     });
     $("planFormatDrafts").addEventListener("click", (event) => {
+      const focus = event.target.closest("[data-focus-format]");
+      if (focus) { activeFormatDraftId = focus.dataset.focusFormat; renderPlanCollections(); renderPodcastAssistant(); return; }
       const button = event.target.closest("[data-save-format]");
       if (button) guard(() => saveFormatDrafts([button.dataset.saveFormat], button.dataset.overwrite === "true"))();
     });
@@ -2828,7 +3232,18 @@
     $("plannerChatReset").addEventListener("click", () => { plannerChatThreadId = ""; plannerChatThread = null; renderPlannerChatHistory(); renderPlannerChatMessages(); });
     $("plannerChatDelete").addEventListener("click", guard(deletePlannerChat));
     $("plannerChatHistory").addEventListener("change", guard(async (event) => { plannerChatThreadId = event.target.value; await loadPlannerChatThread(); }));
-    $("plannerChatMessages").addEventListener("click", (event) => { const button = event.target.closest("[data-apply-plan-patch]"); if (button) guard(() => applyPlannerPatch(Number(button.dataset.applyPlanPatch)))(); });
+    $("assistantPlanSelect").addEventListener("change", guard((event) => loadPlan(event.target.value)));
+    $("assistantPrompts").addEventListener("click", (event) => { const button = event.target.closest("[data-assistant-prompt]"); if (button) { $("plannerChatInput").value = button.dataset.assistantPrompt; $("plannerChatInput").focus(); } });
+    $("assistantProgress").addEventListener("click", (event) => { const button = event.target.closest("[data-assistant-target]"); if (button) openAssistantTarget(button.dataset.assistantTarget); });
+    $("plannerChatMessages").addEventListener("click", (event) => {
+      const apply = event.target.closest("[data-apply-assistant]");
+      if (apply) return guard(() => applyAssistantProposal(Number(apply.dataset.applyAssistant), apply.dataset.continue === "true"))();
+      const run = event.target.closest("[data-run-assistant-step]");
+      if (run) {
+        const parsed = JSON.parse(plannerChatThread.messages[Number(run.dataset.runAssistantStep)].content);
+        return guard(() => runAssistantStep(parsed.nextStep))();
+      }
+    });
 
   </script>
 </body>
