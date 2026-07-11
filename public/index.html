@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Local Podcast Builder</title>
+  <title>pod-god</title>
   <style>
     :root {
       color-scheme: dark;
@@ -22,18 +22,24 @@
       --line-strong: #664A00;
     }
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body { margin: 0; background: var(--surface-0); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+    * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 0; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+    ::-webkit-scrollbar-track { background: transparent; }
+    html, body { height: 100%; }
+    body { margin: 0; overflow: hidden; background: var(--surface-0); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
     ::selection { color: #000000; background: var(--accent); }
     button, input, select, textarea { font: inherit; }
-    button { border: 1px solid var(--line-strong); border-radius: 2px; padding: 9px 13px; color: var(--text); background: var(--surface-3); cursor: pointer; font-weight: 700; }
+    button { border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 11px; color: var(--text); background: var(--surface-3); cursor: pointer; font-weight: 700; }
     button:hover:not(:disabled), button.active { color: #000000; background: var(--accent); border-color: var(--accent); }
     button.primary { color: #000000; background: var(--accent); border-color: var(--accent); }
     button.primary:hover:not(:disabled) { color: var(--text-on-accent); background: #CC9500; border-color: #CC9500; }
+    button.primary:disabled { color: var(--disabled); background: var(--surface-3); border-color: var(--line); }
     button.danger { color: var(--text); border-color: #8F3434; background: #220B0B; }
     button.danger:hover:not(:disabled) { color: #FFFFFF; background: #7A1F1F; border-color: #B53C3C; }
     button:disabled { color: var(--disabled); border-color: var(--line); cursor: not-allowed; }
-    input, select, textarea { width: 100%; color: var(--text); background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: 2px; padding: 9px 10px; }
+    input, select, textarea { width: 100%; color: var(--text); background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 9px; }
     input[type="checkbox"] { appearance: none; width: 18px; height: 18px; flex: 0 0 18px; justify-self: start; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface-0); cursor: pointer; }
     input[type="checkbox"]::after { content: ""; display: block; width: 9px; height: 5px; margin: 4px 3px; border: solid var(--text-on-accent); border-width: 0 0 2px 2px; opacity: 0; transform: rotate(-45deg); }
     input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); }
@@ -42,39 +48,44 @@
     input[type="checkbox"]:indeterminate::after { width: 10px; height: 0; margin: 7px 3px; border-width: 0 0 2px; opacity: 1; transform: none; }
     input[type="checkbox"]:disabled { border-color: var(--line); background: var(--surface-3); cursor: not-allowed; opacity: .65; }
     button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    textarea { min-height: 90px; resize: vertical; line-height: 1.45; }
-    textarea.transcript { min-height: 520px; font: 14px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
-    label { display: grid; gap: 6px; color: var(--muted); font-weight: 650; }
-    h1, h2, h3 { margin: 0 0 12px; line-height: 1.2; }
-    h1 { font-size: 22px; }
-    h2 { font-size: 21px; }
-    h3 { font-size: 16px; }
+    textarea { min-height: 70px; resize: vertical; line-height: 1.45; }
+    textarea.transcript { flex: 1 1 auto; min-height: 220px; font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; resize: none; }
+    label { display: grid; gap: 4px; color: var(--muted); font-weight: 650; }
+    h1, h2, h3 { margin: 0 0 8px; line-height: 1.2; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 18px; }
+    h3 { font-size: 14px; }
     p { margin: 8px 0; }
     code { color: var(--accent); background: var(--surface-1); border: 1px solid var(--line); padding: 1px 5px; border-radius: 2px; }
     .muted, small { color: var(--muted); }
-    .app { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-    .assistant-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-    .assistant-nav button { min-width: 0; width: 100%; padding: 6px 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; }
-    .assistant-nav button.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
-    main { width: min(1120px, calc(100% - 36px)); margin: 24px auto 60px; }
-    main.assistant-active { width: min(1800px, calc(100% - 36px)); display: grid; grid-template-columns: minmax(680px, 760px) minmax(0, 1fr); gap: 18px; align-items: start; }
+    .app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+    body.player-active .app { height: calc(100% - 56px); }
+    main { width: min(1120px, 100%); height: 100%; min-height: 0; margin: 0 auto; padding: 14px 18px; }
+    main.assistant-active { width: min(1800px, 100%); height: 100%; display: grid; grid-template-columns: minmax(680px, 760px) minmax(0, 1fr); gap: 14px; align-items: stretch; }
+    main.assistant-active.nav-only { grid-template-columns: 300px minmax(0, 1fr); }
     main.assistant-active > .view:not([hidden]) { grid-column: 2; min-width: 0; }
-    .view { display: grid; gap: 18px; }
+    .view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .view[hidden] { display: none; }
-    .panel { padding: 20px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+    .view > .view-header { flex: 0 0 auto; padding-bottom: 10px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+    .view > .subnav { flex: 0 0 auto; }
+    .view-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+    .view-body > .panel { flex: 0 0 auto; }
+    .view-header p { margin: 2px 0 0; font-size: 12px; }
+    .view-header h2 { margin: 0; }
+    #view-transcript .view-body > .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    #transcript-script-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    #transcript-script-panel > *:not(.transcript) { flex: 0 0 auto; }
+    #transcript-script-panel[hidden], #transcript-prompt-panel[hidden] { display: none; }
+    .panel { padding: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
     .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .full { grid-column: 1 / -1; }
-    .actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 14px; }
-    .toolbar { display: grid; grid-template-columns: 1fr auto auto auto; gap: 9px; align-items: end; margin-bottom: 16px; }
-    .subnav { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 16px; }
-    .subnav button { min-width: 160px; }
-    .planner-tabs { margin-bottom: 0; }
-    .planner-tabs button { min-width: 0; }
-    .planner-section[hidden] { display: none; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    .toolbar { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: end; margin-bottom: 12px; }
+    .subnav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
     .view-header, .provider-head, .connection-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-    .profile-pills, .active-model-pills, .modality-pills, .model-status { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 16px; }
-    .model-refresh-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: center; margin: 14px 0 16px; }
+    .profile-pills, .active-model-pills, .modality-pills, .model-status { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 12px; }
+    .model-refresh-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: center; margin: 10px 0 12px; }
     .model-refresh-row .model-status { margin: 0; }
     .profile-pill, .model-pill, .modality-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 9px; overflow-wrap: anywhere; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: var(--surface-1); font-size: 12px; }
     .profile-pill.active, .model-pill.used, .modality-pill.active { color: #000; background: var(--accent); border-color: var(--accent); }
@@ -89,18 +100,18 @@
     .status-pill.loading { color: var(--accent); border-color: var(--accent); }
     .status-pill.loading::before { background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
     @keyframes pulse { to { opacity: .25; } }
-    fieldset { margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 2px; }
+    fieldset { margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 2px; }
     legend { font-weight: 750; padding: 0 6px; }
-    .speaker-list { display: grid; gap: 12px; margin-top: 14px; }
+    .speaker-list { display: grid; gap: 10px; margin-top: 10px; }
     .internal-nav-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 14px; align-items: start; }
-    .internal-sidebar { position: sticky; top: 24px; display: grid; gap: 6px; max-height: calc(100vh - 48px); padding: 8px; overflow-y: auto; border: 1px solid var(--line); background: var(--surface-1); }
+    .internal-sidebar { position: sticky; top: 0; display: grid; gap: 6px; max-height: calc(100vh - 220px); padding: 8px; overflow-y: auto; border: 1px solid var(--line); background: var(--surface-1); }
     .internal-sidebar button { width: 100%; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
     .internal-sidebar button.active { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
     .bulk-check { display: flex; align-items: center; gap: 7px; }
     .speaker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .badge { display: inline-block; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--muted); font-size: 12px; }
     .warning { color: var(--accent); }
-    .separator { border-top: 1px solid var(--line); margin: 20px 0; }
+    .separator { border-top: 1px solid var(--line); margin: 12px 0; }
     .speaker-summary { display: grid; gap: 8px; margin-top: 12px; }
     .speaker-summary > div { padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 2px; }
     .provider-card { border: 1px solid var(--line); background: var(--surface-1); }
@@ -132,18 +143,17 @@
     .config-status { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
     dialog { width: min(720px, calc(100% - 32px)); max-height: 86vh; padding: 0; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); }
     dialog::backdrop { background: rgba(0, 0, 0, .78); }
-    .dialog-body { display: grid; gap: 14px; padding: 20px; }
+    .dialog-body { display: grid; gap: 10px; padding: 14px; }
     .model-list { display: grid; gap: 6px; max-height: 45vh; overflow-y: auto; }
     .model-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 130px; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--line); }
     .model-row[hidden] { display: none; }
     audio { width: min(100%, 700px); margin-top: 12px; }
     progress { width: min(100%, 700px); height: 14px; accent-color: var(--accent); }
-    .rightbar { position: sticky; top: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto minmax(0, 1fr); min-width: 0; width: 320px; height: 100vh; padding: 18px 14px; background: var(--surface-1); border-left: 1px solid var(--line); overflow: hidden; }
+    .rightbar { position: static; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto minmax(0, 1fr); min-width: 0; width: 320px; height: 100%; padding: 18px 14px; background: var(--surface-1); border-left: 1px solid var(--line); overflow: hidden; }
     .rightbar[hidden] { display: none; }
     .rightbar-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
     .rightbar-header h2 { margin: 0; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
     .rightbar-header button { padding: 5px 9px; font-size: 12px; }
-    body.player-active .rightbar { height: calc(100vh - 56px); }
     .rightbar-toggle { position: fixed; top: 12px; right: 12px; z-index: 55; padding: 7px 10px; }
     .rightbar-toggle[hidden] { display: none; }
     .rightbar-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: #FFFFFF; background: var(--danger); font-size: 11px; text-align: center; }
@@ -174,13 +184,21 @@
     .loading-line[hidden] { display: none; }
     .spinner { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid var(--disabled); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .planner-layout { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
-    .planner-main { min-width: 0; display: grid; gap: 18px; }
-    .plan-list { display: grid; gap: 10px; }
-    .plan-card { padding: 12px; border: 1px solid var(--line); background: var(--surface-1); }
-    .plan-card[hidden] { display: none; }
-    .plan-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-    .plan-card-head h3 { margin: 0; }
+    .episode-list { display: grid; gap: 10px; }
+    .episode-row { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); background: var(--surface-1); }
+    .episode-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .episode-row-head h3 { margin: 0; }
+    .episode-row-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .episode-chip { display: inline-flex; align-items: center; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    .episode-chip.done { color: var(--success); border-color: var(--success); }
+    .episode-chip.running { color: var(--accent); border-color: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+    .episode-row-actions { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+    .episode-row-actions label { font-size: 12px; color: var(--muted); display: grid; gap: 4px; min-width: 220px; }
+    .episode-row-actions .actions { margin: 0 0 0 auto; }
+    .episode-group-title { margin: 14px 0 4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    #episodeSettings { margin: 10px 0; padding: 10px; border: 1px solid var(--line); background: var(--surface-1); }
+    #episodeSettings summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+    #episodeSettings[open] summary { margin-bottom: 10px; color: var(--text); }
     .player-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, .7fr); gap: 18px; align-items: start; }
     .player-list { display: grid; gap: 8px; }
     #playerLibrary { max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
@@ -210,20 +228,18 @@
     .player-bottom:hover .player-bottom-seek::-moz-range-thumb, .player-bottom-seek:focus-visible::-moz-range-thumb { opacity: 1; }
     .player-bottom button { padding: 6px 10px; font-size: 13px; }
     .player-bottom select { padding: 6px; font-size: 13px; }
-    body.player-active { padding-bottom: 56px; }
-    .chat-pane { position: sticky; top: 24px; display: grid; grid-template-columns: 280px minmax(0, 1fr); max-height: calc(100vh - 48px); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
-    body.player-active .chat-pane { max-height: calc(100vh - 48px - 56px); }
+    .chat-pane { position: static; height: 100%; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
     .assistant-sidebar { min-width: 0; overflow-y: auto; border-right: 1px solid var(--line); }
     .assistant-chat { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-    .chat-pane-header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .chat-pane-header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .chat-pane-header h3 { margin: 0; font-size: 14px; }
-    .chat-controls { padding: 10px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+    .chat-controls { padding: 8px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
     .chat-controls label { font-size: 12px; }
     .chat-controls select { font-size: 12px; padding: 6px 8px; }
-    .chat-messages { flex: 1; overflow-y: auto; padding: 14px 16px; display: grid; gap: 10px; min-height: 0; align-content: start; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 10px 12px; display: grid; gap: 10px; min-height: 0; align-content: start; }
     .chat-msg { padding: 8px 11px; border-radius: 2px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
     .chat-msg.user { background: var(--surface-3); border: 1px solid var(--line); }
-    .chat-msg.assistant { background: #0A1520; border: 1px solid #1A3040; }
+    .chat-msg.assistant { background: var(--surface-3); border: 1px solid var(--line-strong); }
     .chat-msg.system { background: transparent; color: var(--muted); font-size: 12px; text-align: center; padding: 4px 0; }
     .chat-msg p { margin: 4px 0; }
     .chat-msg p:first-child { margin-top: 0; }
@@ -238,7 +254,7 @@
     .chat-proposal.expanded .chat-proposal-diff { max-height: none; }
     .chat-proposal-toggle { padding: 3px 7px; font-size: 11px; }
     .chat-proposal-diff div { padding: 2px 0; border-bottom: 1px solid var(--line); }
-    .chat-input-row { padding: 10px 16px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+    .chat-input-row { padding: 8px 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
     .chat-input-row textarea { min-height: 60px; font-size: 13px; resize: vertical; }
     .chat-input-actions { display: flex; gap: 8px; align-items: center; }
     .chat-input-actions button { font-size: 12px; padding: 6px 12px; }
@@ -247,41 +263,61 @@
     .chat-busy[hidden] { display: none; }
     .chat-pane[hidden] { display: none; }
     label[data-help]::after { content: attr(data-help); color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
-    .assistant-context { margin: 10px 16px 0; padding: 7px 9px; color: var(--accent); border: 1px solid var(--line); background: var(--surface-1); font-size: 12px; }
-    .assistant-steps { display: grid; gap: 4px; margin: 0; padding: 10px 16px; border-bottom: 1px solid var(--line); list-style: none; }
+    .assistant-context { margin: 8px 12px 0; padding: 7px 9px; color: var(--accent); border: 1px solid var(--line); background: var(--surface-1); font-size: 12px; }
+    .assistant-workflow { border-bottom: 1px solid var(--line); }
+    .assistant-util { display: block; width: calc(100% - 24px); margin: 6px 12px; padding: 5px 8px; overflow: hidden; text-align: left; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
+    .assistant-chat-toggle { display: none; }
+    #assistantChatClose { display: none; }
+    .assistant-steps { display: grid; gap: 4px; margin: 0; padding: 8px 12px; border-block: 1px solid var(--line); list-style: none; }
     .assistant-steps button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; overflow: hidden; text-align: left; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
     .assistant-steps .step-mark { flex: 0 0 16px; width: 16px; text-align: center; font-weight: 800; }
     .assistant-steps li[data-state="done"] button { color: var(--success); }
     .assistant-steps li[data-state="current"] button { color: var(--accent); background: var(--surface-1); border-color: var(--line-strong); }
     .assistant-steps li[data-state="pending"] button { color: var(--disabled); }
-    .assistant-steps button:hover:not(:disabled) { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
-    .assistant-prompts { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
-    .assistant-prompts button { padding: 4px 7px; color: var(--muted); font-size: 11px; }
+    .assistant-util.active, .assistant-steps li button.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
+    .assistant-workflow button:hover:not(:disabled) { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
+    .assistant-next { display: grid; gap: 6px; margin: 8px 12px; padding: 10px; border: 1px solid var(--accent); background: var(--surface-1); }
+    .assistant-next-title { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .assistant-next-text { font-size: 12px; }
+    @keyframes ctaPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 185, 0, 0); } 50% { box-shadow: 0 0 0 6px rgba(255, 185, 0, .45); } }
+    .cta-pulse { animation: ctaPulse .9s ease-in-out 3; }
+    #podcastAssistant.nav-only { grid-template-columns: 1fr; }
+    #podcastAssistant.nav-only .assistant-chat,
+    #podcastAssistant.nav-only #assistantContext,
+    #podcastAssistant.nav-only .chat-controls { display: none; }
     .assistant-impact { margin-top: 6px; color: var(--accent); }
     #podcastAssistant { grid-column: 1; grid-row: 1; }
+    @media (max-width: 1200px) {
+      main.assistant-active { display: flex; flex-direction: column; width: 100%; gap: 10px; }
+      main.assistant-active > .view:not([hidden]) { flex: 1; min-height: 0; }
+      .chat-pane { flex: 0 0 auto; height: auto; grid-template-columns: 1fr; overflow: visible; }
+      .assistant-sidebar { overflow: visible; border-right: 0; }
+      .chat-pane-header, #assistantContext, .chat-controls, .assistant-next { display: none; }
+      .assistant-workflow { display: flex; align-items: center; gap: 6px; overflow-x: auto; border-bottom: 0; padding: 6px 8px; }
+      .assistant-steps { display: flex; gap: 6px; padding: 0; border: 0; }
+      .assistant-steps li { flex: 0 0 auto; }
+      .assistant-steps button, .assistant-util { width: auto; margin: 0; white-space: nowrap; }
+      #podcastAssistant:not(.nav-only) .assistant-chat-toggle { display: block; }
+      .assistant-chat { display: none; }
+      #podcastAssistant.chat-open .assistant-chat { display: flex; position: fixed; inset: 0; z-index: 70; background: var(--surface-2); }
+      #podcastAssistant.chat-open #assistantChatClose { display: inline-block; }
+      #podcastAssistant.chat-open .assistant-chat .chat-pane-header { display: flex; }
+    }
     @media (max-width: 820px) {
-      .app { display: block; }
-      .rightbar { position: fixed; top: 0; right: 0; z-index: 45; width: min(340px, 92vw); box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
-      main { width: min(100% - 24px, 1120px); margin-top: 14px; }
+      .app { display: grid; grid-template-columns: minmax(0, 1fr); }
+      .rightbar { position: fixed; top: 0; right: 0; z-index: 45; width: min(340px, 92vw); height: 100%; box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
+      main { padding: 10px 12px; }
       .grid, .grid.three { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
       .toolbar { grid-template-columns: 1fr 1fr; }
       .model-row { grid-template-columns: auto minmax(0, 1fr); }
       .model-row select { grid-column: 1 / -1; }
-      .planner-layout, .player-layout { grid-template-columns: 1fr; }
+      .player-layout { grid-template-columns: 1fr; }
       .internal-nav-layout { grid-template-columns: 1fr; }
       .internal-sidebar { position: static; display: flex; max-height: none; overflow-x: auto; overflow-y: hidden; }
       .internal-sidebar button { width: auto; flex: 0 0 auto; }
-      .chat-pane { position: static; grid-template-columns: 1fr; max-height: none; order: -1; overflow: visible; }
-      .assistant-sidebar { overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
-      .assistant-chat { min-height: 70vh; }
       .player-bottom { padding-inline: 10px; }
       .player-bottom button { padding-inline: 9px; }
-    }
-    @media (max-width: 1200px) {
-      main.assistant-active { display: block; width: min(1120px, calc(100% - 36px)); }
-      main.assistant-active > .view:not([hidden]) { margin-top: 18px; }
-      #podcastAssistant { position: static; max-height: none; }
     }
   </style>
 </head>
@@ -290,82 +326,46 @@
     <main id="appMain">
       <div id="podcastAssistant" class="chat-pane" hidden>
         <div class="assistant-sidebar">
-          <div class="chat-pane-header"><h3>Podcast Assistant</h3></div>
-          <nav class="assistant-nav" aria-label="Builder views">
-            <button data-view="config">Config</button>
-            <button data-view="speakers">Speakers</button>
-            <button data-view="formats">Formats</button>
-            <button data-view="planner">Content Planner</button>
-            <button data-view="transcript">Transcript Generator</button>
-            <button data-view="tts">TTS Generator</button>
-            <button data-view="player">Player</button>
+          <div class="chat-pane-header"><h3 id="assistantTitle">pod-god</h3></div>
+          <nav class="assistant-workflow" aria-label="Workflow">
+            <button type="button" class="assistant-util" data-view="config">⚙ Config</button>
+            <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
+            <button type="button" class="assistant-util" data-view="player">▶ Player</button>
+            <button type="button" id="assistantChatToggle" class="assistant-util assistant-chat-toggle">💬 Chat</button>
           </nav>
+          <div id="assistantNextStep" class="assistant-next"><span class="assistant-next-title">Next step</span><span id="assistantNextText" class="assistant-next-text"></span><button type="button" id="assistantNextGo" class="primary">Go</button></div>
           <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
-          <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
           <div class="chat-controls">
-            <label data-help="Project context shared across planning and generation.">Plan<select id="assistantPlanSelect"><option value="">New plan on first message</option></select></label>
             <label>Chat history<select id="plannerChatHistory"></select></label>
-            <label data-help="Model used only for this assistant conversation.">Model<select id="plannerChatModel"></select></label>
+            <label data-help="Model used for this conversation and for planning episodes.">Model<select id="plannerChatModel"></select></label>
             <label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label>
+            <button id="uploadKnowledge" type="button">Upload knowledge base (.md)</button>
+            <input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain" hidden>
           </div>
-          <div id="assistantPrompts" class="assistant-prompts"></div>
         </div>
         <div class="assistant-chat">
-          <div class="chat-pane-header"><h3>Chat</h3><div class="chat-input-actions"><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
+          <div class="chat-pane-header"><h3>Chat</h3><div class="chat-input-actions"><button id="assistantChatClose" type="button">Close</button><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
           <div id="plannerChatMessages" class="chat-messages"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
-          <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span>Thinking…</span></div>
+          <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span id="plannerChatBusyText">Thinking…</span></div>
           <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary">Send</button></div></div>
         </div>
       </div>
 
-      <div id="view-planner" class="view" hidden>
-        <div class="view-header"><div><h2>Content Planner</h2><p class="muted">Plan one episode or full series, create Episode Formats, and create episode drafts.</p></div><button id="savePlan" class="primary" disabled>Save plan</button></div>
-        <div class="subnav planner-tabs" aria-label="Content Planner sections">
-          <button type="button" data-planner-section="plan">Plan</button>
-          <button type="button" data-planner-section="episodes">Episodes</button>
-        </div>
-        <div class="planner-layout">
-          <div class="planner-main">
-            <section class="panel planner-section" data-planner-panel="plan">
-              <h3>Plan Setup</h3>
-              <p class="muted">Define series goals, source material, speakers, and format, then generate episode titles and first-episode detail.</p>
-              <div class="toolbar"><label data-help="Selects the project this setup and assistant conversation belong to.">Plan<select id="planSelect"></select></label><button id="newPlan">New</button><button id="duplicatePlan">Duplicate</button><button id="deletePlan" class="danger">Delete</button></div>
-              <div class="grid">
-                <label class="full" data-help="Names the project in selectors, histories, and generated drafts.">Name<input id="planName"></label>
-                <label data-help="Grounds planning and transcripts in uploaded source material.">Knowledge Base<select id="planKnowledge"></select></label>
-                <label data-help="Defines hosts, voices, and delivery style used by Episode Formats.">Speaker Profile<select id="planSpeakerProfile"></select></label>
-                <label data-help="Uses a saved structure, or creates one automatically from this plan.">Episode Format<select id="planEpisodeFormat"></select></label>
-                <label data-help="Creates episode titles and planning detail; it does not generate audio.">Planning model<select id="planModel"></select></label>
-                <label data-help="Fixes series length, or leaves it empty so the model chooses without padding.">Episode count (optional)<input id="planEpisodeCount" type="number" min="1" max="100" placeholder="Auto - LLM chooses"></label>
-                <div id="planAutoFormatFields" class="grid full">
-                  <label data-help="Sets language for automatically created Episode Format.">Language<select id="planLanguage"></select></label>
-                  <label data-help="Sets duration for automatically created Episode Format.">Target minutes<input id="planMinutes" type="number" min="5" max="60"></label>
-                </div>
-                <label class="full" data-help="Sets listener knowledge level, interests, and expected tone.">Audience<textarea id="planAudience"></textarea></label>
-                <label class="full" data-help="Defines the useful outcome listeners should reach.">Goal<textarea id="planGoal"></textarea></label>
-                <label class="full" data-help="Sets the subject, boundaries, and central promise for the series.">Theme<textarea id="planTheme" style="min-height:180px"></textarea></label>
-              </div>
-              <div class="actions"><button id="generatePlan" class="primary">Generate plan</button></div>
+      <div id="view-episodes" class="view" hidden>
+        <div class="view-header"><div><h2>Episodes</h2><p class="muted">Press Start on an episode to generate its script and audio. Ask the chat to add, change, or rework episodes.</p></div></div>
+        <div class="view-body">
+            <section class="panel">
+              <div id="episodeList" class="episode-list"><p class="muted">Describe your podcast idea in the chat to get started.</p></div>
             </section>
-
-            <section class="panel planner-section" data-planner-panel="plan" hidden>
-              <h3>Knowledge Base</h3>
-              <p class="muted">Upload and manage source material used by plans, assistants, and transcript generation.</p>
-              <div class="grid"><label data-help="Provides trusted source material; embedded instructions are ignored.">Markdown file<input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain"></label><div class="actions"><button id="uploadKnowledge" class="primary">Upload knowledge base</button></div></div>
-              <div class="separator"></div><div id="knowledgeSummary" class="speaker-summary"><p class="muted">No knowledge base loaded.</p></div>
-            </section>
-
-            <section class="panel planner-section" data-planner-panel="episodes" hidden><div class="view-header"><h3>Planned Episodes</h3><button id="createSelectedEpisodes">Create selected drafts</button></div><p class="muted">Review generated episode outlines, choose formats, and create saved drafts for transcript generation.</p><div class="internal-nav-layout"><div id="plannedEpisodeSidebar" class="internal-sidebar" role="navigation" aria-label="Planned episodes"></div><div id="plannedEpisodes" class="plan-list"><p class="muted">Generate plan to create episodes.</p></div></div></section>
-          </div>
-
         </div>
       </div>
 
       <div id="view-speakers" class="view" hidden>
         <div class="view-header">
-          <div><h2>Speaker Profiles</h2><p class="muted">Define hosts, voices, and delivery rules. Each profile supports 1–4 speakers; MiMo stays default, ElevenLabs models can be selected globally or per speaker.</p></div>
-          <button id="saveProfiles" class="primary" disabled>Save speaker profiles</button>
+          <div><h2>Hosts</h2><p class="muted">Define hosts, voices, and delivery rules. Each profile supports 1–4 speakers; the defaults work out of the box.</p></div>
+          <div class="actions"><button id="saveProfiles" class="primary" disabled>Save hosts</button></div>
         </div>
+        <div class="view-body">
         <section id="profiles-speakers" class="panel">
           <div class="model-refresh-row">
             <div id="modelStatus" class="model-status" role="status" aria-live="polite"></div>
@@ -390,74 +390,73 @@
           </div>
           <div class="actions"><button id="addSpeaker">Add speaker</button></div>
         </section>
-      </div>
-
-      <div id="view-formats" class="view" hidden>
-        <div class="view-header">
-          <div><h2>Episode Formats</h2><p class="muted">Create reusable episode structures with language, duration, speaker, and generation-model defaults.</p></div>
-          <button id="saveEpisodeFormats" class="primary" disabled>Save Episode Formats</button>
         </div>
-        <section id="profiles-episodes" class="panel">
-          <div class="toolbar"><label data-help="Selects the reusable structure being reviewed or edited.">Format<select id="episodeProfileSelect"></select></label><button id="newEpisodeProfile">New</button><button id="duplicateEpisodeProfile">Duplicate</button><button id="deleteEpisodeProfile" class="danger">Delete</button></div>
-          <div id="episodeProfilePills" class="profile-pills" aria-label="Selected Episode Format details"></div>
-          <div class="grid">
-            <label class="full" data-help="Identifies this reusable format.">Name<input id="epName"></label><label class="full" data-help="Explains when this structure should be chosen.">Description<textarea id="epDescription"></textarea></label>
-            <label data-help="Supplies hosts and voice behavior.">Speaker Profile<select id="epSpeakerProfile"></select></label>
-            <label data-help="Builds the episode outline.">Outline model<select id="epOutlineModel"></select></label><label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="epTranscriptModel"></select></label>
-            <label data-help="Controls transcript language and compatible voices.">Language<select id="epLanguage"></select></label><label data-help="Sets expected transcript length and duration checks.">Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
-          </div>
-        </section>
       </div>
 
       <div id="view-transcript" class="view" hidden>
+        <div class="view-header"><div><h2>Script</h2><p class="muted">Generate, edit, and save each episode's script here.</p></div></div>
+        <div class="subnav" aria-label="Transcript sections">
+          <button id="transcriptScriptTab" type="button">Script</button>
+          <button id="transcriptPromptTab" type="button">Prompt &amp; Cues</button>
+        </div>
+        <div class="view-body">
         <section class="panel">
-          <h2>Transcript Generator</h2>
-          <p class="muted">Create episode drafts in Content Planner, then generate transcripts here.</p>
           <div class="toolbar" style="grid-template-columns: 1fr">
             <label data-help="Loads the episode draft and keeps Transcript and TTS on the same selection.">Saved episode<select id="savedEpisodeSelect"><option value="">Select saved episode</option></select></label>
           </div>
-          <div class="subnav" aria-label="Transcript sections">
-            <button id="transcriptScriptTab" type="button">Script</button>
-            <button id="transcriptPromptTab" type="button">Prompt &amp; Cues</button>
-          </div>
-          <div class="actions"><label class="bulk-check" data-help="Queues audio automatically only after transcript generation succeeds."><input id="autoGenerateTts" type="checkbox"> Generate TTS after transcript</label></div>
           <section id="transcript-script-panel">
             <div class="grid three">
-              <label class="full" data-help="Provides structure, speakers, models, language, and target duration.">Episode Format<select id="buildEpisodeProfile"></select></label>
               <label class="full" data-help="Grounds this episode in uploaded source material.">Knowledge Base<select id="buildKnowledge"></select></label>
               <label class="full" data-help="Names the saved draft, jobs, rendered file, and player entry.">Episode name<input id="episodeName" placeholder="Ep. 01 — Title"></label>
-              <label class="full" data-help="Adds episode-specific facts, boundaries, and editorial direction.">Additional instructions<textarea id="additionalInstructions" style="min-height:190px"></textarea></label>
+              <label class="full" data-help="Adds episode-specific facts, boundaries, and editorial direction.">Additional instructions<textarea id="additionalInstructions" style="min-height:120px"></textarea></label>
             </div>
+            <details id="episodeSettings">
+              <summary>Episode settings — hosts, format, language, duration, models</summary>
+              <div class="grid three">
+                <label class="full" data-help="Chooses the hosts and voices used by this episode.">Hosts<select id="episodeHosts"></select></label>
+                <label class="full" data-help="Provides structure, models, language, and target duration.">Episode Format<select id="buildEpisodeProfile"></select></label>
+                <label data-help="Controls transcript language and compatible voices.">Language<select id="epLanguage"></select></label>
+                <label data-help="Sets expected transcript length and duration checks.">Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
+                <label data-help="Builds the episode outline.">Outline model<select id="epOutlineModel"></select></label>
+                <label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="epTranscriptModel"></select></label>
+              </div>
+              <div class="actions"><button id="saveEpisodeSettings" type="button">Save settings</button></div>
+            </details>
             <div class="actions">
               <button id="saveEpisode" disabled>Save draft</button>
               <button id="generateTranscript" class="primary">Generate transcript</button>
+              <label class="bulk-check" data-help="Queues audio automatically only after transcript generation succeeds."><input id="autoGenerateTts" type="checkbox"> Generate TTS after transcript</label>
             </div>
             <div id="transcriptJob" class="loading-line" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="transcriptJobStatus"></span></div>
             <div class="separator"></div>
             <p class="muted">Format: <code>## Segmento</code>, then <code>Speaker [optional delivery cue]: spoken text</code>. One turn per line.</p>
             <div class="actions">
               <label style="display:inline-grid" data-help="Loads an existing Markdown script instead of generating one.">Import transcript<input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
-              <span id="wordCount" class="muted">0 words</span>
+              <span id="wordCount" class="muted" style="margin-left:auto">0 words</span>
             </div>
             <p id="transcriptLengthWarning" class="warning" hidden></p>
             <textarea id="transcript" class="transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
-            <div class="actions"><button id="saveTranscript" class="primary" disabled>Save transcript</button><button id="saveTranscriptAndTts" disabled>Save + go to TTS</button></div>
+            <div class="actions"><button id="saveTranscript" class="primary" disabled>Save transcript</button></div>
           </section>
           <section id="transcript-prompt-panel" hidden>
             <p class="muted">Rules resolve from each speaker's TTS model. References: <a href="https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/speech-synthesis-v2.5" target="_blank" rel="noreferrer">MiMo</a> · <a href="https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices" target="_blank" rel="noreferrer">ElevenLabs</a> · <a href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noreferrer">Chatterbox</a>.</p>
             <div id="transcriptCapabilitySummary" class="speaker-summary"></div>
-            <label data-help="Shows non-editable syntax and capability constraints resolved from selected models.">Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly style="min-height:240px"></textarea></label>
-            <label data-help="Adds reviewed creative direction without replacing provider rules.">Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" style="min-height:160px" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
-            <div class="actions"><button id="resetTranscriptPrompt">Clear guidance</button><button id="saveTranscriptPrompt" disabled>Save draft</button><button id="generateTranscriptFromPrompt" class="primary">Generate transcript</button></div>
+            <label data-help="Shows non-editable syntax and capability constraints resolved from selected models.">Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly style="min-height:160px"></textarea></label>
+            <label data-help="Adds reviewed creative direction without replacing provider rules.">Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" style="min-height:100px" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
+            <div class="actions"><button id="resetTranscriptPrompt">Clear guidance</button><button id="saveTranscriptPrompt" disabled>Save guidance</button></div>
           </section>
         </section>
+        </div>
       </div>
 
       <div id="view-tts" class="view" hidden>
+        <div class="view-header"><div><h2>TTS Generator</h2><p class="muted">Preview voices and render saved transcripts to MP3.</p></div></div>
+        <div class="view-body">
         <section class="panel">
-          <h2>TTS Generator</h2>
-          <label data-help="Chooses the saved transcript and frozen profile snapshot to render.">Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
-          <label data-help="Overrides pronunciation language for this render without changing the Episode Format.">TTS language override<select id="ttsLanguageOverride"><option value="">Use episode profile language</option></select></label>
+          <div class="grid">
+            <label data-help="Chooses the saved transcript and frozen profile snapshot to render.">Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
+            <label data-help="Overrides pronunciation language for this render without changing the Episode Format.">TTS language override<select id="ttsLanguageOverride"><option value="">Use episode profile language</option></select></label>
+          </div>
           <div id="ttsSummary" class="speaker-summary"><p class="muted">Select a saved episode with a transcript.</p></div>
           <div id="previewButtons" class="actions"></div>
           <p class="warning">Preview every voice before rendering. MiMo preset TTS is blocked outside English/Chinese; other languages require a compatible ElevenLabs model and <code>ELEVENLABS_API_KEY</code>.</p>
@@ -468,11 +467,13 @@
           <p id="renderStatus" class="muted"></p>
           <div id="episodePlayerActions" class="actions"></div>
         </section>
+        </div>
       </div>
 
       <div id="view-player" class="view" hidden>
+        <div class="view-header"><div><h2>Player</h2><p class="muted">Listen to rendered episodes without interrupting playback when changing views.</p></div></div>
+        <div class="view-body">
         <section class="panel">
-          <div><h2>Player</h2><p class="muted">Listen to rendered episodes without interrupting playback when changing views.</p></div>
           <h3 id="playerTitle">No episode loaded</h3>
           <div class="player-seek">
             <span id="playerElapsed">0:00</span>
@@ -501,25 +502,35 @@
             <div id="playerQueue" class="player-list"><p class="muted">Queue is empty.</p></div>
           </section>
         </div>
+        </div>
       </div>
 
       <div id="view-config" class="view" hidden>
+        <div class="view-header">
+          <div><h2>Model Connections</h2><p class="muted">Configure connections, then activate only models needed by profiles and generators.</p></div>
+          <button id="saveConfig" class="primary" disabled>Save config</button>
+        </div>
+        <div class="view-body">
         <section class="panel">
-          <div class="view-header">
-            <div><h2>Model Connections</h2><p class="muted">Configure connections, then activate only models needed by profiles and generators.</p></div>
-            <button id="saveConfig" class="primary" disabled>Save config</button>
-          </div>
           <div id="configModelStatus" class="model-status" role="status" aria-live="polite"></div>
           <div id="configProviders"></div>
           <div class="actions"><button id="addCompatibleConnection">Add OpenAI compatible connection</button></div>
         </section>
+        <section class="panel">
+          <h3>Knowledge Bases</h3>
+          <p class="muted">Uploaded source material used by the assistant and script generation. Upload from the chat sidebar.</p>
+          <div id="knowledgeSummary" class="speaker-summary"><p class="muted">No knowledge base loaded.</p></div>
+        </section>
+        </div>
       </div>
 
       <dialog id="modelDialog">
         <div class="dialog-body">
           <div class="view-header"><div><h2 id="modelDialogTitle">Active models</h2><p id="modelDialogStatus" class="muted"></p></div><button id="closeModelDialog" type="button">Close</button></div>
-          <label>Search models<input id="modelSearch" type="search" placeholder="Search discovered models"></label>
-          <label class="bulk-check"><input id="modelSelectedOnly" type="checkbox"> Selected only</label>
+          <div class="grid">
+            <label>Search models<input id="modelSearch" type="search" placeholder="Search discovered models"></label>
+            <label class="bulk-check" style="align-self: end"><input id="modelSelectedOnly" type="checkbox"> Selected only</label>
+          </div>
           <div class="actions"><button id="toggleFilteredModels" type="button">Select all filtered</button><span id="modelSelectionCount" class="muted"></span></div>
           <div id="modelSelectionList" class="model-list"></div>
           <div class="grid">
@@ -558,7 +569,7 @@
     const openaiLegacyVoices = new Set(["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]);
     const ttsCueRe = /\[[^\]\r\n]{1,80}\]|<break\b[^>]*\/?>/gi;
     const $ = (id) => document.getElementById(id);
-    const VIEW_SELECTIONS_KEY = "podcast-builder.view-selections.v1";
+    const VIEW_SELECTIONS_KEY = "pod-god.view-selections.v1";
     const viewSelections = loadViewSelections();
     const rememberedEpisodeId = viewSelections.episodeId || "";
     const rememberedPlanId = viewSelections.planId || "";
@@ -583,7 +594,7 @@
     let hadActiveJobs = false;
     const autoTtsTranscriptJobs = new Set();
     let notifications = [];
-    const RIGHTBAR_KEY = "podcast-builder.rightbar.v1";
+    const RIGHTBAR_KEY = "pod-god.rightbar.v1";
     let rightbarOpen = false;
     try { rightbarOpen = sessionStorage.getItem(RIGHTBAR_KEY) === "open"; } catch {}
     let toastEntries = [];
@@ -593,19 +604,16 @@
     let transcriptPromptDirty = false;
     let activePlanId = rememberedPlanId;
     let activePlan = null;
-    let planDirty = false;
     let plannerChatThreadId = "";
     let plannerChatThread = null;
     let plannerChatThreads = [];
     let plannerChatBusy = false;
-    let activePlannerSection = ["plan", "episodes"].includes(viewSelections.plannerSection) ? viewSelections.plannerSection : "plan";
-    let activePlannedEpisodeId = "";
     let activeSpeakerIndex = 0;
     let playingEpisodeId = "";
     let playerQueue = [];
     let playerFailed = false;
     let playerPlaybackRate = 1;
-    const PLAYER_PLAYLISTS_KEY = "podcast-builder.playlists.v1";
+    const PLAYER_PLAYLISTS_KEY = "pod-god.playlists.v1";
     let playerPlaylists = loadPlayerPlaylists();
     let activePlayerPlaylistId = playerPlaylists[0]?.id || "";
 
@@ -717,6 +725,7 @@
     function selectModelOptions(kind, selected, includeDefault = false) {
       const models = discoveredModels(kind);
       let html = includeDefault ? option("", "Use profile default", !selected) : "";
+      if (!includeDefault && !selected) html = option("", `Select ${kind === "tts" ? "TTS" : "text"} model`, true, true);
       html += models.map((model) => option(model.id, model.label, model.id === selected)).join("");
       if (selected && !models.some((model) => model.id === selected)) html += option(selected, `${selected} · saved/unavailable`, true, true);
       if (!html) html = option("", modelCatalog.status === "loading" ? "Loading models…" : "No available models", true, true);
@@ -737,7 +746,8 @@
 
     function languageOptions(selected) {
       const languages = modelCatalog.languages || [];
-      let html = languages.map((language) => option(language.id, `${language.name} · ${language.id}`, language.id === selected)).join("");
+      let html = selected ? "" : option("", "Select language", true, true);
+      html += languages.map((language) => option(language.id, `${language.name} · ${language.id}`, language.id === selected)).join("");
       if (selected && !languages.some((language) => language.id === selected)) html += option(selected, `${selected} · saved/unavailable`, true, true);
       return html || option("", "Loading languages…", true, true);
     }
@@ -763,98 +773,94 @@
     }
 
     function setView(view) {
-      const aliases = { profiles: "formats", knowledge: "planner" };
+      const aliases = { planner: "episodes", knowledge: "episodes", profiles: "speakers", formats: "transcript" };
       const candidate = aliases[view] || view;
-      const selected = ["config", "speakers", "formats", "planner", "transcript", "tts", "player"].includes(candidate) ? candidate : "planner";
+      const selected = ["config", "speakers", "episodes", "transcript", "tts", "player"].includes(candidate) ? candidate : "episodes";
       document.querySelectorAll(".view").forEach((node) => { node.hidden = node.id !== `view-${selected}`; });
-      document.querySelectorAll("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === selected));
       if (location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
       if (selected === "transcript") renderTranscriptSections();
       if (selected === "tts") renderTtsView();
       if (selected === "player") renderPlayer();
       if (selected === "config") renderConfigView();
-      if (selected === "planner") { renderPlannerSections(); loadPlannerChatThread(); }
+      if (selected === "episodes") { renderEpisodeList(); loadPlannerChatThread(); }
       renderPodcastAssistant();
     }
 
     function activeViewName() {
-      return document.querySelector(".view:not([hidden])")?.id.replace("view-", "") || "planner";
+      return document.querySelector(".view:not([hidden])")?.id.replace("view-", "") || "episodes";
     }
 
     function assistantContext() {
       const view = activeViewName();
       return {
         view,
-        plannerSection: view === "planner" ? activePlannerSection : "",
         transcriptSection: view === "transcript" ? activeTranscriptSection : "",
         episodeProfileId: activeEpisodeProfileId,
-        plannedEpisodeId: activePlannedEpisodeId,
         episodeId: currentEpisode?.id || "",
       };
     }
 
     function assistantWorkspaceDraft() {
       const view = activeViewName();
-      if (view === "formats") return {
-        id: activeEpisodeProfileId, name: $("epName").value, description: $("epDescription").value, speakerProfileId: $("epSpeakerProfile").value,
-        outlineModel: $("epOutlineModel").value, transcriptModel: $("epTranscriptModel").value,
-        language: $("epLanguage").value, targetMinutes: Number($("epMinutes").value),
-      };
       if (view === "transcript") return {
-        id: currentEpisode?.id || "", name: $("episodeName").value, episodeProfileId: $("buildEpisodeProfile").value, knowledgeBaseId: $("buildKnowledge").value,
+        id: currentEpisode?.id || "", name: $("episodeName").value, episodeProfileId: $("buildEpisodeProfile").value, speakerProfileId: $("episodeHosts").value, knowledgeBaseId: $("buildKnowledge").value,
         additionalInstructions: $("additionalInstructions").value, transcriptPromptGuidance: $("transcriptPromptGuidance").value,
       };
       if (view === "tts") return { episodeId: currentEpisode?.id || "", languageOverride: $("ttsLanguageOverride").value };
       return null;
     }
 
+    function planEpisodeRows() {
+      const planned = activePlan?.episodes || [];
+      return planned.map((item) => ({ planned: item, episode: state?.episodes.find((episode) => episode.id === item.createdEpisodeId) || null }));
+    }
+
     function renderPodcastAssistant() {
       const view = activeViewName();
+      const navOnly = ["transcript", "tts", "player", "config"].includes(view);
       $("podcastAssistant").hidden = false;
+      $("podcastAssistant").classList.toggle("nav-only", navOnly);
+      if (navOnly) $("podcastAssistant").classList.remove("chat-open");
       $("appMain").classList.add("assistant-active");
-      const sectionLabels = { plan: "Plan Setup", episodes: "Planned Episodes", script: "Transcript Script", prompt: "Prompt & Cues" };
-      const focus = view === "planner" ? sectionLabels[activePlannerSection]
-        : view === "speakers" ? "Speaker Profiles"
-        : view === "formats" ? "Episode Formats"
-        : view === "transcript" ? sectionLabels[activeTranscriptSection]
+      $("appMain").classList.toggle("nav-only", navOnly);
+      document.querySelectorAll(".assistant-util").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+      const focus = view === "episodes" ? "Episodes"
+        : view === "speakers" ? "Hosts"
+        : view === "transcript" ? (activeTranscriptSection === "prompt" ? "Prompt & Cues" : "Script")
         : view === "tts" ? "TTS Generation"
         : view === "player" ? "Player"
         : "Model Connections";
       $("assistantContext").textContent = `Helping with: ${focus}`;
-      const plans = state?.plans || [];
-      $("assistantPlanSelect").innerHTML = option("", plans.length ? "Select plan" : "New plan on first message", !activePlanId) + plans.map((item) => option(item.id, item.name, item.id === activePlanId)).join("");
-      const planned = activePlan?.episodes || [];
-      const created = planned.map((item) => state?.episodes.find((episode) => episode.id === item.createdEpisodeId)).filter(Boolean);
+      const rows = planEpisodeRows();
+      const created = rows.map((row) => row.episode).filter(Boolean);
       const transcriptCount = created.filter((episode) => episode.transcriptWords > 0).length;
       const audioCount = created.filter((episode) => episode.audioReady).length;
-      const selectedSpeaker = state?.profiles.speakerProfiles.find((item) => item.id === activePlan?.speakerProfileId);
-      const activeTtsModels = new Set(discoveredModels("tts").map((item) => item.id));
-      const profilesReady = Boolean(selectedSpeaker && activeTtsModels.has(selectedSpeaker.voiceModel) && selectedSpeaker.speakers.every((speaker) => !speaker.ttsModelOverride || activeTtsModels.has(speaker.ttsModelOverride)));
-      const formatReady = Boolean(activePlan?.episodeFormatId && state?.profiles.episodeProfiles.some((item) => item.id === activePlan.episodeFormatId));
+      const hasEpisodes = created.length > 0;
       const steps = [
-        ["Plan setup", Boolean(activePlan?.theme && activePlan?.planningModel && activePlan?.speakerProfileId), "planner:plan"],
-        ["Speaker Profile", profilesReady, "speakers"],
-        ["Episode Format", formatReady, "formats"],
-        [`Episodes ${created.length}/${planned.length}`, Boolean(planned.length && created.length === planned.length), "planner:episodes"],
-        [`Transcripts ${transcriptCount}/${created.length}`, Boolean(created.length && transcriptCount === created.length), "transcript"],
+        ["Describe idea", hasEpisodes, "chat"],
+        ["Hosts", hasEpisodes, "speakers"],
+        [`Episodes ${created.length}`, hasEpisodes, "episodes"],
+        [`Scripts ${transcriptCount}/${created.length}`, Boolean(created.length && transcriptCount === created.length), "transcript"],
         [`Audio ${audioCount}/${created.length}`, Boolean(created.length && audioCount === created.length), "tts"],
       ];
       const currentIndex = steps.findIndex(([, done]) => !done);
       $("assistantProgress").innerHTML = steps.map(([label, done, target], index) => {
         const stepState = done ? "done" : index === currentIndex ? "current" : "pending";
         const mark = done ? "✓" : index === currentIndex ? "●" : "○";
-        return `<li data-state="${stepState}"><button type="button" data-assistant-target="${target}"><span class="step-mark" aria-hidden="true">${mark}</span>${escapeHtml(label)}</button></li>`;
+        return `<li data-state="${stepState}"><button type="button"${target === view ? ' class="active"' : ""} data-assistant-target="${target}"><span class="step-mark" aria-hidden="true">${mark}</span>${escapeHtml(label)}</button></li>`;
       }).join("");
-      const prompts = view === "planner"
-        ? activePlannerSection === "episodes" ? ["Review checked episodes", "Improve this episode", "What is the next step?"]
-          : ["Help shape this podcast", "Fill missing setup fields", "What is the next step?"]
-        : view === "speakers" ? ["Design the hosts", "Improve speaker personalities", "Check voice setup"]
-        : view === "formats" ? ["Improve this format", "Suggest target duration", "What is the next step?"]
-        : view === "transcript" ? ["Improve episode guidance", "Check transcript readiness", "What should I do next?"]
-        : view === "tts" ? ["Check voice readiness", "Help choose language", "What should I render next?"]
-        : view === "player" ? ["What should I play next?", "Review production progress", "What is the next step?"]
-        : ["Check model setup", "Which models do I need?", "What is the next step?"];
-      $("assistantPrompts").innerHTML = prompts.map((text) => `<button type="button" data-assistant-prompt="${escapeHtml(text)}">${escapeHtml(text)}</button>`).join("");
+      const nextSteps = [
+        { text: "Describe your podcast idea in the chat, then apply the assistant's episode list.", target: "chat", highlight: "#plannerChatInput", go: "Write your idea" },
+        { text: "Optional: review your hosts and voices, then press Save hosts.", target: "speakers", highlight: "#saveProfiles", go: "Open Hosts" },
+        { text: "Press Start on the next episode to generate its script and audio.", target: "episodes", highlight: "[data-start-episode]", go: "Open Episodes" },
+        { text: "Generate or edit the script for the next episode.", target: "transcript", highlight: "#generateTranscript", go: "Open Script" },
+        { text: "Render MP3 audio for each finished script.", target: "tts", highlight: "#renderAudio", go: "Open TTS Generator" },
+      ];
+      const nextStep = currentIndex === -1 ? { text: "All episodes produced. Listen in the Player.", target: "player", highlight: "", go: "Open Player" } : nextSteps[currentIndex];
+      $("assistantNextText").textContent = nextStep.text;
+      $("assistantNextGo").textContent = nextStep.go;
+      $("assistantNextGo").dataset.nextTarget = nextStep.target;
+      $("assistantNextGo").dataset.nextHighlight = nextStep.highlight;
     }
 
     function modelProviders() {
@@ -885,10 +891,9 @@
       renderModelStatus();
       if (state) {
         syncSpeakerForm();
-        syncEpisodeProfileForm();
         syncConfigForm();
         renderProfileOptions();
-        renderPlannerOptions();
+        renderChatControls();
         renderConfigView();
         renderTtsView();
         renderJobIndicators();
@@ -932,11 +937,8 @@
       const episodeLocked = episodeIsBusy() || !currentEpisode;
       $("saveConfig").disabled = !configDirty;
       $("saveProfiles").disabled = !profilesDirty;
-      $("saveEpisodeFormats").disabled = !profilesDirty;
-      $("savePlan").disabled = !activePlan || !planDirty;
       $("saveEpisode").disabled = episodeLocked || !(episodeDraftDirty || transcriptPromptDirty);
       $("saveTranscript").disabled = episodeLocked || !transcriptDirty;
-      $("saveTranscriptAndTts").disabled = episodeLocked || (!transcriptDirty && !currentEpisode?.transcript);
       $("saveTranscriptPrompt").disabled = episodeLocked || !transcriptPromptDirty;
     }
 
@@ -949,12 +951,12 @@
       $("transcriptJob").hidden = !transcriptBusy;
       $("transcriptJobStatus").textContent = transcriptBusy ? transcriptJob.message : "";
       $("generateTranscript").disabled = episodeDisabled;
-      $("generateTranscriptFromPrompt").disabled = episodeDisabled;
       $("autoGenerateTts").disabled = episodeDisabled;
       updateSaveButtons();
-      for (const id of ["buildEpisodeProfile", "buildKnowledge", "episodeName", "additionalInstructions", "transcriptPromptGuidance", "transcriptFile", "transcript", "resetTranscriptPrompt"]) $(id).disabled = episodeDisabled;
+      for (const id of ["buildEpisodeProfile", "episodeHosts", "saveEpisodeSettings", "buildKnowledge", "episodeName", "additionalInstructions", "transcriptPromptGuidance", "transcriptFile", "transcript", "resetTranscriptPrompt"]) $(id).disabled = episodeDisabled;
       $("applyLatestProfiles").disabled = episodeBusy || !currentEpisode || episodeProfilesAreCurrent();
       $("renderAudio").disabled = episodeBusy || ttsCompatibilityErrors().length > 0 || !currentEpisode?.transcript;
+      renderEpisodeList();
 
       if (ttsJob) {
         $("renderProgress").hidden = false;
@@ -1009,10 +1011,7 @@
     }
 
     async function refreshState(preferredEpisodeId = currentEpisode?.id) {
-      if (profilesDirty) {
-        syncSpeakerForm();
-        syncEpisodeProfileForm();
-      }
+      if (profilesDirty) syncSpeakerForm();
       if (configDirty) syncConfigForm();
       const pendingProfiles = profilesDirty ? state?.profiles : null;
       const pendingConfig = configState;
@@ -1022,7 +1021,8 @@
       configState = configDirty ? pendingConfig : structuredClone(state.config || { providers: { mimo: {}, elevenlabs: {}, openai: {}, chatterbox: {} }, compatibleConnections: [] });
       renderProfileOptions();
       renderBuildOptions();
-      renderPlannerOptions();
+      renderChatControls();
+      renderEpisodeList();
       renderConfigView();
       renderPlayer();
       if (preferredEpisodeId && state.episodes.some((episode) => episode.id === preferredEpisodeId && !episode.corrupt)) {
@@ -1037,24 +1037,12 @@
 
     function renderProfileOptions() {
       const speakers = state.profiles.speakerProfiles;
-      const episodes = state.profiles.episodeProfiles;
       activeSpeakerProfileId = speakers.some((item) => item.id === activeSpeakerProfileId) ? activeSpeakerProfileId : speakers[0]?.id || "";
-      activeEpisodeProfileId = episodes.some((item) => item.id === activeEpisodeProfileId) ? activeEpisodeProfileId : episodes[0]?.id || "";
+      activeEpisodeProfileId = state.profiles.episodeProfiles.some((item) => item.id === activeEpisodeProfileId) ? activeEpisodeProfileId : state.profiles.episodeProfiles[0]?.id || "";
       $("speakerProfileSelect").innerHTML = speakers.map((item) => option(item.id, item.name, item.id === activeSpeakerProfileId)).join("");
-      $("episodeProfileSelect").innerHTML = episodes.map((item) => option(item.id, item.name, item.id === activeEpisodeProfileId)).join("");
       const selectedSpeaker = speakers.find((item) => item.id === activeSpeakerProfileId);
-      const selectedEpisode = episodes.find((item) => item.id === activeEpisodeProfileId);
-      const selectedEpisodeSpeaker = speakers.find((item) => item.id === selectedEpisode?.speakerProfileId);
       $("speakerProfilePills").innerHTML = selectedSpeaker ? `<span class="profile-pill active">${selectedSpeaker.speakers.length} speaker${selectedSpeaker.speakers.length === 1 ? "" : "s"}</span><span class="profile-pill">${escapeHtml(modelLabel(selectedSpeaker.voiceModel))}</span>` : "";
-      $("episodeProfilePills").innerHTML = selectedEpisode ? [
-        `<span class="profile-pill active">${escapeHtml(languageById(selectedEpisode.language)?.name || selectedEpisode.language)}</span>`,
-        `<span class="profile-pill">${selectedEpisode.targetMinutes} min</span>`,
-        `<span class="profile-pill">${escapeHtml(selectedEpisodeSpeaker?.name || "Speaker profile unavailable")}</span>`,
-        `<span class="profile-pill">Outline: ${escapeHtml(textModelLabel(selectedEpisode.outlineModel))}</span>`,
-        `<span class="profile-pill">Transcript: ${escapeHtml(textModelLabel(selectedEpisode.transcriptModel))}</span>`,
-      ].join("") : "";
       loadSpeakerForm(activeSpeakerProfileId);
-      loadEpisodeProfileForm(activeEpisodeProfileId);
       updateSaveButtons();
     }
 
@@ -1089,7 +1077,7 @@
     function episodeProfilesAreCurrent() {
       if (!state || !currentEpisode) return false;
       const episodeProfile = state.profiles.episodeProfiles.find((item) => item.id === currentEpisode.episodeProfileId);
-      const speakerProfile = state.profiles.speakerProfiles.find((item) => item.id === episodeProfile?.speakerProfileId);
+      const speakerProfile = state.profiles.speakerProfiles.find((item) => item.id === (currentEpisode.speakerProfileId || episodeProfile?.speakerProfileId));
       return JSON.stringify(currentEpisode.episodeProfile) === JSON.stringify(episodeProfile)
         && JSON.stringify(currentEpisode.speakerProfile) === JSON.stringify(speakerProfile);
     }
@@ -1336,6 +1324,7 @@
       $("spVoiceModel").innerHTML = modelOptions(profile.voiceModel);
       $("spInstructions").value = profile.instructions || "";
       renderSpeakerCards(profile);
+      updateSaveButtons();
     }
 
     function voiceProvider(model) {
@@ -1444,7 +1433,7 @@
         const resolvedModel = speaker.ttsModelOverride || profile.voiceModel;
         return `<fieldset data-speaker-index="${index}"${index === activeSpeakerIndex ? "" : " hidden"}>
           <legend>Speaker ${index + 1}</legend>
-          <div class="speaker-head"><span class="badge">${escapeHtml(modelLabel(resolvedModel))}</span><button type="button" class="danger remove-speaker" data-index="${index}"${profile.speakers.length === 1 ? " disabled" : ""}>Remove</button></div>
+          <div class="speaker-head">${resolvedModel ? `<span class="badge" title="Resolved TTS model">TTS: ${escapeHtml(modelLabel(resolvedModel))}</span>` : ""}<button type="button" class="danger remove-speaker" data-index="${index}"${profile.speakers.length === 1 ? " disabled" : ""}>Remove</button></div>
           <div class="grid">
             <label>Name<input data-field="name" value="${escapeHtml(speaker.name)}"></label>
             <label>Model override<select data-field="ttsModelOverride">${modelOptions(speaker.ttsModelOverride || "", true)}</select></label>
@@ -1527,30 +1516,26 @@
       updateSaveButtons();
     }
 
-    function loadEpisodeProfileForm(id) {
-      const profile = state.profiles.episodeProfiles.find((item) => item.id === id);
-      if (!profile) return;
-      activeEpisodeProfileId = id;
-      rememberViewSelection("episodeProfileId", id);
-      $("epName").value = profile.name;
-      $("epDescription").value = profile.description || "";
-      $("epSpeakerProfile").innerHTML = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === profile.speakerProfileId)).join("");
-      $("epOutlineModel").innerHTML = textModelOptions(profile.outlineModel);
-      $("epTranscriptModel").innerHTML = textModelOptions(profile.transcriptModel);
-      $("epLanguage").innerHTML = languageOptions(profile.language);
-      $("epMinutes").value = profile.targetMinutes;
+    function renderEpisodeSettingsFields() {
+      const format = state?.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
+      $("episodeHosts").innerHTML = (state?.profiles.speakerProfiles || []).map((item) => option(item.id, item.name, item.id === (currentEpisode?.speakerProfileId || format?.speakerProfileId))).join("");
+      $("epOutlineModel").innerHTML = textModelOptions(format?.outlineModel || "");
+      $("epTranscriptModel").innerHTML = textModelOptions(format?.transcriptModel || "");
+      $("epLanguage").innerHTML = languageOptions(format?.language || "es-419");
+      $("epMinutes").value = format?.targetMinutes ?? 18;
     }
 
-    function syncEpisodeProfileForm() {
-      const profile = state?.profiles.episodeProfiles.find((item) => item.id === activeEpisodeProfileId);
-      if (!profile) return;
-      profile.name = $("epName").value;
-      profile.description = $("epDescription").value;
-      profile.speakerProfileId = $("epSpeakerProfile").value;
-      profile.outlineModel = $("epOutlineModel").value;
-      profile.transcriptModel = $("epTranscriptModel").value;
-      profile.language = $("epLanguage").value;
-      profile.targetMinutes = Number($("epMinutes").value);
+    async function saveEpisodeSettings() {
+      if (!currentEpisode) throw new Error("Select a saved episode first.");
+      const format = state.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
+      if (!format) throw new Error("Select an Episode Format.");
+      format.outlineModel = $("epOutlineModel").value;
+      format.transcriptModel = $("epTranscriptModel").value;
+      format.language = $("epLanguage").value;
+      format.targetMinutes = Number($("epMinutes").value);
+      await saveProfiles();
+      await saveEpisode();
+      notify("Episode settings saved.", "ok");
     }
 
     function addSpeakerProfile(copy) {
@@ -1568,24 +1553,8 @@
       renderProfileOptions();
     }
 
-    function addEpisodeProfile(copy) {
-      syncEpisodeProfileForm();
-      const current = state.profiles.episodeProfiles.find((item) => item.id === activeEpisodeProfileId);
-      const base = copy ? structuredClone(current) : {
-        name: "New Episode Format", description: "", speakerProfileId: state.profiles.speakerProfiles[0]?.id || "",
-        outlineModel: "mimo-v2.5-pro", transcriptModel: "mimo-v2.5-pro", language: "es-419", targetMinutes: 18,
-      };
-      base.id = crypto.randomUUID();
-      if (copy) base.name += " — Copy";
-      state.profiles.episodeProfiles.push(base);
-      profilesDirty = true;
-      activeEpisodeProfileId = base.id;
-      renderProfileOptions();
-    }
-
     async function saveProfiles() {
       syncSpeakerForm();
-      syncEpisodeProfileForm();
       const result = await api("/api/profiles", { method: "PUT", body: JSON.stringify(state.profiles) });
       state.profiles = result.profiles || result;
       profilesDirty = false;
@@ -1594,6 +1563,7 @@
       renderTtsView();
       if (result.warnings?.length) notify(`Profiles saved with warnings: ${result.warnings.join(" ")}`, "warning");
       else notify("Profiles saved.", "ok");
+      return result.profiles || result;
     }
 
     function addCompatibleConnection() {
@@ -1643,11 +1613,12 @@
       const file = $("knowledgeFile").files[0];
       if (!file) throw new Error("Choose a Markdown file first.");
       const item = await api("/api/knowledge", { method: "POST", body: JSON.stringify({ name: file.name, content: await file.text() }) });
+      $("knowledgeFile").value = "";
       await refreshState();
       $("buildKnowledge").value = item.id;
+      $("plannerChatKb").value = item.id;
       if (activePlan) {
-        $("planKnowledge").value = item.id;
-        planDirty = true;
+        activePlan.knowledgeBaseId = item.id;
         await saveActivePlan();
       }
       notify(`Uploaded ${item.name}.`, "ok");
@@ -1662,19 +1633,13 @@
       const result = await api(`/api/knowledge/${encodeURIComponent(id)}`, { method: "DELETE" });
       if ($("buildKnowledge").value === id) $("buildKnowledge").value = "";
       if (currentEpisode?.knowledgeBaseId === id) currentEpisode.knowledgeBaseId = "";
-      if (activePlan?.knowledgeBaseId === id) { activePlan.knowledgeBaseId = ""; $("planKnowledge").value = ""; }
+      if (activePlan?.knowledgeBaseId === id) activePlan.knowledgeBaseId = "";
       if (plannerChatThread?.kbId === id) plannerChatThread.kbId = "";
       await refreshState(currentEpisode?.id);
       notify(`Deleted ${item.name}. Cleared ${result.cleared.plans} plan(s), ${result.cleared.episodes} episode(s), and ${result.cleared.chats} chat(s).`, "ok");
     }
 
-    function renderPlannerSections() {
-      document.querySelectorAll("[data-planner-panel]").forEach((panel) => { panel.hidden = panel.dataset.plannerPanel !== activePlannerSection; });
-      document.querySelectorAll("[data-planner-section]").forEach((button) => button.classList.toggle("active", button.dataset.plannerSection === activePlannerSection));
-      renderPodcastAssistant();
-    }
-
-    function renderPlannerOptions() {
+    function renderChatControls() {
       if (!state) return;
       const plans = state.plans || [];
       if (activePlanId && !plans.some((item) => item.id === activePlanId)) {
@@ -1686,29 +1651,11 @@
         activePlanId = plans[0].id;
         queueMicrotask(() => loadPlan(activePlanId, true).catch((error) => notify(error.message, "error")));
       }
-      $("planSelect").innerHTML = option("", plans.length ? "Select plan" : "No plans", !activePlanId)
-        + plans.map((item) => option(item.id, item.name, item.id === activePlanId)).join("");
-      const kb = planDirty ? $("planKnowledge").value : activePlan?.knowledgeBaseId || $("planKnowledge").value || "";
-      $("planKnowledge").innerHTML = option("", "None", !kb) + state.knowledgeBases.map((item) => option(item.id, item.name, item.id === kb)).join("");
-      const speaker = planDirty ? $("planSpeakerProfile").value : activePlan?.speakerProfileId || $("planSpeakerProfile").value || state.profiles.speakerProfiles[0]?.id || "";
-      $("planSpeakerProfile").innerHTML = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === speaker)).join("");
-      const episodeFormat = planDirty ? $("planEpisodeFormat").value : activePlan?.episodeFormatId || "";
-      $("planEpisodeFormat").innerHTML = option("", "Create automatically from this plan", !episodeFormat)
-        + state.profiles.episodeProfiles.filter((item) => item.speakerProfileId === speaker).map((item) => option(item.id, item.name, item.id === episodeFormat)).join("");
-      const language = planDirty ? $("planLanguage").value : activePlan?.language || "es-419";
-      $("planLanguage").innerHTML = languageOptions(language);
-      if (!planDirty) $("planMinutes").value = activePlan?.targetMinutes ?? 18;
-      $("planAutoFormatFields").hidden = Boolean($("planEpisodeFormat").value);
-      const model = planDirty ? $("planModel").value : activePlan?.planningModel || $("planModel").value || "";
-      $("planModel").innerHTML = textModelOptions(model);
-      const chatModel = plannerChatThread?.lastModel || $("plannerChatModel").value || model;
+      const chatModel = plannerChatThread?.lastModel || $("plannerChatModel").value || activePlan?.planningModel || "";
       $("plannerChatModel").innerHTML = textModelOptions(chatModel);
       const chatKb = plannerChatThread?.kbId || $("plannerChatKb").value || "";
       $("plannerChatKb").innerHTML = option("", "None", !chatKb) + state.knowledgeBases.map((item) => option(item.id, item.name, item.id === chatKb)).join("");
       renderPlannerChatHistory();
-      $("duplicatePlan").disabled = !activePlan;
-      $("deletePlan").disabled = !activePlan;
-      $("generatePlan").disabled = !activePlan;
       updateSaveButtons();
       renderPodcastAssistant();
     }
@@ -1717,51 +1664,19 @@
       activePlan = structuredClone(plan);
       activePlanId = plan.id;
       rememberViewSelection("planId", plan.id);
-      $("planName").value = plan.name;
-      $("planEpisodeCount").value = plan.episodeCount ?? "";
-      $("planAudience").value = plan.audience;
-      $("planGoal").value = plan.goal;
-      $("planTheme").value = plan.theme;
-      renderPlannerOptions();
-      $("planSelect").value = plan.id;
-      $("planKnowledge").value = plan.knowledgeBaseId;
-      $("planSpeakerProfile").value = plan.speakerProfileId;
-      $("planEpisodeFormat").value = plan.episodeFormatId || "";
-      $("planLanguage").value = plan.language || "es-419";
-      $("planMinutes").value = plan.targetMinutes ?? 18;
-      $("planAutoFormatFields").hidden = Boolean($("planEpisodeFormat").value);
-      $("planModel").value = plan.planningModel;
-      renderPlanCollections();
-      planDirty = false;
-      renderPodcastAssistant();
+      renderChatControls();
+      renderEpisodeList();
     }
 
     function capturePlanDraft() {
       if (!activePlan) return null;
       const plan = structuredClone(activePlan);
-      plan.name = $("planName").value;
-      plan.knowledgeBaseId = $("planKnowledge").value;
-      plan.speakerProfileId = $("planSpeakerProfile").value;
-      plan.episodeFormatId = $("planEpisodeFormat").value;
-      plan.planningModel = $("planModel").value;
-      plan.language = $("planLanguage").value;
-      plan.targetMinutes = Number($("planMinutes").value);
-      plan.episodeCount = $("planEpisodeCount").value.trim() ? Number($("planEpisodeCount").value) : null;
-      plan.audience = $("planAudience").value;
-      plan.goal = $("planGoal").value;
-      plan.theme = $("planTheme").value;
-      document.querySelectorAll("[data-planned-episode-id]").forEach((card) => {
-        const episode = plan.episodes.find((item) => item.id === card.dataset.plannedEpisodeId);
-        if (!episode) return;
-        for (const input of card.querySelectorAll("[data-episode-field]")) episode[input.dataset.episodeField] = input.dataset.episodeField === "keyPoints" ? input.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : input.value;
-        episode.episodeProfileId = card.querySelector("[data-episode-format]")?.value || "";
-      });
+      plan.planningModel = $("plannerChatModel").value || plan.planningModel;
       return plan;
     }
 
     async function loadPlan(id, force = false) {
-      if (!id) { activePlanId = ""; activePlan = null; rememberViewSelection("planId", ""); renderPlannerOptions(); renderPlanCollections(); return; }
-      if (!force && planDirty && id !== activePlanId && !confirm("Discard unsaved plan changes?")) { $("planSelect").value = activePlanId; return; }
+      if (!id) { activePlanId = ""; activePlan = null; rememberViewSelection("planId", ""); renderChatControls(); renderEpisodeList(); return; }
       const data = await api(`/api/plans/${encodeURIComponent(id)}`);
       loadPlanForm(data.plan);
       plannerChatThreadId = "";
@@ -1770,96 +1685,130 @@
     }
 
     async function saveActivePlan() {
-      if (!activePlan) throw new Error("Create or select a plan first.");
+      if (!activePlan) throw new Error("Describe the podcast in the chat first.");
       const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}`, { method: "PUT", body: JSON.stringify(capturePlanDraft()) });
       loadPlanForm(data.plan);
       await refreshPlanIndex();
-      notify("Plan saved.", "ok");
       return data.plan;
     }
 
     async function refreshPlanIndex() {
       const data = await api("/api/plans");
       state.plans = data.plans;
-      renderPlannerOptions();
+      renderChatControls();
     }
 
-    async function createNewPlan(copy = false) {
-      if (planDirty && !confirm("Discard unsaved plan changes?")) return;
-      const source = copy && activePlan ? capturePlanDraft() : {};
-      const body = copy ? { name: `${source.name} — Copy`, knowledgeBaseId: source.knowledgeBaseId, speakerProfileId: source.speakerProfileId, episodeFormatId: source.episodeFormatId, planningModel: source.planningModel, language: source.language, targetMinutes: source.targetMinutes, theme: source.theme, audience: source.audience, goal: source.goal, episodeCount: source.episodeCount } : {};
-      const data = await api("/api/plans", { method: "POST", body: JSON.stringify(body) });
+    async function createNewPlan() {
+      const data = await api("/api/plans", { method: "POST", body: JSON.stringify({}) });
       await refreshPlanIndex();
       loadPlanForm(data.plan);
-      notify(copy ? "Plan duplicated." : "Plan created.", "ok");
     }
 
-    async function deleteActivePlan() {
-      if (!activePlan || !confirm(`Delete plan "${activePlan.name}"? Created episodes stay saved.`)) return;
-      await api(`/api/plans/${encodeURIComponent(activePlan.id)}`, { method: "DELETE" });
-      activePlan = null; activePlanId = ""; planDirty = false; plannerChatThread = null; plannerChatThreadId = "";
-      await refreshPlanIndex();
-      if (state.plans[0]) await loadPlan(state.plans[0].id, true); else renderPlanCollections();
-      notify("Plan deleted.", "ok");
+    function setPlanBusy(message) {
+      $("plannerChatBusy").hidden = !message && !plannerChatBusy;
+      $("plannerChatBusyText").textContent = message || "Thinking…";
+      $("plannerChatSend").disabled = Boolean(message);
     }
 
     async function generateActivePlan() {
-      if (!activePlan) throw new Error("Create or select a plan first.");
+      if (!activePlan) await createNewPlan();
       await saveActivePlan();
       const replaceExisting = Boolean(activePlan.episodes.length);
-      if (replaceExisting && !confirm("Replace the current planned episode list? Created episode drafts stay saved.")) return;
-      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/generate`, { method: "POST", body: JSON.stringify({ replaceExisting }) });
-      state.profiles = data.profiles;
-      renderProfileOptions();
-      renderBuildOptions();
-      loadPlanForm(data.plan);
-      activePlannerSection = "episodes";
-      renderPlannerSections();
-      await refreshPlanIndex();
-      notify("Content plan generated.", "ok");
+      if (replaceExisting && !confirm("Replace the episode list? Existing episodes stay saved.")) return;
+      setPlanBusy("Creating episodes…");
+      try {
+        const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/generate`, { method: "POST", body: JSON.stringify({ replaceExisting, chatThreadId: plannerChatThreadId }) });
+        state.profiles = data.profiles;
+        renderProfileOptions();
+        renderBuildOptions();
+        loadPlanForm(data.plan);
+        await refreshPlanIndex();
+        const pending = activePlan.episodes.filter((item) => !item.createdEpisodeId).map((item) => item.id);
+        if (pending.length) await createEpisodeDrafts(pending);
+        location.hash = "episodes";
+        notify("Episodes created. Press Start on episode 1.", "ok");
+      } finally { setPlanBusy(""); }
     }
 
-    function showPlannedEpisode(id) {
-      activePlannedEpisodeId = id;
-      document.querySelectorAll("[data-planned-nav]").forEach((button) => button.classList.toggle("active", button.dataset.plannedNav === id));
-      document.querySelectorAll("[data-planned-episode-id]").forEach((card) => { card.hidden = card.dataset.plannedEpisodeId !== id; });
-      renderPodcastAssistant();
+    function episodeRowHtml(episode, label) {
+      const job = jobsState.jobs.find((item) => item.episodeId === episode.id && ["queued", "running"].includes(item.status));
+      const scriptChip = job?.type === "transcript" ? '<span class="episode-chip running">Script: generating…</span>' : episode.transcriptWords > 0 ? '<span class="episode-chip done">Script ✓</span>' : '<span class="episode-chip">Script —</span>';
+      const audioChip = job?.type === "tts" ? '<span class="episode-chip running">Audio: rendering…</span>' : episode.audioReady ? '<span class="episode-chip done">Audio ✓</span>' : '<span class="episode-chip">Audio —</span>';
+      const format = state.profiles.episodeProfiles.find((item) => item.id === episode.episodeProfileId);
+      const hostId = episode.speakerProfileId || format?.speakerProfileId || "";
+      const hostOptions = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === hostId)).join("");
+      const canStart = !job && !(episode.transcriptWords > 0);
+      return `<div class="episode-row" data-episode-row="${escapeHtml(episode.id)}">
+        <div class="episode-row-head"><h3>${escapeHtml(label)}</h3><div class="episode-row-chips">${scriptChip}${audioChip}</div></div>
+        <div class="episode-row-actions">
+          <label>Hosts<select data-episode-host="${escapeHtml(episode.id)}"${job ? " disabled" : ""}>${hostOptions}</select></label>
+          <div class="actions">${canStart ? `<button class="primary" data-start-episode="${escapeHtml(episode.id)}">Start</button>` : ""}<button data-open-episode="${escapeHtml(episode.id)}">Open</button>${episode.audioReady ? `<button data-play-episode="${escapeHtml(episode.id)}">Play</button>` : ""}<button data-delete-episode="${escapeHtml(episode.id)}"${job ? " disabled" : ""}>Delete</button></div>
+        </div>
+      </div>`;
     }
 
-    function renderPlanCollections() {
-      const plan = activePlan;
-      if (!plan) {
-        $("plannedEpisodes").innerHTML = '<p class="muted">Create or select a plan.</p>';
-        $("plannedEpisodeSidebar").innerHTML = "";
-        return;
+    function renderEpisodeList() {
+      if (!state) return;
+      const parts = [];
+      const listed = new Set();
+      const planRows = planEpisodeRows().map((row) => {
+        const label = `${row.planned.number}. ${row.episode?.name || row.planned.title}`;
+        if (!row.episode) return `<div class="episode-row" data-episode-row=""><div class="episode-row-head"><h3>${escapeHtml(label)}</h3><div class="episode-row-chips"><span class="episode-chip">Not created</span></div></div><div class="episode-row-actions"><div class="actions"><button data-create-planned="${escapeHtml(row.planned.id)}">Create</button><button data-delete-planned="${escapeHtml(row.planned.id)}">Delete</button></div></div></div>`;
+        listed.add(row.episode.id);
+        return episodeRowHtml(row.episode, label);
+      });
+      if (planRows.length) {
+        if (activePlan?.name) parts.push(`<div class="episode-group-title">${escapeHtml(activePlan.name)}</div>`);
+        parts.push(...planRows);
       }
-      activePlannedEpisodeId = plan.episodes.some((episode) => episode.id === activePlannedEpisodeId) ? activePlannedEpisodeId : plan.episodes[0]?.id || "";
-      $("plannedEpisodeSidebar").innerHTML = plan.episodes.map((episode) => `<button type="button" data-planned-nav="${escapeHtml(episode.id)}" class="${episode.id === activePlannedEpisodeId ? "active" : ""}" title="${escapeHtml(episode.title)}">${episode.number}. ${escapeHtml(episode.title)}</button>`).join("");
-      $("plannedEpisodes").innerHTML = plan.episodes.length ? plan.episodes.map((episode) => {
-        const selected = episode.episodeProfileId || plan.episodeFormatId || "";
-        const savedOptions = state.profiles.episodeProfiles.filter((item) => item.speakerProfileId === plan.speakerProfileId).map((item) => option(item.id, item.name, item.id === selected)).join("");
-        const detailed = Boolean(episode.premise.trim());
-        return `<div class="plan-card" data-planned-episode-id="${escapeHtml(episode.id)}"${episode.id === activePlannedEpisodeId ? "" : " hidden"}><div class="plan-card-head"><h3><label class="bulk-check"><input type="checkbox" data-plan-episode-check="${escapeHtml(episode.id)}"> ${episode.number}. ${escapeHtml(episode.title)}</label></h3><div class="actions" style="margin:0"><span class="badge">${detailed ? "Detailed" : "Titles only"}</span><span class="badge">${episode.createdEpisodeId ? "Draft created" : "Not created"}</span></div></div>
-          <div class="grid"><label class="full" data-help="Names the future saved episode.">Title<input data-episode-field="title" value="${escapeHtml(episode.title)}"></label><label class="full" data-help="Defines this episode's unique story or argument.">Premise<textarea data-episode-field="premise">${escapeHtml(episode.premise)}</textarea></label><label class="full" data-help="Prevents overlap by limiting source material assigned here.">Knowledge scope<textarea data-episode-field="knowledgeScope">${escapeHtml(episode.knowledgeScope)}</textarea></label><label class="full" data-help="Lists facts or ideas the transcript must cover.">Key points, one per line<textarea data-episode-field="keyPoints">${escapeHtml(episode.keyPoints.join("\n"))}</textarea></label><label class="full" data-help="States what listeners should understand or do afterward.">Listener outcome<textarea data-episode-field="listenerOutcome">${escapeHtml(episode.listenerOutcome)}</textarea></label><label class="full" data-help="Supplies structure, speakers, models, language, and duration.">Episode Format<select data-episode-format>${option("", "Select saved format", !selected)}${savedOptions}</select></label><label class="full" data-help="Adds episode-specific editorial constraints.">Additional instructions<textarea data-episode-field="additionalInstructions">${escapeHtml(episode.additionalInstructions)}</textarea></label><label class="full" data-help="Adds creative script direction without replacing provider rules.">Transcript Prompt Guidance<textarea data-episode-field="transcriptPromptGuidance">${escapeHtml(episode.transcriptPromptGuidance)}</textarea></label></div>
-          <div class="actions">${detailed ? "" : `<button data-detail-episode="${escapeHtml(episode.id)}">Generate details</button>`}<button data-create-episode="${escapeHtml(episode.id)}"${episode.createdEpisodeId ? " disabled" : ""}>Create draft</button>${episode.createdEpisodeId ? `<button data-open-created="${escapeHtml(episode.createdEpisodeId)}">Open in Transcript Generator</button>` : ""}</div></div>`;
-      }).join("") : '<p class="muted">Generate plan to create episodes.</p>';
+      const others = (state.episodes || []).filter((episode) => !listed.has(episode.id) && !episode.corrupt);
+      if (others.length) {
+        if (planRows.length) parts.push('<div class="episode-group-title">Other episodes</div>');
+        parts.push(...others.map((episode) => episodeRowHtml(episode, episode.name)));
+      }
+      $("episodeList").innerHTML = parts.length ? parts.join("") : '<p class="muted">Describe your podcast idea in the chat to get started.</p>';
     }
 
-    async function generatePlanEpisodeDetails(id) {
-      if (!id) throw new Error("Select a planned episode first.");
+    async function startEpisode(id) {
+      const { job } = await api(`/api/episodes/${encodeURIComponent(id)}/generate`, { method: "POST" });
+      autoTtsTranscriptJobs.add(job.id);
+      trackJob(job);
+      notify("Episode started: script first, then audio.", "ok");
+    }
+
+    async function changeEpisodeHosts(id, speakerProfileId) {
+      const episode = await api(`/api/episodes/${encodeURIComponent(id)}`);
+      await api("/api/episodes", { method: "POST", body: JSON.stringify({ id: episode.id, name: episode.name, episodeProfileId: episode.episodeProfileId, speakerProfileId, knowledgeBaseId: episode.knowledgeBaseId, additionalInstructions: episode.additionalInstructions, transcriptPromptGuidance: episode.transcriptPromptGuidance }) });
+      await refreshState(currentEpisode?.id);
+      notify("Hosts updated. Audio renders with the new voices from now on.", "ok");
+    }
+
+    async function deleteEpisode(id) {
+      const episode = state.episodes.find((item) => item.id === id);
+      if (!confirm(`Delete "${episode?.name || "this episode"}"? Script and audio files will be removed.`)) return;
+      await api(`/api/episodes/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (currentEpisode?.id === id) resetEpisodeForm();
+      if (activePlanId) {
+        const data = await api(`/api/plans/${encodeURIComponent(activePlanId)}`);
+        loadPlanForm(data.plan);
+      }
+      await refreshState(currentEpisode?.id);
+      notify("Episode deleted.", "ok");
+    }
+
+    async function deletePlannedEpisode(plannedId) {
+      const planned = activePlan?.episodes.find((item) => item.id === plannedId);
+      if (!confirm(`Remove planned episode "${planned?.title || plannedId}"?`)) return;
+      activePlan.episodes = activePlan.episodes.filter((item) => item.id !== plannedId);
       await saveActivePlan();
-      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/detail-episode`, { method: "POST", body: JSON.stringify({ plannedEpisodeId: id }) });
-      loadPlanForm(data.plan);
-      notify("Episode details generated.", "ok");
+      notify("Planned episode removed.", "ok");
     }
 
     async function createEpisodeDrafts(ids) {
-      if (!ids.length) throw new Error("Select at least one planned episode.");
-      await saveActivePlan();
+      if (!ids.length) throw new Error("No episodes to create.");
       const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/create-episodes`, { method: "POST", body: JSON.stringify({ plannedEpisodeIds: ids }) });
       loadPlanForm(data.plan);
       await refreshState(data.episodes[0]?.id);
-      notify(data.skipped?.length ? "Created new drafts; existing drafts skipped." : "Episode drafts created.", data.skipped?.length ? "warning" : "ok");
     }
 
     function resetEpisodeForm(preserveDirty = false) {
@@ -1902,6 +1851,7 @@
       $("additionalInstructions").value = currentEpisode.additionalInstructions || "";
       $("transcriptPromptGuidance").value = currentEpisode.transcriptPromptGuidance || "";
       $("transcript").value = currentEpisode.transcript || "";
+      renderEpisodeSettingsFields();
       if (pendingDraft?.id === id) restoreEpisodeDraft(pendingDraft);
       else {
         episodeDraftDirty = false;
@@ -1918,6 +1868,7 @@
       return {
         id: currentEpisode?.id || null,
         episodeProfileId: $("buildEpisodeProfile").value,
+        speakerProfileId: $("episodeHosts").value,
         knowledgeBaseId: $("buildKnowledge").value,
         name: $("episodeName").value,
         additionalInstructions: $("additionalInstructions").value,
@@ -1932,6 +1883,7 @@
 
     function restoreEpisodeDraft(draft) {
       $("buildEpisodeProfile").value = draft.episodeProfileId;
+      if (draft.speakerProfileId) $("episodeHosts").value = draft.speakerProfileId;
       $("buildKnowledge").value = draft.knowledgeBaseId;
       $("episodeName").value = draft.name;
       $("additionalInstructions").value = draft.additionalInstructions;
@@ -1946,13 +1898,14 @@
     }
 
     async function saveEpisode() {
-      if (!currentEpisode) throw new Error("Create the episode from the Content Planner first.");
+      if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
       const value = await api("/api/episodes", {
         method: "POST",
         body: JSON.stringify({
           id: currentEpisode.id,
           name: $("episodeName").value,
           episodeProfileId: $("buildEpisodeProfile").value,
+          speakerProfileId: $("episodeHosts").value,
           knowledgeBaseId: $("buildKnowledge").value,
           additionalInstructions: $("additionalInstructions").value,
           transcriptPromptGuidance: $("transcriptPromptGuidance").value,
@@ -1966,7 +1919,7 @@
     }
 
     async function saveTranscript() {
-      if (!currentEpisode) throw new Error("Create the episode from the Content Planner first.");
+      if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
       currentEpisode = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcript").value }) });
       episodeDraftDirty = false;
       transcriptDirty = false;
@@ -1983,11 +1936,6 @@
       if (generateTts) autoTtsTranscriptJobs.add(job.id);
       trackJob(job);
       notify(generateTts ? "Transcript job queued. TTS will start when it completes." : "Transcript job queued.");
-    }
-
-    async function saveTranscriptAndGoToTts() {
-      await saveTranscript();
-      location.hash = "tts";
     }
 
     function selectedSpeakerContext(index) {
@@ -2446,15 +2394,12 @@
       await selectEpisode(id);
     }
 
-    document.querySelectorAll("nav button").forEach((button) => button.addEventListener("click", () => { location.hash = button.dataset.view; }));
+    document.querySelectorAll("nav button[data-view]").forEach((button) => button.addEventListener("click", () => { location.hash = button.dataset.view; }));
     window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
     $("speakerProfileSelect").addEventListener("change", (event) => { syncSpeakerForm(); loadSpeakerForm(event.target.value); });
-    $("episodeProfileSelect").addEventListener("change", (event) => { syncEpisodeProfileForm(); loadEpisodeProfileForm(event.target.value); });
     $("spVoiceModel").addEventListener("change", () => { syncSpeakerForm(); renderSpeakerCards(state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId)); });
     $("newSpeakerProfile").addEventListener("click", () => addSpeakerProfile(false));
     $("duplicateSpeakerProfile").addEventListener("click", () => addSpeakerProfile(true));
-    $("newEpisodeProfile").addEventListener("click", () => addEpisodeProfile(false));
-    $("duplicateEpisodeProfile").addEventListener("click", () => addEpisodeProfile(true));
     $("addSpeaker").addEventListener("click", addSpeaker);
     $("speakerSidebar").addEventListener("click", (event) => {
       const button = event.target.closest("[data-speaker-nav]");
@@ -2471,22 +2416,28 @@
     });
     $("refreshModels").addEventListener("click", guard(refreshModels));
     $("deleteSpeakerProfile").addEventListener("click", guard(async () => {
-      syncSpeakerForm();
-      if (state.profiles.episodeProfiles.some((item) => item.speakerProfileId === activeSpeakerProfileId)) throw new Error("Speaker Profile is used by an Episode Format.");
-      state.profiles.speakerProfiles = state.profiles.speakerProfiles.filter((item) => item.id !== activeSpeakerProfileId);
-      profilesDirty = true;
-      activeSpeakerProfileId = state.profiles.speakerProfiles[0]?.id || "";
-      renderProfileOptions();
-    }));
-    $("deleteEpisodeProfile").addEventListener("click", guard(async () => {
-      if (state.episodes.some((item) => item.episodeProfileId === activeEpisodeProfileId)) throw new Error("Episode Format is used by a saved episode.");
-      state.profiles.episodeProfiles = state.profiles.episodeProfiles.filter((item) => item.id !== activeEpisodeProfileId);
-      profilesDirty = true;
-      activeEpisodeProfileId = state.profiles.episodeProfiles[0]?.id || "";
-      renderProfileOptions();
+      const id = activeSpeakerProfileId;
+      const profile = state.profiles.speakerProfiles.find((item) => item.id === id);
+      if (!profile) return;
+      if (state.profiles.speakerProfiles.length === 1) { notify("At least one host profile must remain.", "error"); return; }
+      const fallback = state.profiles.speakerProfiles.find((item) => item.id !== id);
+      const podcasts = (state.plans || []).filter((item) => item.speakerProfileId === id);
+      const episodes = (state.episodes || []).filter((item) => item.speakerProfileId === id || item.speakerProfile?.id === id);
+      const question = podcasts.length || episodes.length
+        ? `"${profile.name}" is hosts for ${podcasts.length ? podcasts.map((item) => `"${item.name}"`).join(", ") : "no podcast"} and ${episodes.length} episode(s). Episodes keep their current audio; affected podcasts switch to "${fallback.name}". Delete?`
+        : `Delete host profile "${profile.name}"?`;
+      if (!confirm(question)) return;
+      await api(`/api/speaker-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+      profilesDirty = false;
+      await refreshState(currentEpisode?.id);
+      await refreshPlanIndex();
+      if (activePlanId && podcasts.some((item) => item.id === activePlanId)) {
+        const data = await api(`/api/plans/${encodeURIComponent(activePlanId)}`);
+        loadPlanForm(data.plan);
+      }
+      notify("Host profile deleted.", "ok");
     }));
     $("saveProfiles").addEventListener("click", guard(saveProfiles));
-    $("saveEpisodeFormats").addEventListener("click", guard(saveProfiles));
     $("addCompatibleConnection").addEventListener("click", addCompatibleConnection);
     $("saveConfig").addEventListener("click", guard(saveConfig));
     $("view-config").addEventListener("input", (event) => {
@@ -2502,7 +2453,28 @@
         }
       }
     });
-    $("uploadKnowledge").addEventListener("click", guard(uploadKnowledge));
+    $("uploadKnowledge").addEventListener("click", () => $("knowledgeFile").click());
+    $("knowledgeFile").addEventListener("change", guard(uploadKnowledge));
+    $("saveEpisodeSettings").addEventListener("click", guard(saveEpisodeSettings));
+    $("buildEpisodeProfile").addEventListener("change", () => renderEpisodeSettingsFields());
+    $("episodeList").addEventListener("click", (event) => {
+      const start = event.target.closest("[data-start-episode]");
+      if (start) return guard(() => startEpisode(start.dataset.startEpisode))();
+      const open = event.target.closest("[data-open-episode]");
+      if (open) { location.hash = "transcript"; return guard(() => selectEpisode(open.dataset.openEpisode))(); }
+      const play = event.target.closest("[data-play-episode]");
+      if (play) return guard(async () => { await playEpisode(play.dataset.playEpisode); location.hash = "player"; })();
+      const create = event.target.closest("[data-create-planned]");
+      if (create) return guard(() => createEpisodeDrafts([create.dataset.createPlanned]))();
+      const remove = event.target.closest("[data-delete-episode]");
+      if (remove) return guard(() => deleteEpisode(remove.dataset.deleteEpisode))();
+      const removePlanned = event.target.closest("[data-delete-planned]");
+      if (removePlanned) return guard(() => deletePlannedEpisode(removePlanned.dataset.deletePlanned))();
+    });
+    $("episodeList").addEventListener("change", (event) => {
+      const select = event.target.closest("[data-episode-host]");
+      if (select) guard(() => changeEpisodeHosts(select.dataset.episodeHost, select.value))();
+    });
     $("knowledgeSummary").addEventListener("click", guard((event) => { const button = event.target.closest("[data-delete-knowledge]"); if (button) return deleteKnowledgeBase(button.dataset.deleteKnowledge); }));
     $("savedEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
     $("ttsEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
@@ -2512,11 +2484,9 @@
     $("transcriptPromptGuidance").addEventListener("input", () => { transcriptPromptDirty = true; episodeDraftDirty = true; renderTranscriptPrompt(); updateSaveButtons(); });
     $("resetTranscriptPrompt").addEventListener("click", () => { $("transcriptPromptGuidance").value = ""; transcriptPromptDirty = true; episodeDraftDirty = true; updateSaveButtons(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); });
     $("saveTranscriptPrompt").addEventListener("click", guard(async () => { await saveEpisode(); notify("Transcript guidance saved.", "ok"); }));
-    $("generateTranscriptFromPrompt").addEventListener("click", guard(generateTranscript));
     $("saveEpisode").addEventListener("click", guard(async () => { await saveEpisode(); notify("Episode draft saved.", "ok"); }));
     $("generateTranscript").addEventListener("click", guard(generateTranscript));
     $("saveTranscript").addEventListener("click", guard(saveTranscript));
-    $("saveTranscriptAndTts").addEventListener("click", guard(saveTranscriptAndGoToTts));
     $("previewButtons").addEventListener("click", guard((event) => {
       const button = event.target.closest("button[data-preview-index]");
       if (button) return preview(Number(button.dataset.previewIndex));
@@ -2624,10 +2594,9 @@
       if (event.target.id !== "speakerProfileSelect") profilesDirty = true;
       updateSaveButtons();
     });
-    $("profiles-episodes").addEventListener("input", (event) => { if (event.target.id !== "episodeProfileSelect") profilesDirty = true; updateSaveButtons(); });
     $("transcript").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); updateSaveButtons(); });
     window.addEventListener("beforeunload", (event) => {
-      if (!configDirty && !profilesDirty && !planDirty && !episodeDraftDirty && !transcriptDirty && !transcriptPromptDirty) return;
+      if (!configDirty && !profilesDirty && !episodeDraftDirty && !transcriptDirty && !transcriptPromptDirty) return;
       event.preventDefault();
       event.returnValue = "";
     });
@@ -2655,9 +2624,41 @@
       $("plannerChatHistory").innerHTML = option("", "New chat", !plannerChatThreadId) + plannerChatThreads.map((thread) => option(thread.threadId, `${thread.title} (${thread.messageCount})`, thread.threadId === plannerChatThreadId)).join("");
     }
 
+    function summarizeProposal(type, proposal) {
+      const line = (label, value) => value === undefined || value === null || value === "" ? "" : `<div><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</div>`;
+      const firstSentence = (text) => String(text || "").split(/(?<=[.!?])\s/)[0].slice(0, 140);
+      if (type === "speakerProfile") {
+        const value = proposal.value || {};
+        return [
+          line("Hosts profile", value.name),
+          ...(value.speakers || []).map((speaker) => line(speaker.name || "Host", firstSentence(speaker.personality || speaker.style || speaker.backstory))),
+          line("Voice model", value.voiceModel),
+        ].join("") || line("Hosts", "no changes");
+      }
+      if (type === "planPatch") {
+        const labels = { name: "Name", theme: "Theme", audience: "Audience", goal: "Goal", episodeCount: "Episodes", language: "Language", targetMinutes: "Minutes", planningModel: "Model" };
+        return Object.entries(labels).map(([key, label]) => line(label, proposal[key])).join("") || line("Podcast", "no changes");
+      }
+      if (type === "episodeFormat") {
+        const value = proposal.value || {};
+        return [line("Format", value.name), line("Language", value.language), line("Minutes", value.targetMinutes), line("Outline model", value.outlineModel), line("Script model", value.transcriptModel)].join("");
+      }
+      if (type === "plannedEpisodePatches" && Array.isArray(proposal)) {
+        return proposal.map((patch) => {
+          const planned = activePlan?.episodes.find((item) => item.id === patch.id);
+          return line(planned?.title || patch.id, patch.changes?.title || `changes: ${Object.keys(patch.changes || {}).join(", ")}`);
+        }).join("");
+      }
+      if (type === "episodePatch") {
+        const episode = state?.episodes.find((item) => item.id === proposal.episodeId);
+        return line(episode?.name || "Episode", proposal.changes?.name || `changes: ${Object.keys(proposal.changes || {}).join(", ")}`);
+      }
+      return `<div>${escapeHtml(JSON.stringify(proposal))}</div>`;
+    }
+
     function renderPlannerChatMessages() {
       if (!plannerChatThread?.messages?.length) {
-        $("plannerChatMessages").innerHTML = '<div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div>';
+        $("plannerChatMessages").innerHTML = '<div class="chat-msg system">Describe the podcast you want. I will ask what matters, then create the episodes.</div>';
         return;
       }
       $("plannerChatMessages").innerHTML = plannerChatThread.messages.map((message, index) => {
@@ -2667,14 +2668,13 @@
           const parsed = JSON.parse(message.content);
           const proposalType = parsed.proposal ? Object.keys(parsed.proposal)[0] : "";
           const proposal = proposalType ? parsed.proposal[proposalType] : null;
-          const labels = { planPatch: "Plan setup", speakerProfile: "Speaker Profile", episodeFormat: "Episode Format", plannedEpisodePatches: "Planned episodes", episodePatch: "Episode guidance" };
-          const sharedSpeaker = proposalType === "speakerProfile" && proposal?.mode === "update" && proposal.impact && (proposal.impact.plans || proposal.impact.episodes);
-          const impact = proposal?.impact && (proposal.impact.plans || proposal.impact.episodes) ? `<div class="assistant-impact">Shared by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s).${sharedSpeaker ? " Apply to a new profile to preserve them." : ""}</div>` : "";
+          const labels = { planPatch: "Podcast setup", speakerProfile: "Hosts", episodeFormat: "Episode Format", plannedEpisodePatches: "Episode list", episodePatch: "Episode changes" };
+          const impact = proposalType === "speakerProfile" && proposal?.impact?.episodes ? `<div class="assistant-impact">Updates hosts on ${proposal.impact.episodes} episode(s) of this podcast — stale audio will re-render.</div>` : "";
           const next = parsed.nextStep;
-          const actionLabels = { generatePlan: "generate plan", generateDetails: "generate episode details", createEpisodes: "create episode drafts", generateTranscript: "generate transcript", generateTts: "generate TTS", openPlayer: "open Player", none: "continue" };
+          const actionLabels = { generatePlan: "create episodes", createEpisodes: "create episodes", generateTranscript: "generate script", generateTts: "generate audio", openPlayer: "open Player", none: "continue" };
           const nextLabel = next ? actionLabels[next.action] || "continue" : "";
-          const newProfileButton = sharedSpeaker ? `<button class="primary" data-apply-assistant="${index}" data-continue="false" data-create-new="true">Apply to new profile</button>` : "";
-          const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff"><div>${escapeHtml(JSON.stringify(proposal, null, 2))}</div></div>${impact}<div class="actions">${newProfileButton}<button data-apply-assistant="${index}" data-continue="false">${sharedSpeaker ? "Update shared profile" : "Apply only"}</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div></div>` : "";
+          const proposalButtons = message.appliedAt ? '<div class="assistant-impact">✓ Applied</div>' : `<div class="actions"><button data-apply-assistant="${index}" data-continue="false">Apply</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div>`;
+          const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff">${summarizeProposal(proposalType, proposal)}</div>${impact}${proposalButtons}</div>` : "";
           const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}">${escapeHtml(nextLabel)}</button></div>` : "";
           return `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>${parsed.questions?.length ? `<div class="chat-questions"><ol>${parsed.questions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : ""}${proposalHtml}${nextHtml}`;
         } catch { return `<div class="chat-msg assistant">${escapeHtml(message.content)}</div>`; }
@@ -2688,7 +2688,7 @@
       plannerChatThreads = listed.chats || [];
       if (plannerChatThreadId && !plannerChatThreads.some((thread) => thread.threadId === plannerChatThreadId)) plannerChatThreadId = "";
       plannerChatThread = plannerChatThreadId ? await api(`/api/chat?threadId=${encodeURIComponent(plannerChatThreadId)}`) : null;
-      renderPlannerOptions();
+      renderChatControls();
       renderPlannerChatMessages();
     }
 
@@ -2698,9 +2698,9 @@
       if (!text) return;
       const model = $("plannerChatModel").value;
       if (!model) throw new Error("Select a text model first.");
-      plannerChatBusy = true; $("plannerChatBusy").hidden = false; $("plannerChatInput").value = "";
+      plannerChatBusy = true; $("plannerChatBusyText").textContent = "Thinking…"; $("plannerChatBusy").hidden = false; $("plannerChatInput").value = "";
       try {
-        if (!activePlan) await createNewPlan(false);
+        if (!activePlan) await createNewPlan();
         const data = await api("/api/plans/chat", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, planId: activePlan.id, text, model, kbId: $("plannerChatKb").value, planDraft: capturePlanDraft(), activeContext: assistantContext(), workspaceDraft: assistantWorkspaceDraft() }) });
         plannerChatThreadId = data.threadId;
         await loadPlannerChatThread();
@@ -2714,21 +2714,25 @@
     }
 
     function openAssistantTarget(target) {
-      if (!target) return;
-      if (target.startsWith("planner:")) {
-        activePlannerSection = target.slice(8);
-        rememberViewSelection("plannerSection", activePlannerSection);
-        location.hash = "planner";
-        renderPlannerSections();
-      } else location.hash = target;
+      if (!target) return false;
+      const legacyTargets = { "planner:plan": "chat", "planner:episodes": "episodes", planner: "episodes", formats: "transcript" };
+      const resolved = legacyTargets[target] || target;
+      if (resolved === "chat") {
+        $("podcastAssistant").classList.add("chat-open");
+        if (["transcript", "tts", "player", "config"].includes(activeViewName())) location.hash = "episodes";
+        $("plannerChatInput").focus();
+        return true;
+      }
+      if (resolved === "speakers" && activePlan?.speakerProfileId) loadSpeakerForm(activePlan.speakerProfileId);
+      location.hash = resolved;
+      return true;
     }
 
     async function runAssistantStep(step) {
       if (!step) return;
-      openAssistantTarget(step.target);
+      if (!openAssistantTarget(step.target)) return;
       const ids = step.targetIds || [];
       if (step.action === "generatePlan") return generateActivePlan();
-      if (step.action === "generateDetails") return generatePlanEpisodeDetails(ids[0] || activePlannedEpisodeId);
       if (step.action === "createEpisodes") return createEpisodeDrafts(ids.length ? ids : (activePlan?.episodes || []).filter((item) => !item.createdEpisodeId).map((item) => item.id));
       const episodeId = ids[0] || currentEpisode?.id || activePlan?.episodes.find((item) => item.createdEpisodeId)?.createdEpisodeId || "";
       if (["generateTranscript", "generateTts", "openPlayer"].includes(step.action) && episodeId && currentEpisode?.id !== episodeId) await selectEpisode(episodeId);
@@ -2737,65 +2741,47 @@
       if (step.action === "openPlayer" && episodeId) { selectPlayerEpisode(episodeId); location.hash = "player"; }
     }
 
-    async function applyAssistantProposal(index, continueWorkflow, createNew = false) {
+    async function applyAssistantProposal(index, continueWorkflow) {
       const message = plannerChatThread?.messages?.[index];
       if (message?.role !== "assistant") return;
       const parsed = JSON.parse(message.content);
-      const proposal = parsed.proposal && parsed.proposal[Object.keys(parsed.proposal)[0]];
-      if (!proposal) return;
-      if (!createNew && proposal.impact && (proposal.impact.plans || proposal.impact.episodes) && !confirm(`This shared item is used by ${proposal.impact.plans} plan(s) and ${proposal.impact.episodes} episode(s). Apply changes anyway?`)) return;
-      const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index, createNew }) });
+      if (!parsed.proposal) return;
+      const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index }) });
       await refreshState(data.episode?.id || currentEpisode?.id);
       if (data.plan?.id) loadPlanForm(data.plan);
       await refreshPlanIndex();
       await loadPlannerChatThread();
-      notify(data.warnings?.length ? `Proposal applied with warnings: ${data.warnings.join(" ")}` : "Proposal applied.", data.warnings?.length ? "warning" : "ok");
+      if (data.appliedType === "speakerProfile") {
+        loadSpeakerForm(data.plan?.speakerProfileId || activePlan?.speakerProfileId);
+        notify(`Hosts applied — updated ${data.updatedEpisodes ?? 0} episode(s).${data.warnings?.length ? ` ${data.warnings.join(" ")}` : ""}`, data.warnings?.length ? "warning" : "ok");
+      } else {
+        notify(data.warnings?.length ? `Proposal applied with warnings: ${data.warnings.join(" ")}` : "Proposal applied.", data.warnings?.length ? "warning" : "ok");
+      }
       if (continueWorkflow) await runAssistantStep(parsed.nextStep);
     }
 
-    $("planSelect").addEventListener("change", guard((event) => loadPlan(event.target.value)));
-    $("newPlan").addEventListener("click", guard(() => createNewPlan(false)));
-    $("duplicatePlan").addEventListener("click", guard(() => createNewPlan(true)));
-    $("deletePlan").addEventListener("click", guard(deleteActivePlan));
-    $("savePlan").addEventListener("click", guard(saveActivePlan));
-    $("generatePlan").addEventListener("click", guard(generateActivePlan));
-    document.querySelectorAll("[data-planner-section]").forEach((button) => button.addEventListener("click", () => { activePlannerSection = button.dataset.plannerSection; rememberViewSelection("plannerSection", activePlannerSection); renderPlannerSections(); }));
-    for (const id of ["planName", "planKnowledge", "planSpeakerProfile", "planEpisodeFormat", "planModel", "planEpisodeCount", "planLanguage", "planMinutes", "planAudience", "planGoal", "planTheme"]) $(id).addEventListener("input", () => {
-      if (activePlan) planDirty = true;
-      updateSaveButtons();
-      if (id === "planSpeakerProfile") renderPlannerOptions();
-      if (id === "planEpisodeFormat") $("planAutoFormatFields").hidden = Boolean($("planEpisodeFormat").value);
-    });
-    $("plannedEpisodes").addEventListener("input", (event) => {
-      planDirty = true;
-      updateSaveButtons();
-      if (event.target.dataset.episodeField !== "title") return;
-      const id = event.target.closest("[data-planned-episode-id]").dataset.plannedEpisodeId;
-      const episode = activePlan?.episodes.find((item) => item.id === id);
-      const button = $("plannedEpisodeSidebar").querySelector(`[data-planned-nav="${id}"]`);
-      if (button && episode) button.textContent = `${episode.number}. ${event.target.value}`;
-    });
-    $("plannedEpisodeSidebar").addEventListener("click", (event) => { const button = event.target.closest("[data-planned-nav]"); if (button) showPlannedEpisode(button.dataset.plannedNav); });
-    $("plannedEpisodes").addEventListener("click", (event) => {
-      const detail = event.target.closest("[data-detail-episode]");
-      if (detail) return guard(() => generatePlanEpisodeDetails(detail.dataset.detailEpisode))();
-      const create = event.target.closest("[data-create-episode]");
-      if (create) return guard(() => createEpisodeDrafts([create.dataset.createEpisode]))();
-      const open = event.target.closest("[data-open-created]");
-      if (open) { location.hash = "transcript"; guard(() => selectEpisode(open.dataset.openCreated))(); }
-    });
-    $("createSelectedEpisodes").addEventListener("click", guard(() => createEpisodeDrafts([...document.querySelectorAll("[data-plan-episode-check]:checked")].map((item) => item.dataset.planEpisodeCheck))));
     $("plannerChatSend").addEventListener("click", guard(sendPlannerChat));
     $("plannerChatInput").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); guard(sendPlannerChat)(); } });
+    $("assistantChatToggle").addEventListener("click", () => $("podcastAssistant").classList.add("chat-open"));
+    $("assistantChatClose").addEventListener("click", () => $("podcastAssistant").classList.remove("chat-open"));
+    document.querySelectorAll(".toolbar label[data-help]").forEach((label) => { label.title = label.dataset.help; label.removeAttribute("data-help"); });
     $("plannerChatReset").addEventListener("click", () => { plannerChatThreadId = ""; plannerChatThread = null; renderPlannerChatHistory(); renderPlannerChatMessages(); });
     $("plannerChatDelete").addEventListener("click", guard(deletePlannerChat));
     $("plannerChatHistory").addEventListener("change", guard(async (event) => { plannerChatThreadId = event.target.value; await loadPlannerChatThread(); }));
-    $("assistantPlanSelect").addEventListener("change", guard((event) => loadPlan(event.target.value)));
-    $("assistantPrompts").addEventListener("click", (event) => { const button = event.target.closest("[data-assistant-prompt]"); if (button) { $("plannerChatInput").value = button.dataset.assistantPrompt; $("plannerChatInput").focus(); } });
     $("assistantProgress").addEventListener("click", (event) => { const button = event.target.closest("[data-assistant-target]"); if (button) openAssistantTarget(button.dataset.assistantTarget); });
+    $("assistantNextGo").addEventListener("click", () => {
+      const go = $("assistantNextGo");
+      if (!openAssistantTarget(go.dataset.nextTarget)) return;
+      const highlight = go.dataset.nextHighlight ? document.querySelector(go.dataset.nextHighlight) : null;
+      if (!highlight) return;
+      highlight.scrollIntoView({ block: "center", behavior: "smooth" });
+      highlight.classList.remove("cta-pulse");
+      requestAnimationFrame(() => highlight.classList.add("cta-pulse"));
+      setTimeout(() => highlight.classList.remove("cta-pulse"), 3000);
+    });
     $("plannerChatMessages").addEventListener("click", (event) => {
       const apply = event.target.closest("[data-apply-assistant]");
-      if (apply) return guard(() => applyAssistantProposal(Number(apply.dataset.applyAssistant), apply.dataset.continue === "true", apply.dataset.createNew === "true"))();
+      if (apply) return guard(() => applyAssistantProposal(Number(apply.dataset.applyAssistant), apply.dataset.continue === "true"))();
       const run = event.target.closest("[data-run-assistant-step]");
       if (run) {
         const parsed = JSON.parse(plannerChatThread.messages[Number(run.dataset.runAssistantStep)].content);

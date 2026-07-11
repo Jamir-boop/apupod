@@ -1,6 +1,6 @@
 {
-  "name": "local-podcast-builder",
-  "version": "0.9.0",
+  "name": "pod-god",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "engines": {

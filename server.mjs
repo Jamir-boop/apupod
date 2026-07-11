@@ -6,5 +6,5 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("PORT 
 const server = await createPodcastServer();
 
 server.listen(port, host, () => {
-  console.log(`Podcast Builder: http://${host}:${port}`);
+  console.log(`pod-god: http://${host}:${port}`);
 });

@@ -1,4 +1,4 @@
-# Local Podcast Builder
+# pod-god
 
 Small local web app for building reviewed podcast transcripts and rendered audio. No Docker or DB.
 
