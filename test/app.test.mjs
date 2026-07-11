@@ -1520,7 +1520,13 @@ test("planner generates plans, creates formats and drafts, and chats", { concurr
       const system = request.messages?.[0]?.content || "";
       const prompt = request.messages?.[1]?.content || "";
       const content = system.includes("content planning assistant")
-        ? prompt.includes("Improve shared speaker")
+        ? prompt.includes("Broken speaker JSON")
+          ? prompt.includes("YOUR PREVIOUS RESPONSE WAS REJECTED")
+            ? JSON.stringify({ message: "Recovered.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Recovered Speaker" } } } })
+            : '{"message":"Bad "quote" inside"}'
+          : prompt.includes("Fenced reply")
+          ? '```json\n{"message":"Fenced ok.","questions":[]}\n```'
+          : prompt.includes("Improve shared speaker")
           ? JSON.stringify({ message: "Improve the shared host profile.", questions: [], proposal: { speakerProfile: { mode: "update", targetId: "speaker-chisme-crianza", value: { description: "Revised without changing existing references." } } } })
           : prompt.includes("Create partial speaker")
           ? JSON.stringify({ message: "Create a partial host profile.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Partial Speaker", description: "Valid sibling field", voiceModel: "mimo-v2-tts" } } } })
@@ -1705,6 +1711,15 @@ test("planner generates plans, creates formats and drafts, and chats", { concurr
   assert.equal(response.status, 200, partialPlanApply.error);
   assert.equal(partialPlanApply.plan.audience, "Partial audience");
   assert.equal(partialPlanApply.plan.planningModel, "");
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Fenced reply", model: planningModel }) });
+  const fencedChat = await response.json();
+  assert.equal(response.status, 200, fencedChat.error);
+  assert.equal(fencedChat.message.message, "Fenced ok.");
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Broken speaker JSON", model: planningModel }) });
+  const recoveredChat = await response.json();
+  assert.equal(response.status, 200, recoveredChat.error);
+  assert.equal(recoveredChat.message.message, "Recovered.");
+  assert.equal(recoveredChat.message.proposal.speakerProfile.value.name, "Recovered Speaker");
   const chats = await (await fetch(`${baseUrl}/api/chats?kind=planner&planId=${plan.id}`)).json();
   assert.equal(chats.chats[0].kind, "planner");
   assert.equal(chats.chats[0].lastPlanId, plan.id);

@@ -1286,7 +1286,7 @@ function buildPlanGenerationPrompt(plan, kbContent, profiles, chatContext = "") 
 
 function parseGeneratedPlan(content) {
   try {
-    return JSON.parse(content);
+    return parseJsonLoose(content);
   } catch (error) {
     throw badRequest(`Content planner response was not valid JSON: ${error.message}`);
   }
@@ -2325,9 +2325,22 @@ function parseChatJson(data, label) {
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error(`${label} response did not include choices[0].message.content.`);
   try {
-    return JSON.parse(content);
+    return parseJsonLoose(content);
   } catch (error) {
     throw new Error(`${label} response was not valid JSON: ${error.message}`);
+  }
+}
+
+function parseJsonLoose(content) {
+  const text = String(content ?? "").trim();
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    // ponytail: models wrap JSON in ``` fences or prose; salvage the outermost object before giving up
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) throw error;
+    return JSON.parse(text.slice(start, end + 1));
   }
 }
 
@@ -3408,7 +3421,16 @@ async function sendPlannerChatMessage(req, res, context) {
     const response = await callTextModel({ context, model, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt, maxTokens: 8_000, temperature: 0.5, topP: 0.9 });
     const content = response?.choices?.[0]?.message?.content;
     if (!content) throw new Error("Planner assistant model did not return content.");
-    const parsed = parsePlannerChatResponse(content);
+    let parsed;
+    try {
+      parsed = parsePlannerChatResponse(content);
+    } catch (error) {
+      // ponytail: one corrective retry; models occasionally emit broken JSON on long proposals
+      const retry = await callTextModel({ context, model, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt: `${prompt}\n\nYOUR PREVIOUS RESPONSE WAS REJECTED (${error.message}). Return the same answer again as strictly valid JSON only, with all inner quotes escaped.`, maxTokens: 8_000, temperature: 0.2, topP: 0.9 });
+      const retryContent = retry?.choices?.[0]?.message?.content;
+      if (!retryContent) throw error;
+      parsed = parsePlannerChatResponse(retryContent);
+    }
     const warnings = [];
     if (parsed.proposal) parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context, plan, profiles, focusEpisode }, warnings);
     parsed.warnings = warnings;
@@ -3424,7 +3446,7 @@ async function sendPlannerChatMessage(req, res, context) {
 function parsePlannerChatResponse(content) {
   let parsed;
   try {
-    parsed = JSON.parse(content);
+    parsed = parseJsonLoose(content);
   } catch (error) {
     throw new Error(`Planner assistant response was not valid JSON: ${error.message}`);
   }
