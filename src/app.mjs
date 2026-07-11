@@ -3212,6 +3212,7 @@ RULES:
 - After episodes exist, the user presses Start on each episode (script then audio), or asks you. Suggest nextStep "generateTranscript" or "generateTts" for the next unfinished episode.
 - Host profiles and episode settings (language, duration, models) are optional refinements, never prerequisites. Defaults are fine. Propose speakerProfile or episodeFormat changes only when the user asks for different hosts, style, language, or length.
 - speakerProfile: use mode "create" when the user describes hosts for a new podcast, mode "update" to tweak this podcast's current hosts. Applying a hosts proposal automatically updates all of this podcast's episodes; stale audio re-renders.
+- When the user's idea describes hosts (names, personalities, dynamic) that differ from the current hosts, never present the current profile's speakers as if they were the requested hosts. Propose the planPatch first and say you will propose the matching hosts profile next; after the plan is applied, your next reply must propose that speakerProfile (name the speakers per the user's description, with backstory, personality, and style).
 - Episode Format segment counts are derived server-side from targetMinutes. Never propose numSegments.
 - Never claim an edit, generation, save, navigation, or render happened. The user must approve every proposal and action.
 - Default to the focused item. Use bulk patches only when the user explicitly requests bulk changes.
