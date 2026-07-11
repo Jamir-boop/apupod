@@ -188,6 +188,7 @@ function makePaths(rootDir) {
     episodes: join(data, "episodes"),
     chat: join(data, "chat"),
     publicIndex: join(rootDir, "public", "index.html"),
+    publicIcon: join(rootDir, "public", "icon.png"),
     env: join(rootDir, ".env"),
   };
 }
@@ -815,6 +816,10 @@ async function routeRequest(req, res, context) {
 
   if (method === "GET" && path === "/") {
     return sendFile(req, res, context.paths.publicIndex, "text/html; charset=utf-8");
+  }
+
+  if (method === "GET" && path === "/icon.png") {
+    return sendFile(req, res, context.paths.publicIcon, "image/png");
   }
 
   if (method === "GET" && path === "/api/state") {

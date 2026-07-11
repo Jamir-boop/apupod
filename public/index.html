@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pod-god</title>
+  <link rel="icon" type="image/png" href="/icon.png">
   <style>
     :root {
       color-scheme: dark;
@@ -31,7 +32,10 @@
     body { margin: 0; overflow: hidden; background: var(--surface-0); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
     ::selection { color: #000000; background: var(--accent); }
     button, input, select, textarea { font: inherit; }
-    button { border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 11px; color: var(--text); background: var(--surface-3); cursor: pointer; font-weight: 700; }
+    button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 11px; color: var(--text); background: var(--surface-3); cursor: pointer; font-weight: 700; }
+    .icon { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+    .icon-btn { padding: 6px; line-height: 0; }
+    .label-icon { display: inline-flex; align-items: center; gap: 6px; }
     button:hover:not(:disabled), button.active { color: #000000; background: var(--accent); border-color: var(--accent); }
     button.primary { color: #000000; background: var(--accent); border-color: var(--accent); }
     button.primary:hover:not(:disabled) { color: var(--text-on-accent); background: #CC9500; border-color: #CC9500; }
@@ -61,7 +65,7 @@
     .app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
     body.player-active .app { height: calc(100% - 56px); }
     main { width: min(1120px, 100%); height: 100%; min-height: 0; margin: 0 auto; padding: 14px 18px; }
-    main.assistant-active { width: min(1800px, 100%); height: 100%; display: grid; grid-template-columns: minmax(680px, 760px) minmax(0, 1fr); gap: 14px; align-items: stretch; }
+    main.assistant-active { width: 100%; height: 100%; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(680px, 760px) minmax(0, 1fr); gap: 14px; align-items: stretch; }
     main.assistant-active.nav-only { grid-template-columns: 300px minmax(0, 1fr); }
     main.assistant-active > .view:not([hidden]) { grid-column: 2; min-width: 0; }
     .view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -103,9 +107,10 @@
     fieldset { margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 2px; }
     legend { font-weight: 750; padding: 0 6px; }
     .speaker-list { display: grid; gap: 10px; margin-top: 10px; }
-    .internal-nav-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 14px; align-items: start; }
-    .internal-sidebar { position: sticky; top: 0; display: grid; gap: 6px; max-height: calc(100vh - 220px); padding: 8px; overflow-y: auto; border: 1px solid var(--line); background: var(--surface-1); }
-    .internal-sidebar button { width: 100%; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+    .internal-nav-layout { display: grid; gap: 10px; }
+    .internal-nav-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .internal-sidebar { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+    .internal-sidebar button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .internal-sidebar button.active { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
     .bulk-check { display: flex; align-items: center; gap: 7px; }
     .speaker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -127,6 +132,7 @@
     .connection-row { margin-top: 8px; border: 1px solid var(--line); background: var(--surface-0); }
     .connection-row > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; list-style: none; cursor: pointer; }
     .connection-row > summary::-webkit-details-marker { display: none; }
+    /* ponytail: keep the glyph chevron — it already rotates on [open]; an SVG here would need a data-URI mask for zero visual gain */
     .connection-row > summary::before { content: "›"; flex: 0 0 auto; color: var(--accent); font-size: 20px; line-height: 1; transition: transform .15s ease; }
     .connection-row[open] > summary::before { transform: rotate(90deg); }
     .connection-row > summary .connection-head { flex: 1; min-width: 0; }
@@ -160,7 +166,10 @@
     .rightbar-badge[hidden] { display: none; }
     .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); }
     body.player-active .toasts { bottom: 72px; }
-    .toast { padding: 10px 12px; overflow-wrap: anywhere; text-align: left; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, .55); font-size: 13px; font-weight: 400; }
+    .toast { display: flex; align-items: flex-start; justify-content: flex-start; gap: 8px; padding: 10px 12px; overflow-wrap: anywhere; text-align: left; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, .55); font-size: 13px; font-weight: 400; }
+    .toast[data-type="ok"] .icon { color: var(--success); }
+    .toast[data-type="warning"] .icon { color: var(--accent); }
+    .toast[data-type="error"] .icon { color: var(--danger); }
     .toast:hover:not(:disabled) { color: var(--text); background: var(--surface-3); border-color: var(--accent); }
     .toast[data-type="ok"] { border-color: var(--success); }
     .toast[data-type="warning"] { border-color: var(--accent); }
@@ -189,7 +198,8 @@
     .episode-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     .episode-row-head h3 { margin: 0; }
     .episode-row-chips { display: flex; gap: 6px; flex-wrap: wrap; }
-    .episode-chip { display: inline-flex; align-items: center; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    .episode-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    .episode-chip .icon { width: 13px; height: 13px; }
     .episode-chip.done { color: var(--success); border-color: var(--success); }
     .episode-chip.running { color: var(--accent); border-color: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
     .episode-row-actions { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
@@ -206,7 +216,9 @@
     .player-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 12px; border: 1px solid var(--line); background: var(--surface-1); }
     .player-row strong, .player-bottom-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .player-row-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
-    .player-row-actions button { padding: 6px 9px; }
+    .player-row-actions button, .player-row-actions a { padding: 6px 9px; }
+    .player-row-actions a { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--text); background: var(--surface-3); }
+    .player-row-actions a:hover { color: #000000; background: var(--accent); border-color: var(--accent); }
     .player-seek { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; margin-top: 18px; }
     .player-seek input { padding: 0; accent-color: var(--accent); }
     .player-controls { display: flex; flex-wrap: wrap; gap: 9px; align-items: end; margin-top: 14px; }
@@ -230,9 +242,24 @@
     .player-bottom select { padding: 6px; font-size: 13px; }
     .chat-pane { position: static; height: 100%; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
     .assistant-sidebar { min-width: 0; overflow-y: auto; border-right: 1px solid var(--line); }
-    .assistant-chat { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    .assistant-chat { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .chat-pane-header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .chat-pane-header h3 { margin: 0; font-size: 14px; }
+    .assistant-sidebar .chat-pane-header { justify-content: flex-start; gap: 8px; }
+    .brand-logo { width: 22px; height: 22px; flex: 0 0 auto; object-fit: contain; }
+    .chat-history-toggle { flex: 1; min-width: 0; justify-content: flex-start; font-size: 13px; }
+    .chat-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-history-toggle .icon:last-child { margin-left: auto; }
+    .chat-history-panel { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--surface-2); }
+    .chat-history-panel[hidden] { display: none; }
+    .chat-history-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .chat-history-list { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+    .chat-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px; border: 1px solid var(--line); background: var(--surface-1); }
+    .chat-history-row.active { border-color: var(--accent); }
+    .chat-history-open { display: grid; gap: 2px; min-width: 0; justify-items: start; text-align: left; border-color: transparent; background: transparent; }
+    .chat-history-open > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-history-meta { color: var(--muted); font-size: 12px; font-weight: 400; }
+    .chat-history-open:hover:not(:disabled) .chat-history-meta { color: inherit; }
     .chat-controls { padding: 8px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
     .chat-controls label { font-size: 12px; }
     .chat-controls select { font-size: 12px; padding: 6px 8px; }
@@ -265,12 +292,12 @@
     label[data-help]::after { content: attr(data-help); color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
     .assistant-context { margin: 8px 12px 0; padding: 7px 9px; color: var(--accent); border: 1px solid var(--line); background: var(--surface-1); font-size: 12px; }
     .assistant-workflow { border-bottom: 1px solid var(--line); }
-    .assistant-util { display: block; width: calc(100% - 24px); margin: 6px 12px; padding: 5px 8px; overflow: hidden; text-align: left; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
+    .assistant-util { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: calc(100% - 24px); margin: 6px 12px; padding: 5px 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
     .assistant-chat-toggle { display: none; }
     #assistantChatClose { display: none; }
     .assistant-steps { display: grid; gap: 4px; margin: 0; padding: 8px 12px; border-block: 1px solid var(--line); list-style: none; }
     .assistant-steps button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; overflow: hidden; text-align: left; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
-    .assistant-steps .step-mark { flex: 0 0 16px; width: 16px; text-align: center; font-weight: 800; }
+    .assistant-steps .step-mark { flex: 0 0 16px; }
     .assistant-steps li[data-state="done"] button { color: var(--success); }
     .assistant-steps li[data-state="current"] button { color: var(--accent); background: var(--surface-1); border-color: var(--line-strong); }
     .assistant-steps li[data-state="pending"] button { color: var(--disabled); }
@@ -285,7 +312,7 @@
     #podcastAssistant.nav-only .assistant-chat,
     #podcastAssistant.nav-only #assistantContext,
     #podcastAssistant.nav-only .chat-controls { display: none; }
-    .assistant-impact { margin-top: 6px; color: var(--accent); }
+    .assistant-impact { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--accent); }
     #podcastAssistant { grid-column: 1; grid-row: 1; }
     @media (max-width: 1200px) {
       main.assistant-active { display: flex; flex-direction: column; width: 100%; gap: 10px; }
@@ -297,57 +324,112 @@
       .assistant-steps { display: flex; gap: 6px; padding: 0; border: 0; }
       .assistant-steps li { flex: 0 0 auto; }
       .assistant-steps button, .assistant-util { width: auto; margin: 0; white-space: nowrap; }
-      #podcastAssistant:not(.nav-only) .assistant-chat-toggle { display: block; }
+      #podcastAssistant:not(.nav-only) .assistant-chat-toggle { display: inline-flex; }
       .assistant-chat { display: none; }
       #podcastAssistant.chat-open .assistant-chat { display: flex; position: fixed; inset: 0; z-index: 70; background: var(--surface-2); }
-      #podcastAssistant.chat-open #assistantChatClose { display: inline-block; }
+      #podcastAssistant.chat-open #assistantChatClose { display: inline-flex; }
       #podcastAssistant.chat-open .assistant-chat .chat-pane-header { display: flex; }
     }
     @media (max-width: 820px) {
       .app { display: grid; grid-template-columns: minmax(0, 1fr); }
       .rightbar { position: fixed; top: 0; right: 0; z-index: 45; width: min(340px, 92vw); height: 100%; box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
       main { padding: 10px 12px; }
+      main.assistant-active { padding: 0; }
       .grid, .grid.three { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
       .toolbar { grid-template-columns: 1fr 1fr; }
       .model-row { grid-template-columns: auto minmax(0, 1fr); }
       .model-row select { grid-column: 1 / -1; }
       .player-layout { grid-template-columns: 1fr; }
-      .internal-nav-layout { grid-template-columns: 1fr; }
-      .internal-sidebar { position: static; display: flex; max-height: none; overflow-x: auto; overflow-y: hidden; }
-      .internal-sidebar button { width: auto; flex: 0 0 auto; }
       .player-bottom { padding-inline: 10px; }
       .player-bottom button { padding-inline: 9px; }
     }
   </style>
 </head>
 <body>
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-audio-lines" viewBox="0 0 24 24"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></symbol>
+<symbol id="i-message-square" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></symbol>
+<symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></symbol>
+<symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-circle-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/></symbol>
+<symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+<symbol id="i-square-pen" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></symbol>
+<symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+<symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/></symbol>
+<symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+<symbol id="i-save" viewBox="0 0 24 24"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></symbol>
+<symbol id="i-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+<symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+<symbol id="i-file-up" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></symbol>
+<symbol id="i-eraser" viewBox="0 0 24 24"><path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21"/><path d="m5.082 11.09 8.828 8.828"/></symbol>
+<symbol id="i-sliders-horizontal" viewBox="0 0 24 24"><path d="M10 5H3"/><path d="M12 19H3"/><path d="M14 3v4"/><path d="M16 17v4"/><path d="M21 12h-9"/><path d="M21 19h-5"/><path d="M21 5h-7"/><path d="M8 10v4"/><path d="M8 12H3"/></symbol>
+<symbol id="i-volume-2" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></symbol>
+<symbol id="i-list-plus" viewBox="0 0 24 24"><path d="M16 5H3"/><path d="M11 12H3"/><path d="M16 19H3"/><path d="M18 9v6"/><path d="M21 12h-6"/></symbol>
+<symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+<symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+<symbol id="i-skip-forward" viewBox="0 0 24 24"><path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+<symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="i-list-x" viewBox="0 0 24 24"><path d="M16 5H3"/><path d="M11 12H3"/><path d="M16 19H3"/><path d="m15.5 9.5 5 5"/><path d="m20.5 9.5-5 5"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></symbol>
+<symbol id="i-key-round" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+<symbol id="i-undo-2" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+<symbol id="i-check-check" viewBox="0 0 24 24"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+<symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-circle-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  </svg>
   <div class="app">
     <main id="appMain">
       <div id="podcastAssistant" class="chat-pane" hidden>
         <div class="assistant-sidebar">
-          <div class="chat-pane-header"><h3 id="assistantTitle">pod-god</h3></div>
+          <div class="chat-pane-header"><img class="brand-logo" src="/icon.png" alt=""><h3 id="assistantTitle">pod-god</h3></div>
           <nav class="assistant-workflow" aria-label="Workflow">
-            <button type="button" class="assistant-util" data-view="config">⚙ Config</button>
+            <button type="button" class="assistant-util" data-view="config"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Config</button>
             <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
-            <button type="button" class="assistant-util" data-view="player">▶ Player</button>
-            <button type="button" id="assistantChatToggle" class="assistant-util assistant-chat-toggle">💬 Chat</button>
+            <button type="button" class="assistant-util" data-view="player"><svg class="icon" aria-hidden="true"><use href="#i-audio-lines"/></svg>Player</button>
+            <button type="button" id="assistantChatToggle" class="assistant-util assistant-chat-toggle"><svg class="icon" aria-hidden="true"><use href="#i-message-square"/></svg>Chat</button>
           </nav>
-          <div id="assistantNextStep" class="assistant-next"><span class="assistant-next-title">Next step</span><span id="assistantNextText" class="assistant-next-text"></span><button type="button" id="assistantNextGo" class="primary">Go</button></div>
+          <div id="assistantNextStep" class="assistant-next"><span class="assistant-next-title">Next step</span><span id="assistantNextText" class="assistant-next-text"></span><button type="button" id="assistantNextGo" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg>Go</button></div>
           <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
           <div class="chat-controls">
-            <label>Chat history<select id="plannerChatHistory"></select></label>
             <label data-help="Model used for this conversation and for planning episodes.">Model<select id="plannerChatModel"></select></label>
             <label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label>
-            <button id="uploadKnowledge" type="button">Upload knowledge base (.md)</button>
+            <button id="uploadKnowledge" type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload knowledge base (.md)</button>
             <input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain" hidden>
           </div>
         </div>
         <div class="assistant-chat">
-          <div class="chat-pane-header"><h3>Chat</h3><div class="chat-input-actions"><button id="assistantChatClose" type="button">Close</button><button id="plannerChatReset">New Chat</button><button id="plannerChatDelete" class="danger">Delete</button></div></div>
+          <div class="chat-pane-header">
+            <button id="chatHistoryToggle" type="button" class="chat-history-toggle" aria-haspopup="true" aria-expanded="false" title="Chat history"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span id="chatHistoryTitle" class="chat-history-title">New chat</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+            <button id="assistantChatClose" type="button" class="icon-btn" title="Close chat" aria-label="Close chat"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+          </div>
+          <div id="chatHistoryPanel" class="chat-history-panel" hidden>
+            <div class="chat-history-head">
+              <button id="chatHistoryNew" type="button" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-square-pen"/></svg>New chat</button>
+              <button id="chatHistoryClose" type="button" class="icon-btn" title="Close history" aria-label="Close history"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+            </div>
+            <div id="chatHistoryList" class="chat-history-list"></div>
+          </div>
           <div id="plannerChatMessages" class="chat-messages"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
           <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span id="plannerChatBusyText">Thinking…</span></div>
-          <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary">Send</button></div></div>
+          <div class="chat-input-row"><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><button id="plannerChatSend" class="primary icon-btn" title="Send message" aria-label="Send message"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button></div></div>
         </div>
       </div>
 
@@ -363,19 +445,19 @@
       <div id="view-speakers" class="view" hidden>
         <div class="view-header">
           <div><h2>Hosts</h2><p class="muted">Define hosts, voices, and delivery rules. Each profile supports 1–4 speakers; the defaults work out of the box.</p></div>
-          <div class="actions"><button id="saveProfiles" class="primary" disabled>Save hosts</button></div>
+          <div class="actions"><button id="saveProfiles" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save hosts</button></div>
         </div>
         <div class="view-body">
         <section id="profiles-speakers" class="panel">
           <div class="model-refresh-row">
             <div id="modelStatus" class="model-status" role="status" aria-live="polite"></div>
-            <button id="refreshModels">Refresh models</button>
+            <button id="refreshModels" class="icon-btn" title="Refresh models" aria-label="Refresh models"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg></button>
           </div>
           <div class="toolbar">
             <label>Profile<select id="speakerProfileSelect"></select></label>
-            <button id="newSpeakerProfile">New</button>
-            <button id="duplicateSpeakerProfile">Duplicate</button>
-            <button id="deleteSpeakerProfile" class="danger">Delete</button>
+            <button id="newSpeakerProfile" class="icon-btn" title="New profile" aria-label="New profile"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+            <button id="duplicateSpeakerProfile" class="icon-btn" title="Duplicate profile" aria-label="Duplicate profile"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg></button>
+            <button id="deleteSpeakerProfile" class="danger icon-btn" title="Delete profile" aria-label="Delete profile"><svg class="icon" aria-hidden="true"><use href="#i-trash-2"/></svg></button>
           </div>
           <div id="speakerProfilePills" class="profile-pills" aria-label="Selected speaker profile details"></div>
           <div class="grid">
@@ -385,10 +467,12 @@
             <label class="full">Profile rules<textarea id="spInstructions"></textarea></label>
           </div>
           <div class="internal-nav-layout">
-            <div id="speakerSidebar" class="internal-sidebar" role="navigation" aria-label="Speakers"></div>
+            <div class="internal-nav-row">
+              <div id="speakerSidebar" class="internal-sidebar" role="navigation" aria-label="Speakers"></div>
+              <button id="addSpeaker" type="button" class="icon-btn" title="Add speaker" aria-label="Add speaker"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+            </div>
             <div id="speakerCards" class="speaker-list"></div>
           </div>
-          <div class="actions"><button id="addSpeaker">Add speaker</button></div>
         </section>
         </div>
       </div>
@@ -396,8 +480,8 @@
       <div id="view-transcript" class="view" hidden>
         <div class="view-header"><div><h2>Script</h2><p class="muted">Generate, edit, and save each episode's script here.</p></div></div>
         <div class="subnav" aria-label="Transcript sections">
-          <button id="transcriptScriptTab" type="button">Script</button>
-          <button id="transcriptPromptTab" type="button">Prompt &amp; Cues</button>
+          <button id="transcriptScriptTab" type="button"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg>Script</button>
+          <button id="transcriptPromptTab" type="button"><svg class="icon" aria-hidden="true"><use href="#i-sliders-horizontal"/></svg>Prompt &amp; Cues</button>
         </div>
         <div class="view-body">
         <section class="panel">
@@ -420,30 +504,30 @@
                 <label data-help="Builds the episode outline.">Outline model<select id="epOutlineModel"></select></label>
                 <label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="epTranscriptModel"></select></label>
               </div>
-              <div class="actions"><button id="saveEpisodeSettings" type="button">Save settings</button></div>
+              <div class="actions"><button id="saveEpisodeSettings" type="button"><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save settings</button></div>
             </details>
             <div class="actions">
-              <button id="saveEpisode" disabled>Save draft</button>
-              <button id="generateTranscript" class="primary">Generate transcript</button>
+              <button id="saveEpisode" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save draft</button>
+              <button id="generateTranscript" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Generate transcript</button>
               <label class="bulk-check" data-help="Queues audio automatically only after transcript generation succeeds."><input id="autoGenerateTts" type="checkbox"> Generate TTS after transcript</label>
             </div>
             <div id="transcriptJob" class="loading-line" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="transcriptJobStatus"></span></div>
             <div class="separator"></div>
             <p class="muted">Format: <code>## Segmento</code>, then <code>Speaker [optional delivery cue]: spoken text</code>. One turn per line.</p>
             <div class="actions">
-              <label style="display:inline-grid" data-help="Loads an existing Markdown script instead of generating one.">Import transcript<input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
+              <label style="display:inline-grid" data-help="Loads an existing Markdown script instead of generating one."><span class="label-icon"><svg class="icon" aria-hidden="true"><use href="#i-file-up"/></svg>Import transcript</span><input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
               <span id="wordCount" class="muted" style="margin-left:auto">0 words</span>
             </div>
             <p id="transcriptLengthWarning" class="warning" hidden></p>
             <textarea id="transcript" class="transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
-            <div class="actions"><button id="saveTranscript" class="primary" disabled>Save transcript</button></div>
+            <div class="actions"><button id="saveTranscript" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save transcript</button></div>
           </section>
           <section id="transcript-prompt-panel" hidden>
             <p class="muted">Rules resolve from each speaker's TTS model. References: <a href="https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/speech-synthesis-v2.5" target="_blank" rel="noreferrer">MiMo</a> · <a href="https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices" target="_blank" rel="noreferrer">ElevenLabs</a> · <a href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noreferrer">Chatterbox</a>.</p>
             <div id="transcriptCapabilitySummary" class="speaker-summary"></div>
             <label data-help="Shows non-editable syntax and capability constraints resolved from selected models.">Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly style="min-height:160px"></textarea></label>
             <label data-help="Adds reviewed creative direction without replacing provider rules.">Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" style="min-height:100px" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
-            <div class="actions"><button id="resetTranscriptPrompt">Clear guidance</button><button id="saveTranscriptPrompt" disabled>Save guidance</button></div>
+            <div class="actions"><button id="resetTranscriptPrompt"><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg>Clear guidance</button><button id="saveTranscriptPrompt" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save guidance</button></div>
           </section>
         </section>
         </div>
@@ -462,7 +546,7 @@
           <p class="warning">Preview every voice before rendering. MiMo preset TTS is blocked outside English/Chinese; other languages require a compatible ElevenLabs model and <code>ELEVENLABS_API_KEY</code>.</p>
           <audio id="previewAudio" controls hidden></audio>
           <div class="separator"></div>
-          <div class="actions"><button id="applyLatestProfiles">Apply latest profiles</button><button id="renderAudio" class="primary">Render MP3</button></div>
+          <div class="actions"><button id="applyLatestProfiles"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Apply latest profiles</button><button id="renderAudio" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg>Render MP3</button></div>
           <progress id="renderProgress" value="0" max="1" hidden></progress>
           <p id="renderStatus" class="muted"></p>
           <div id="episodePlayerActions" class="actions"></div>
@@ -481,10 +565,10 @@
             <span id="playerDuration">0:00</span>
           </div>
           <div class="player-controls">
-            <button type="button" data-player-action="back" disabled>-15 seconds</button>
-            <button type="button" data-player-action="toggle" class="primary" disabled>Play</button>
-            <button type="button" data-player-action="forward" disabled>+15 seconds</button>
-            <button type="button" data-player-action="next" disabled>Next</button>
+            <button type="button" class="icon-btn" data-player-action="back" title="Back 15 seconds" aria-label="Back 15 seconds" disabled><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg></button>
+            <button type="button" class="primary icon-btn" data-player-action="toggle" title="Play" aria-label="Play" disabled><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg></button>
+            <button type="button" class="icon-btn" data-player-action="forward" title="Forward 15 seconds" aria-label="Forward 15 seconds" disabled><svg class="icon" aria-hidden="true"><use href="#i-rotate-cw"/></svg></button>
+            <button type="button" class="icon-btn" data-player-action="next" title="Next episode" aria-label="Next episode" disabled><svg class="icon" aria-hidden="true"><use href="#i-skip-forward"/></svg></button>
             <label>Speed<select id="playerSpeed"><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="1.75">1.75x</option><option value="2">2x</option></select></label>
           </div>
         </section>
@@ -494,10 +578,10 @@
             <div id="playerLibrary" class="player-list"><p class="muted">Loading rendered episodes…</p></div>
           </section>
           <section class="panel">
-            <div class="view-header"><div><h3>Up Next</h3><p class="muted">Upcoming episodes only.</p></div><button id="clearPlayerQueue" type="button" disabled>Clear queue</button></div>
+            <div class="view-header"><div><h3>Up Next</h3><p class="muted">Upcoming episodes only.</p></div><button id="clearPlayerQueue" type="button" class="icon-btn" title="Clear queue" aria-label="Clear queue" disabled><svg class="icon" aria-hidden="true"><use href="#i-list-x"/></svg></button></div>
             <div class="playlist-controls">
               <label>Playlist<select id="playerPlaylistSelect"><option value="">No saved playlists</option></select></label>
-              <div class="actions"><button id="savePlayerPlaylist" type="button">Save as</button><button id="loadPlayerPlaylist" type="button">Load</button><button id="updatePlayerPlaylist" type="button">Update</button><button id="renamePlayerPlaylist" type="button">Rename</button><button id="deletePlayerPlaylist" type="button" class="danger">Delete</button></div>
+              <div class="actions"><button id="savePlayerPlaylist" type="button" class="icon-btn" title="Save as new playlist" aria-label="Save as new playlist"><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg></button><button id="loadPlayerPlaylist" type="button" class="icon-btn" title="Load playlist" aria-label="Load playlist"><svg class="icon" aria-hidden="true"><use href="#i-folder-open"/></svg></button><button id="updatePlayerPlaylist" type="button" class="icon-btn" title="Update playlist" aria-label="Update playlist"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg></button><button id="renamePlayerPlaylist" type="button" class="icon-btn" title="Rename playlist" aria-label="Rename playlist"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg></button><button id="deletePlayerPlaylist" type="button" class="danger icon-btn" title="Delete playlist" aria-label="Delete playlist"><svg class="icon" aria-hidden="true"><use href="#i-trash-2"/></svg></button></div>
             </div>
             <div id="playerQueue" class="player-list"><p class="muted">Queue is empty.</p></div>
           </section>
@@ -508,13 +592,13 @@
       <div id="view-config" class="view" hidden>
         <div class="view-header">
           <div><h2>Model Connections</h2><p class="muted">Configure connections, then activate only models needed by profiles and generators.</p></div>
-          <button id="saveConfig" class="primary" disabled>Save config</button>
+          <button id="saveConfig" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save config</button>
         </div>
         <div class="view-body">
         <section class="panel">
           <div id="configModelStatus" class="model-status" role="status" aria-live="polite"></div>
           <div id="configProviders"></div>
-          <div class="actions"><button id="addCompatibleConnection">Add OpenAI compatible connection</button></div>
+          <div class="actions"><button id="addCompatibleConnection"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add OpenAI compatible connection</button></div>
         </section>
         <section class="panel">
           <h3>Knowledge Bases</h3>
@@ -526,24 +610,24 @@
 
       <dialog id="modelDialog">
         <div class="dialog-body">
-          <div class="view-header"><div><h2 id="modelDialogTitle">Active models</h2><p id="modelDialogStatus" class="muted"></p></div><button id="closeModelDialog" type="button">Close</button></div>
+          <div class="view-header"><div><h2 id="modelDialogTitle">Active models</h2><p id="modelDialogStatus" class="muted"></p></div><button id="closeModelDialog" type="button" class="icon-btn" title="Close" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
           <div class="grid">
             <label>Search models<input id="modelSearch" type="search" placeholder="Search discovered models"></label>
             <label class="bulk-check" style="align-self: end"><input id="modelSelectedOnly" type="checkbox"> Selected only</label>
           </div>
-          <div class="actions"><button id="toggleFilteredModels" type="button">Select all filtered</button><span id="modelSelectionCount" class="muted"></span></div>
+          <div class="actions"><button id="toggleFilteredModels" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check-check"/></svg>Select all filtered</button><span id="modelSelectionCount" class="muted"></span></div>
           <div id="modelSelectionList" class="model-list"></div>
           <div class="grid">
             <label>Custom model ID<input id="customModelId" placeholder="Model ID not returned by /models"></label>
             <label>Custom model type<select id="customModelType"><option value="text">LLM</option><option value="tts">TTS</option><option value="both">Both</option></select></label>
           </div>
-          <div class="actions"><button id="addCustomModel" type="button">Add custom model</button><button id="applyModelSelection" type="button" class="primary">Apply model selection</button></div>
+          <div class="actions"><button id="addCustomModel" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add custom model</button><button id="applyModelSelection" type="button" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Apply model selection</button></div>
         </div>
       </dialog>
     </main>
 
     <aside id="rightbar" class="rightbar" aria-label="Notifications and jobs" hidden>
-      <div class="rightbar-header"><h2>Activity</h2><button id="rightbarClose" type="button">Close</button></div>
+      <div class="rightbar-header"><h2>Activity</h2><button id="rightbarClose" type="button" class="icon-btn" title="Close activity" aria-label="Close activity"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <div class="activity-heading">Notifications</div>
       <div id="notificationFeed" class="notice-list" aria-live="polite"><span class="muted">No notifications</span></div>
       <div class="activity-heading">Jobs</div>
@@ -551,15 +635,15 @@
     </aside>
   </div>
 
-  <button id="rightbarToggle" class="rightbar-toggle" type="button" aria-label="Open notifications">🔔<span id="rightbarBadge" class="rightbar-badge" hidden>0</span></button>
+  <button id="rightbarToggle" class="rightbar-toggle" type="button" title="Notifications and jobs" aria-label="Open notifications"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span id="rightbarBadge" class="rightbar-badge" hidden>0</span></button>
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
   <audio id="playerAudio" preload="metadata" hidden></audio>
   <footer id="playerBottom" class="player-bottom" aria-label="Podcast player" hidden>
     <input id="bottomPlayerSeek" class="player-bottom-seek" type="range" min="0" max="0" value="0" step="1" aria-label="Playback position" disabled>
     <div class="player-bottom-meta"><button id="bottomPlayerTitle" class="player-bottom-title" type="button" data-player-action="open">No episode loaded</button><span class="player-bottom-time"><span id="bottomPlayerElapsed">0:00</span> / <span id="bottomPlayerDuration">0:00</span></span></div>
-    <button type="button" data-player-action="toggle">Play</button>
-    <button type="button" data-player-action="next">Next</button>
+    <button type="button" class="icon-btn" data-player-action="toggle" title="Play" aria-label="Play"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg></button>
+    <button type="button" class="icon-btn" data-player-action="next" title="Next episode" aria-label="Next episode"><svg class="icon" aria-hidden="true"><use href="#i-skip-forward"/></svg></button>
     <select id="bottomPlayerSpeed" aria-label="Playback speed"><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="1.75">1.75x</option><option value="2">2x</option></select>
   </footer>
 
@@ -682,9 +766,11 @@
       renderToasts();
     }
 
+    const TOAST_ICONS = { ok: "circle-check", warning: "triangle-alert", error: "circle-x" };
+
     function renderToasts() {
-      $("toasts").innerHTML = (toastOverflow ? `<button type="button" class="toast toast-more">+${toastOverflow} more notification${toastOverflow === 1 ? "" : "s"}</button>` : "")
-        + toastEntries.map((item) => `<button type="button" class="toast" data-type="${escapeHtml(item.type)}">${escapeHtml(item.message)}</button>`).join("");
+      $("toasts").innerHTML = (toastOverflow ? `<button type="button" class="toast toast-more">${icon("chevron-up")}+${toastOverflow} more notification${toastOverflow === 1 ? "" : "s"}</button>` : "")
+        + toastEntries.map((item) => `<button type="button" class="toast" data-type="${escapeHtml(item.type)}">${icon(TOAST_ICONS[item.type] || "circle-dot")}<span>${escapeHtml(item.message)}</span></button>`).join("");
     }
 
     async function api(path, options = {}) {
@@ -704,6 +790,10 @@
 
     function option(value, label, selected = false, disabled = false) {
       return `<option value="${escapeHtml(value)}"${selected ? " selected" : ""}${disabled ? " disabled" : ""}>${escapeHtml(label)}</option>`;
+    }
+
+    function icon(name, extraClass = "") {
+      return `<svg class="icon${extraClass ? ` ${extraClass}` : ""}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
     }
 
     function discoveredModels(kind) {
@@ -846,8 +936,8 @@
       const currentIndex = steps.findIndex(([, done]) => !done);
       $("assistantProgress").innerHTML = steps.map(([label, done, target], index) => {
         const stepState = done ? "done" : index === currentIndex ? "current" : "pending";
-        const mark = done ? "✓" : index === currentIndex ? "●" : "○";
-        return `<li data-state="${stepState}"><button type="button"${target === view ? ' class="active"' : ""} data-assistant-target="${target}"><span class="step-mark" aria-hidden="true">${mark}</span>${escapeHtml(label)}</button></li>`;
+        const mark = done ? "circle-check" : index === currentIndex ? "circle-dot" : "circle";
+        return `<li data-state="${stepState}"><button type="button"${target === view ? ' class="active"' : ""} data-assistant-target="${target}">${icon(mark, "step-mark")}${escapeHtml(label)}</button></li>`;
       }).join("");
       const nextSteps = [
         { text: "Describe your podcast idea in the chat, then apply the assistant's episode list.", target: "chat", highlight: "#plannerChatInput", go: "Write your idea" },
@@ -1054,7 +1144,7 @@
       $("savedEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
       $("ttsEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
       $("knowledgeSummary").innerHTML = state.knowledgeBases.length
-        ? state.knowledgeBases.map((item) => `<div class="view-header"><div><strong>${escapeHtml(item.name)}</strong><br><span class="muted">${item.characters.toLocaleString()} characters</span></div><button type="button" class="danger" data-delete-knowledge="${escapeHtml(item.id)}">Delete</button></div>`).join("")
+        ? state.knowledgeBases.map((item) => `<div class="view-header"><div><strong>${escapeHtml(item.name)}</strong><br><span class="muted">${item.characters.toLocaleString()} characters</span></div><button type="button" class="danger icon-btn" data-delete-knowledge="${escapeHtml(item.id)}" title="Delete knowledge base" aria-label="Delete ${escapeHtml(item.name)}">${icon("trash-2")}</button></div>`).join("")
         : '<p class="muted">No knowledge base loaded.</p>';
     }
 
@@ -1155,8 +1245,8 @@
     }
 
     function keyClearControl(kind, id, connection) {
-      if (connection.clearApiKey) return `<button type="button" data-undo-clear-key="${kind}:${escapeHtml(id)}">Undo key clear</button><span class="warning" data-key-clear-status>Key will be cleared on save.</span>`;
-      return connection.hasApiKey ? `<button type="button" class="danger" data-clear-key="${kind}:${escapeHtml(id)}">Clear saved key</button>` : "";
+      if (connection.clearApiKey) return `<button type="button" data-undo-clear-key="${kind}:${escapeHtml(id)}">${icon("undo-2")}Undo key clear</button><span class="warning" data-key-clear-status>Key will be cleared on save.</span>`;
+      return connection.hasApiKey ? `<button type="button" class="danger" data-clear-key="${kind}:${escapeHtml(id)}">${icon("key-round")}Clear saved key</button>` : "";
     }
 
     function providerCard(id, name, types, fields, openConnections) {
@@ -1165,7 +1255,7 @@
       return `<section class="provider-card" data-configured="${Boolean(provider?.configured)}">
         <details class="connection-row" data-provider-id="${id}"${openConnections.has(`provider:${id}`) ? " open" : ""}>
           <summary><span class="connection-head"><span class="connection-title"><strong>${name}</strong>${modalityPills(types, connection.activeModels)}</span>${providerStatusPill(name, provider)}</span></summary>
-          <div class="connection-body"><div class="connection-actions"><button type="button" data-model-provider="${id}">Models</button>${keyClearControl("provider", id, connection)}</div>
+          <div class="connection-body"><div class="connection-actions"><button type="button" data-model-provider="${id}">${icon("list")}Models</button>${keyClearControl("provider", id, connection)}</div>
             <p class="config-status">${escapeHtml(providerStatus(provider))}</p>
             <div class="grid">${fields}</div>
             <div class="active-model-pills">${activeModelPills(connection.activeModels, id)}</div>
@@ -1180,7 +1270,7 @@
         const name = connection.name || "OpenAI compatible";
         return `<details class="connection-row" data-compatible-id="${escapeHtml(connection.id)}"${openConnections.has(`compatible:${connection.id}`) ? " open" : ""}>
           <summary><span class="connection-head"><span class="connection-title"><strong>${escapeHtml(name)}</strong>${modalityPills(["text", "tts"], connection.activeModels)}</span>${providerStatusPill(name, provider)}</span></summary>
-          <div class="connection-body"><div class="connection-actions"><button type="button" data-model-connection="${escapeHtml(connection.id)}">Models</button><button type="button" class="danger" data-remove-connection="${escapeHtml(connection.id)}">Remove</button>${keyClearControl("compatible", connection.id, connection)}</div>
+          <div class="connection-body"><div class="connection-actions"><button type="button" data-model-connection="${escapeHtml(connection.id)}">${icon("list")}Models</button><button type="button" class="danger icon-btn" data-remove-connection="${escapeHtml(connection.id)}" title="Remove connection" aria-label="Remove connection">${icon("trash-2")}</button>${keyClearControl("compatible", connection.id, connection)}</div>
             <p class="config-status">${escapeHtml(providerStatus(provider))}</p>
             <div class="grid">
             <label>Name<input data-field="name" value="${escapeHtml(connection.name || "")}"></label>
@@ -1433,7 +1523,7 @@
         const resolvedModel = speaker.ttsModelOverride || profile.voiceModel;
         return `<fieldset data-speaker-index="${index}"${index === activeSpeakerIndex ? "" : " hidden"}>
           <legend>Speaker ${index + 1}</legend>
-          <div class="speaker-head">${resolvedModel ? `<span class="badge" title="Resolved TTS model">TTS: ${escapeHtml(modelLabel(resolvedModel))}</span>` : ""}<button type="button" class="danger remove-speaker" data-index="${index}"${profile.speakers.length === 1 ? " disabled" : ""}>Remove</button></div>
+          <div class="speaker-head">${resolvedModel ? `<span class="badge" title="Resolved TTS model">TTS: ${escapeHtml(modelLabel(resolvedModel))}</span>` : ""}<button type="button" class="danger icon-btn remove-speaker" data-index="${index}" title="Remove speaker" aria-label="Remove speaker"${profile.speakers.length === 1 ? " disabled" : ""}>${icon("trash-2")}</button></div>
           <div class="grid">
             <label>Name<input data-field="name" value="${escapeHtml(speaker.name)}"></label>
             <label>Model override<select data-field="ttsModelOverride">${modelOptions(speaker.ttsModelOverride || "", true)}</select></label>
@@ -1732,8 +1822,8 @@
 
     function episodeRowHtml(episode, label) {
       const job = jobsState.jobs.find((item) => item.episodeId === episode.id && ["queued", "running"].includes(item.status));
-      const scriptChip = job?.type === "transcript" ? '<span class="episode-chip running">Script: generating…</span>' : episode.transcriptWords > 0 ? '<span class="episode-chip done">Script ✓</span>' : '<span class="episode-chip">Script —</span>';
-      const audioChip = job?.type === "tts" ? '<span class="episode-chip running">Audio: rendering…</span>' : episode.audioReady ? '<span class="episode-chip done">Audio ✓</span>' : '<span class="episode-chip">Audio —</span>';
+      const scriptChip = job?.type === "transcript" ? '<span class="episode-chip running">Script: generating…</span>' : episode.transcriptWords > 0 ? `<span class="episode-chip done">Script${icon("check")}</span>` : `<span class="episode-chip">Script${icon("minus")}</span>`;
+      const audioChip = job?.type === "tts" ? '<span class="episode-chip running">Audio: rendering…</span>' : episode.audioReady ? `<span class="episode-chip done">Audio${icon("check")}</span>` : `<span class="episode-chip">Audio${icon("minus")}</span>`;
       const format = state.profiles.episodeProfiles.find((item) => item.id === episode.episodeProfileId);
       const hostId = episode.speakerProfileId || format?.speakerProfileId || "";
       const hostOptions = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === hostId)).join("");
@@ -1742,7 +1832,7 @@
         <div class="episode-row-head"><h3>${escapeHtml(label)}</h3><div class="episode-row-chips">${scriptChip}${audioChip}</div></div>
         <div class="episode-row-actions">
           <label>Hosts<select data-episode-host="${escapeHtml(episode.id)}"${job ? " disabled" : ""}>${hostOptions}</select></label>
-          <div class="actions">${canStart ? `<button class="primary" data-start-episode="${escapeHtml(episode.id)}">Start</button>` : ""}<button data-open-episode="${escapeHtml(episode.id)}">Open</button>${episode.audioReady ? `<button data-play-episode="${escapeHtml(episode.id)}">Play</button>` : ""}<button data-delete-episode="${escapeHtml(episode.id)}"${job ? " disabled" : ""}>Delete</button></div>
+          <div class="actions">${canStart ? `<button class="primary icon-btn" data-start-episode="${escapeHtml(episode.id)}" title="Start" aria-label="Start ${escapeHtml(label)}">${icon("play")}</button>` : ""}<button class="icon-btn" data-open-episode="${escapeHtml(episode.id)}" title="Open script" aria-label="Open ${escapeHtml(label)}">${icon("external-link")}</button>${episode.audioReady ? `<button class="icon-btn" data-play-episode="${escapeHtml(episode.id)}" title="Play" aria-label="Play ${escapeHtml(label)}">${icon("play")}</button>` : ""}<button class="danger icon-btn" data-delete-episode="${escapeHtml(episode.id)}" title="Delete episode" aria-label="Delete ${escapeHtml(label)}"${job ? " disabled" : ""}>${icon("trash-2")}</button></div>
         </div>
       </div>`;
     }
@@ -1753,7 +1843,7 @@
       const listed = new Set();
       const planRows = planEpisodeRows().map((row) => {
         const label = `${row.planned.number}. ${row.episode?.name || row.planned.title}`;
-        if (!row.episode) return `<div class="episode-row" data-episode-row=""><div class="episode-row-head"><h3>${escapeHtml(label)}</h3><div class="episode-row-chips"><span class="episode-chip">Not created</span></div></div><div class="episode-row-actions"><div class="actions"><button data-create-planned="${escapeHtml(row.planned.id)}">Create</button><button data-delete-planned="${escapeHtml(row.planned.id)}">Delete</button></div></div></div>`;
+        if (!row.episode) return `<div class="episode-row" data-episode-row=""><div class="episode-row-head"><h3>${escapeHtml(label)}</h3><div class="episode-row-chips"><span class="episode-chip">Not created</span></div></div><div class="episode-row-actions"><div class="actions"><button class="icon-btn" data-create-planned="${escapeHtml(row.planned.id)}" title="Create episode" aria-label="Create ${escapeHtml(label)}">${icon("plus")}</button><button class="danger icon-btn" data-delete-planned="${escapeHtml(row.planned.id)}" title="Delete planned episode" aria-label="Delete ${escapeHtml(label)}">${icon("trash-2")}</button></div></div></div>`;
         listed.add(row.episode.id);
         return episodeRowHtml(row.episode, label);
       });
@@ -2004,13 +2094,13 @@
       if (lengthWarning) $("ttsSummary").insertAdjacentHTML("afterbegin", `<div class="warning">${escapeHtml(lengthWarning)}</div>`);
       $("previewButtons").innerHTML = speakerProfile.speakers.map((speaker, index) => {
         const error = modelLanguageError(speaker.ttsModelOverride || speakerProfile.voiceModel, language);
-        return `<button type="button" data-preview-index="${index}"${error ? " disabled" : ""}>Preview ${escapeHtml(speaker.name)}</button>`;
+        return `<button type="button" data-preview-index="${index}"${error ? " disabled" : ""}>${icon("volume-2")}${escapeHtml(speaker.name)}</button>`;
       }).join("");
       if (currentEpisode.audioUrl) {
         const current = currentEpisode.id === playingEpisodeId;
         const queued = playerQueue.includes(currentEpisode.id);
         const playing = current && !$("playerAudio").paused;
-        $("episodePlayerActions").innerHTML = `<button type="button" data-episode-player="play" class="primary"${playing ? " disabled" : ""}>${current ? playing ? "Playing" : "Resume" : "Play now"}</button><button type="button" data-episode-player="queue"${current || queued ? " disabled" : ""}>${current ? "Current" : queued ? "Queued" : "Add to queue"}</button>`;
+        $("episodePlayerActions").innerHTML = `<button type="button" data-episode-player="play" class="primary"${playing ? " disabled" : ""}>${icon(playing ? "audio-lines" : "play")}${current ? playing ? "Playing" : "Resume" : "Play now"}</button><button type="button" data-episode-player="queue"${current || queued ? " disabled" : ""}>${icon("list-plus")}${current ? "Current" : queued ? "Queued" : "Add to queue"}</button>`;
       } else {
         $("episodePlayerActions").innerHTML = "";
       }
@@ -2138,7 +2228,10 @@
       }
       $("bottomPlayerSeek").style.setProperty("--player-progress", duration ? `${Math.min(100, position / duration * 100)}%` : "0%");
       document.querySelectorAll('[data-player-action="toggle"]').forEach((button) => {
-        button.textContent = audio.paused ? "Play" : "Pause";
+        const label = audio.paused ? "Play" : "Pause";
+        button.innerHTML = icon(audio.paused ? "play" : "pause");
+        button.title = label;
+        button.setAttribute("aria-label", label);
         button.disabled = !loaded;
       });
       document.querySelectorAll('[data-player-action="back"], [data-player-action="forward"]').forEach((button) => { button.disabled = !loaded; });
@@ -2159,11 +2252,12 @@
           const queued = playerQueue.includes(episode.id);
           const date = episode.updatedAt ? ` - Updated ${new Date(episode.updatedAt).toLocaleString()}` : "";
           const detail = `${episode.episodeProfile?.name || "Rendered episode"}${date}`;
-          return `<div class="player-row"><div><strong>${escapeHtml(episode.name)}</strong><br><span class="muted">${escapeHtml(detail)}</span></div><div class="player-row-actions"><button type="button" data-rename-episode="${escapeHtml(episode.id)}">Rename</button><button type="button" data-play-episode="${escapeHtml(episode.id)}"${current && !audio.paused ? " disabled" : ""}>${current ? audio.paused ? "Resume" : "Playing" : "Play now"}</button><button type="button" data-queue-episode="${escapeHtml(episode.id)}"${current || queued ? " disabled" : ""}>${current ? "Current" : queued ? "Queued" : "Add to queue"}</button></div></div>`;
+          const playing = current && !audio.paused;
+          return `<div class="player-row"><div><strong>${escapeHtml(episode.name)}</strong><br><span class="muted">${escapeHtml(detail)}</span></div><div class="player-row-actions"><button type="button" class="icon-btn" data-rename-episode="${escapeHtml(episode.id)}" title="Rename" aria-label="Rename ${escapeHtml(episode.name)}">${icon("pencil")}</button><button type="button" class="icon-btn" data-play-episode="${escapeHtml(episode.id)}" title="${playing ? "Playing" : current ? "Resume" : "Play now"}" aria-label="Play ${escapeHtml(episode.name)}"${playing ? " disabled" : ""}>${icon(playing ? "audio-lines" : "play")}</button><button type="button" class="icon-btn" data-queue-episode="${escapeHtml(episode.id)}" title="${current ? "Current" : queued ? "Queued" : "Add to queue"}" aria-label="Queue ${escapeHtml(episode.name)}"${current || queued ? " disabled" : ""}>${icon("list-plus")}</button><a class="icon-btn" download href="${escapeHtml(episode.audioUrl)}" title="Download MP3" aria-label="Download ${escapeHtml(episode.name)}">${icon("download")}</a></div></div>`;
         }).join("") : '<p class="muted">No rendered episodes yet.</p>';
       $("playerQueue").innerHTML = playerQueue.length ? playerQueue.map((id, index) => {
         const episode = playerEpisode(id);
-        return `<div class="player-row"><div><strong>${index + 1}. ${escapeHtml(episode.name)}</strong></div><div class="player-row-actions"><button type="button" data-move-queued="${escapeHtml(id)}" data-offset="-1" aria-label="Move ${escapeHtml(episode.name)} up"${index === 0 ? " disabled" : ""}>Up</button><button type="button" data-move-queued="${escapeHtml(id)}" data-offset="1" aria-label="Move ${escapeHtml(episode.name)} down"${index === playerQueue.length - 1 ? " disabled" : ""}>Down</button><button type="button" data-remove-queued="${escapeHtml(id)}" aria-label="Remove ${escapeHtml(episode.name)} from queue">Remove</button></div></div>`;
+        return `<div class="player-row"><div><strong>${index + 1}. ${escapeHtml(episode.name)}</strong></div><div class="player-row-actions"><button type="button" class="icon-btn" data-move-queued="${escapeHtml(id)}" data-offset="-1" title="Move up" aria-label="Move ${escapeHtml(episode.name)} up"${index === 0 ? " disabled" : ""}>${icon("chevron-up")}</button><button type="button" class="icon-btn" data-move-queued="${escapeHtml(id)}" data-offset="1" title="Move down" aria-label="Move ${escapeHtml(episode.name)} down"${index === playerQueue.length - 1 ? " disabled" : ""}>${icon("chevron-down")}</button><button type="button" class="icon-btn" data-remove-queued="${escapeHtml(id)}" title="Remove from queue" aria-label="Remove ${escapeHtml(episode.name)} from queue">${icon("x")}</button></div></div>`;
       }).join("") : '<p class="muted">Queue is empty.</p>';
       $("clearPlayerQueue").disabled = playerQueue.length === 0;
       renderPlaylistControls();
@@ -2620,8 +2714,17 @@
       .catch((error) => notify(error.message || String(error), "error"));
 
     function renderPlannerChatHistory() {
-      if (!$("plannerChatHistory")) return;
-      $("plannerChatHistory").innerHTML = option("", "New chat", !plannerChatThreadId) + plannerChatThreads.map((thread) => option(thread.threadId, `${thread.title} (${thread.messageCount})`, thread.threadId === plannerChatThreadId)).join("");
+      if (!$("chatHistoryList")) return;
+      const active = plannerChatThreads.find((thread) => thread.threadId === plannerChatThreadId);
+      $("chatHistoryTitle").textContent = active ? active.title : "New chat";
+      $("chatHistoryList").innerHTML = plannerChatThreads.length
+        ? plannerChatThreads.map((thread) => `<div class="chat-history-row${thread.threadId === plannerChatThreadId ? " active" : ""}"><button type="button" class="chat-history-open" data-chat-open="${escapeHtml(thread.threadId)}"><span>${escapeHtml(thread.title)}</span><span class="chat-history-meta">${thread.messageCount} message${thread.messageCount === 1 ? "" : "s"}</span></button><button type="button" class="danger icon-btn" data-chat-delete="${escapeHtml(thread.threadId)}" title="Delete chat" aria-label="Delete ${escapeHtml(thread.title)}">${icon("trash-2")}</button></div>`).join("")
+        : '<p class="muted">No saved chats yet.</p>';
+    }
+
+    function setChatHistoryOpen(open) {
+      $("chatHistoryPanel").hidden = !open;
+      $("chatHistoryToggle").setAttribute("aria-expanded", String(open));
     }
 
     function summarizeProposal(type, proposal) {
@@ -2673,9 +2776,9 @@
           const next = parsed.nextStep;
           const actionLabels = { generatePlan: "create episodes", createEpisodes: "create episodes", generateTranscript: "generate script", generateTts: "generate audio", openPlayer: "open Player", none: "continue" };
           const nextLabel = next ? actionLabels[next.action] || "continue" : "";
-          const proposalButtons = message.appliedAt ? '<div class="assistant-impact">✓ Applied</div>' : `<div class="actions"><button data-apply-assistant="${index}" data-continue="false">Apply</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div>`;
+          const proposalButtons = message.appliedAt ? `<div class="assistant-impact">${icon("circle-check")}<span>Applied</span></div>` : `<div class="actions"><button data-apply-assistant="${index}" data-continue="false">${icon("check")}Apply</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">${icon("check")}Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div>`;
           const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff">${summarizeProposal(proposalType, proposal)}</div>${impact}${proposalButtons}</div>` : "";
-          const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}">${escapeHtml(nextLabel)}</button></div>` : "";
+          const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}">${icon("play")}${escapeHtml(nextLabel)}</button></div>` : "";
           return `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>${parsed.questions?.length ? `<div class="chat-questions"><ol>${parsed.questions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : ""}${proposalHtml}${nextHtml}`;
         } catch { return `<div class="chat-msg assistant">${escapeHtml(message.content)}</div>`; }
       }).join("");
@@ -2683,6 +2786,7 @@
     }
 
     async function loadPlannerChatThread() {
+      setChatHistoryOpen(false);
       if (!activePlanId) { plannerChatThreads = []; plannerChatThread = null; renderPlannerChatHistory(); renderPlannerChatMessages(); return; }
       const listed = await api(`/api/chats?kind=planner&planId=${encodeURIComponent(activePlanId)}`);
       plannerChatThreads = listed.chats || [];
@@ -2707,10 +2811,13 @@
       } finally { plannerChatBusy = false; $("plannerChatBusy").hidden = true; }
     }
 
-    async function deletePlannerChat() {
-      if (!plannerChatThreadId || !confirm("Delete this planner chat?")) return;
-      await api(`/api/chat?threadId=${encodeURIComponent(plannerChatThreadId)}`, { method: "DELETE" });
-      plannerChatThreadId = ""; plannerChatThread = null; await loadPlannerChatThread();
+    async function deletePlannerChat(threadId = plannerChatThreadId) {
+      if (!threadId) return;
+      const thread = plannerChatThreads.find((item) => item.threadId === threadId);
+      if (!confirm(`Delete "${thread?.title || "this chat"}"?`)) return;
+      await api(`/api/chat?threadId=${encodeURIComponent(threadId)}`, { method: "DELETE" });
+      if (threadId === plannerChatThreadId) { plannerChatThreadId = ""; plannerChatThread = null; }
+      await loadPlannerChatThread();
     }
 
     function openAssistantTarget(target) {
@@ -2765,9 +2872,21 @@
     $("assistantChatToggle").addEventListener("click", () => $("podcastAssistant").classList.add("chat-open"));
     $("assistantChatClose").addEventListener("click", () => $("podcastAssistant").classList.remove("chat-open"));
     document.querySelectorAll(".toolbar label[data-help]").forEach((label) => { label.title = label.dataset.help; label.removeAttribute("data-help"); });
-    $("plannerChatReset").addEventListener("click", () => { plannerChatThreadId = ""; plannerChatThread = null; renderPlannerChatHistory(); renderPlannerChatMessages(); });
-    $("plannerChatDelete").addEventListener("click", guard(deletePlannerChat));
-    $("plannerChatHistory").addEventListener("change", guard(async (event) => { plannerChatThreadId = event.target.value; await loadPlannerChatThread(); }));
+    $("chatHistoryToggle").addEventListener("click", () => setChatHistoryOpen(true));
+    $("chatHistoryClose").addEventListener("click", () => setChatHistoryOpen(false));
+    $("chatHistoryNew").addEventListener("click", () => {
+      plannerChatThreadId = ""; plannerChatThread = null;
+      setChatHistoryOpen(false);
+      renderPlannerChatHistory(); renderPlannerChatMessages();
+    });
+    $("chatHistoryList").addEventListener("click", guard(async (event) => {
+      const remove = event.target.closest("[data-chat-delete]");
+      if (remove) { await deletePlannerChat(remove.dataset.chatDelete); return; }
+      const open = event.target.closest("[data-chat-open]");
+      if (!open) return;
+      plannerChatThreadId = open.dataset.chatOpen;
+      await loadPlannerChatThread();
+    }));
     $("assistantProgress").addEventListener("click", (event) => { const button = event.target.closest("[data-assistant-target]"); if (button) openAssistantTarget(button.dataset.assistantTarget); });
     $("assistantNextGo").addEventListener("click", () => {
       const go = $("assistantNextGo");
