@@ -30,10 +30,10 @@ npm run dev
 ## Views
 
 - `Speaker Profiles`: 1 to 4 speakers, default TTS model, per-speaker overrides, and speaker assistant.
-- `Content Planner`: upload optional Markdown, plan one episode or a series, generate and save Episode Formats, then create episode drafts.
-- `Transcript Generator`: create one-off episodes without Planner, review provider/model cue rules, generate transcripts, and edit canonical text.
+- `Podcast Assistant` and `Episodes`: describe a podcast in chat, upload optional Markdown, review proposed hosts and formats, then create and run episode drafts.
+- `Transcript Generator`: open saved episodes, review provider/model cue rules, generate transcripts, and edit canonical text.
 - `TTS Generator`: preview speakers, optionally override TTS language, and render final MP3.
-- `Player`: play rendered episodes, change playback speed, and manage an in-memory queue while navigating other views.
+- `Player`: play rendered episodes, change playback speed, manage an in-memory queue, and save browser-local playlists while navigating other views.
 - `Config`: manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes model catalog without restart.
 
 ## Providers
@@ -77,20 +77,20 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 
 - Generated transcripts require at least 125 spoken words per target minute.
 - Short imported or edited transcripts remain renderable after a warning and confirmation.
-- Rendering inserts cue-aware pauses and rejects final MP3s shorter than 90% of target duration.
+- Rendering inserts cue-aware pauses and publishes short MP3s with a warning when they are below 90% of target duration.
 - Rendering uses the saved transcript directly and preserves only cue syntax supported by each selected TTS model.
 - Failed rerenders preserve the last successful MP3 when it was still valid before the job.
 
 ## Storage
 
-- `data/profiles.json`: speaker profiles, episode profiles, episode seeds
+- `data/profiles.json`: speaker profiles and episode profiles
 - `data/plans/index.json`: content plan summaries
 - `data/plans/*.json`: editable content plans and creation links
 - `data/config.json`: non-secret provider and compatible connection metadata
 - `.env`: API keys and base URL values
 - `data/episodes/*`: saved episodes, transcripts, audio, clip cache
 
-Episodes store Speaker Profile and Episode Format snapshots. Later profile edits do not alter existing transcripts or renders; save episode draft again to intentionally refresh its snapshots.
+Episodes store Speaker Profile and Episode Format snapshots. Later profile edits do not alter existing transcripts or renders; use **Apply latest profiles** (or save the episode draft) to intentionally refresh its snapshots.
 
 Reviewed transcript text remains authoritative when generation instructions change. Refreshing snapshots invalidates audio when language, speaker mapping, TTS model, voice, style, accent, or Chatterbox tuning changes. Stale MP3 files stay hidden until a successful render replaces them.
 
@@ -99,6 +99,10 @@ On startup, obsolete outline/transcript JSON, concat manifests, temporary files,
 Keys stay server-side. API responses return `hasApiKey`, never raw secret values.
 
 The server binds to loopback, rejects cross-origin writes, prevents framing, and supports HTTP byte ranges for MP3 playback.
+
+Unsaved Config, Host, Format, episode, and transcript edits are protected across view and episode changes. Keyboard focus stays within open overlays; transcript tabs support arrow, Home, and End keys; reduced-motion preferences disable nonessential animation.
+
+Player queues last for the current page session. Named playlists are stored in the current browser profile's `localStorage`; they are not included in server data backups.
 
 OpenAI and compatible TTS voices are AI-generated. Disclose that fact in published episodes. This app generates podcast scripts; it does not transcribe uploaded audio.
 

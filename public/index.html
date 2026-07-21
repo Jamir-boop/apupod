@@ -23,6 +23,7 @@
       --line-strong: #664A00;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 0; }
@@ -53,6 +54,12 @@
     input[type="checkbox"]:disabled { border-color: var(--line); background: var(--surface-3); cursor: not-allowed; opacity: .65; }
     button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     textarea { min-height: 70px; resize: vertical; line-height: 1.45; }
+    #additionalInstructions { min-height: 120px; }
+    #transcriptLockedPrompt { min-height: 160px; }
+    #transcriptPromptGuidance { min-height: 100px; }
+    .inline-grid { display: inline-grid; }
+    .push-right { margin-left: auto; }
+    .align-end { align-self: end; }
     textarea.transcript { flex: 1 1 auto; min-height: 220px; font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; resize: none; }
     label { display: grid; gap: 4px; color: var(--muted); font-weight: 650; }
     h1, h2, h3 { margin: 0 0 8px; line-height: 1.2; }
@@ -62,6 +69,7 @@
     p { margin: 8px 0; }
     code { color: var(--accent); background: var(--surface-1); border: 1px solid var(--line); padding: 1px 5px; border-radius: 2px; }
     .muted, small { color: var(--muted); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
     body.player-active .app { height: calc(100% - 56px); }
     main { width: min(1120px, 100%); height: 100%; min-height: 0; margin: 0 auto; padding: 14px 18px; }
@@ -86,6 +94,7 @@
     .full { grid-column: 1 / -1; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
     .toolbar { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: end; margin-bottom: 12px; }
+    .toolbar.single-column { grid-template-columns: 1fr; }
     .subnav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
     .view-header, .provider-head, .connection-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
     .profile-pills, .active-model-pills, .modality-pills, .model-status { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 12px; }
@@ -244,7 +253,7 @@
     .assistant-sidebar { min-width: 0; overflow-y: auto; border-right: 1px solid var(--line); }
     .assistant-chat { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .chat-pane-header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .chat-pane-header h3 { margin: 0; font-size: 14px; }
+    .chat-pane-header h1, .chat-pane-header h3 { margin: 0; font-size: 14px; }
     .assistant-sidebar .chat-pane-header { justify-content: flex-start; gap: 8px; }
     .brand-logo { width: 22px; height: 22px; flex: 0 0 auto; object-fit: contain; }
     .chat-history-toggle { flex: 1; min-width: 0; justify-content: flex-start; font-size: 13px; }
@@ -262,6 +271,7 @@
     .chat-history-open:hover:not(:disabled) .chat-history-meta { color: inherit; }
     .chat-controls-panel { display: grid; gap: 8px; padding: 0 12px 8px; max-height: 200px; overflow: hidden; border-bottom: 1px solid var(--line); transition: max-height .18s ease, opacity .18s ease, transform .18s ease, padding .18s ease, border-bottom-color .18s ease; }
     .chat-controls-panel.closed { max-height: 0; opacity: 0; transform: translateY(-12px); padding: 0 12px; border-bottom-color: transparent; pointer-events: none; }
+    .chat-controls-panel[hidden] { display: none; }
     .chat-controls-panel label { font-size: 12px; }
     .chat-controls-panel select { font-size: 12px; padding: 6px 8px; }
     .chat-controls-panel button { font-size: 12px; padding: 6px 12px; }
@@ -345,7 +355,7 @@
     }
     @media (max-width: 820px) {
       .app { display: grid; grid-template-columns: minmax(0, 1fr); }
-      .rightbar { position: fixed; top: 0; right: 0; z-index: 45; width: min(340px, 92vw); height: 100%; box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
+      .rightbar { position: fixed; top: 0; right: 0; z-index: 65; width: min(340px, 92vw); height: 100%; box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
       main { padding: 10px 12px; }
       main.assistant-active { padding: 0; }
       .grid, .grid.three { grid-template-columns: 1fr; }
@@ -357,10 +367,14 @@
       .player-bottom { padding-inline: 10px; }
       .player-bottom button { padding-inline: 9px; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
   </style>
 </head>
 <body>
-  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <h1 class="sr-only">pod-god</h1>
+  <svg xmlns="http://www.w3.org/2000/svg" hidden aria-hidden="true">
 <symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-audio-lines" viewBox="0 0 24 24"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></symbol>
 <symbol id="i-message-square" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></symbol>
@@ -419,6 +433,7 @@
             <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
             <button type="button" class="assistant-util" data-view="player"><svg class="icon" aria-hidden="true"><use href="#i-audio-lines"/></svg>Player</button>
             <button type="button" id="assistantChatToggle" class="assistant-util assistant-chat-toggle"><svg class="icon" aria-hidden="true"><use href="#i-message-square"/></svg>Chat</button>
+            <button type="button" id="retryState" class="assistant-util" hidden><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Retry workspace</button>
           </nav>
           <div id="assistantNextStep" class="assistant-next"><span class="assistant-next-title">Next step</span><span id="assistantNextText" class="assistant-next-text"></span><button type="button" id="assistantNextGo" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg>Go</button></div>
           <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
@@ -429,16 +444,16 @@
             <button id="chatHistoryToggle" type="button" class="chat-history-toggle" aria-haspopup="true" aria-expanded="false" title="Chat history"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span id="chatHistoryTitle" class="chat-history-title">New chat</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
             <button id="assistantChatClose" type="button" class="icon-btn" title="Close chat" aria-label="Close chat"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
           </div>
-          <div id="chatHistoryPanel" class="chat-history-panel" hidden>
+          <div id="chatHistoryPanel" class="chat-history-panel" role="dialog" aria-modal="true" aria-label="Chat history" hidden>
             <div class="chat-history-head">
               <button id="chatHistoryNew" type="button" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-square-pen"/></svg>New chat</button>
               <button id="chatHistoryClose" type="button" class="icon-btn" title="Close history" aria-label="Close history"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
             </div>
             <div id="chatHistoryList" class="chat-history-list"></div>
           </div>
-          <div id="plannerChatMessages" class="chat-messages"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
-          <div id="plannerChatBusy" class="chat-busy" hidden><span class="spinner"></span><span id="plannerChatBusyText">Thinking…</span></div>
-          <div class="chat-input-row"><div id="chatControlsPanel" class="chat-controls-panel closed"><label data-help="Model used for this conversation and for planning episodes.">Model<select id="plannerChatModel"></select></label><label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label><button id="uploadKnowledge" type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload .md</button><input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain" hidden></div><textarea id="plannerChatInput" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><span class="chat-pills"><button type="button" class="chat-pill" id="chatPillModel" title="Model">—</button><button type="button" class="chat-pill" id="chatPillKb" title="Knowledge base">None</button></span><button id="chatControlsToggle" type="button" class="icon-btn" title="Chat settings" aria-expanded="false" aria-label="Chat settings"><svg class="icon" aria-hidden="true"><use href="#i-sliders-horizontal"/></svg></button><button id="plannerChatSend" class="primary icon-btn" title="Send message" aria-label="Send message"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button></div></div>
+          <div id="plannerChatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
+          <div id="plannerChatBusy" class="chat-busy" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="plannerChatBusyText">Thinking…</span></div>
+          <div class="chat-input-row"><div id="chatControlsPanel" class="chat-controls-panel closed" hidden><label data-help="Model used for this conversation and for planning episodes.">Model<select id="plannerChatModel"></select></label><label id="plannerChatEffortLabel" data-help="Reasoning effort for Responses API models." hidden>Effort<select id="plannerChatEffort"></select></label><label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label><button id="uploadKnowledge" type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload .md</button><input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain" hidden></div><textarea id="plannerChatInput" aria-label="Message to podcast assistant" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><span class="chat-pills"><button type="button" class="chat-pill" id="chatPillModel" title="Model">—</button><button type="button" class="chat-pill" id="chatPillEffort" title="Reasoning effort" hidden>effort</button><button type="button" class="chat-pill" id="chatPillKb" title="Knowledge base">None</button></span><button id="chatControlsToggle" type="button" class="icon-btn" title="Chat settings" aria-expanded="false" aria-label="Chat settings"><svg class="icon" aria-hidden="true"><use href="#i-sliders-horizontal"/></svg></button><button id="plannerChatSend" class="primary icon-btn" title="Send message" aria-label="Send message"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button></div></div>
         </div>
       </div>
 
@@ -470,7 +485,7 @@
           </div>
           <div id="speakerProfilePills" class="profile-pills" aria-label="Selected speaker profile details"></div>
           <div class="grid">
-            <label class="full">Name<input id="spName"></label>
+            <label class="full">Name<input id="spName" required></label>
             <label class="full">Description<textarea id="spDescription"></textarea></label>
             <label>Default TTS model<select id="spVoiceModel"></select></label>
             <label class="full">Profile rules<textarea id="spInstructions"></textarea></label>
@@ -486,37 +501,58 @@
         </div>
       </div>
 
-      <div id="view-transcript" class="view" hidden>
-        <div class="view-header"><div><h2>Script</h2><p class="muted">Generate, edit, and save each episode's script here.</p></div></div>
-        <div class="subnav" aria-label="Transcript sections">
-          <button id="transcriptScriptTab" type="button"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg>Script</button>
-          <button id="transcriptPromptTab" type="button"><svg class="icon" aria-hidden="true"><use href="#i-sliders-horizontal"/></svg>Prompt &amp; Cues</button>
+      <div id="view-format" class="view" hidden>
+        <div class="view-header">
+          <div><h2>Format</h2><p class="muted">Define the episode format: language, duration, and the models that write outlines and scripts.</p></div>
+          <div class="actions"><button id="saveFormat" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save format</button></div>
         </div>
         <div class="view-body">
         <section class="panel">
-          <div class="toolbar" style="grid-template-columns: 1fr">
+          <div class="toolbar">
+            <label>Format<select id="formatSelect"></select></label>
+          </div>
+          <div class="grid">
+            <label class="full">Name<input id="fmtName" required></label>
+            <label class="full">Description<textarea id="fmtDescription"></textarea></label>
+            <label data-help="Controls transcript language and compatible voices.">Language<select id="fmtLanguage"></select></label>
+            <label data-help="Sets expected transcript length and duration checks.">Target minutes<input id="fmtMinutes" type="number" min="5" max="60"></label>
+            <label data-help="Builds the episode outline.">Outline model<select id="fmtOutlineModel"></select></label>
+            <label data-help="Reasoning effort for Responses API models.">Outline effort<select id="fmtOutlineEffort"></select></label>
+            <label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="fmtTranscriptModel"></select></label>
+            <label data-help="Reasoning effort for Responses API models.">Transcript effort<select id="fmtTranscriptEffort"></select></label>
+          </div>
+        </section>
+        </div>
+      </div>
+
+      <div id="view-transcript" class="view" hidden>
+        <div class="view-header"><div><h2>Script</h2><p class="muted">Generate, edit, and save each episode's script here.</p></div></div>
+        <div class="subnav" role="tablist" aria-label="Transcript sections">
+          <button id="transcriptScriptTab" type="button" role="tab" aria-controls="transcript-script-panel"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg>Script</button>
+          <button id="transcriptPromptTab" type="button" role="tab" aria-controls="transcript-prompt-panel"><svg class="icon" aria-hidden="true"><use href="#i-sliders-horizontal"/></svg>Prompt &amp; Cues</button>
+        </div>
+        <div class="view-body">
+        <section class="panel">
+          <div class="toolbar single-column">
             <label data-help="Loads the episode draft and keeps Transcript and TTS on the same selection.">Saved episode<select id="savedEpisodeSelect"><option value="">Select saved episode</option></select></label>
           </div>
-          <section id="transcript-script-panel">
+          <section id="transcript-script-panel" role="tabpanel" aria-labelledby="transcriptScriptTab">
             <div class="grid three">
               <label class="full" data-help="Grounds this episode in uploaded source material.">Knowledge Base<select id="buildKnowledge"></select></label>
-              <label class="full" data-help="Names the saved draft, jobs, rendered file, and player entry.">Episode name<input id="episodeName" placeholder="Ep. 01 — Title"></label>
-              <label class="full" data-help="Adds episode-specific facts, boundaries, and editorial direction.">Additional instructions<textarea id="additionalInstructions" style="min-height:120px"></textarea></label>
+            <label class="full" data-help="Names the saved draft, jobs, rendered file, and player entry.">Episode name<input id="episodeName" required placeholder="Ep. 01 — Title"></label>
+              <label class="full" data-help="Adds episode-specific facts, boundaries, and editorial direction.">Additional instructions<textarea id="additionalInstructions"></textarea></label>
             </div>
             <details id="episodeSettings">
-              <summary>Episode settings — hosts, format, language, duration, models</summary>
+              <summary>Episode settings — hosts and format</summary>
               <div class="grid three">
                 <label class="full" data-help="Chooses the hosts and voices used by this episode.">Hosts<select id="episodeHosts"></select></label>
-                <label class="full" data-help="Provides structure, models, language, and target duration.">Episode Format<select id="buildEpisodeProfile"></select></label>
-                <label data-help="Controls transcript language and compatible voices.">Language<select id="epLanguage"></select></label>
-                <label data-help="Sets expected transcript length and duration checks.">Target minutes<input id="epMinutes" type="number" min="5" max="60"></label>
-                <label data-help="Builds the episode outline.">Outline model<select id="epOutlineModel"></select></label>
-                <label data-help="Writes the final speaker-by-speaker script.">Transcript model<select id="epTranscriptModel"></select></label>
+                <label class="full" data-help="Connects the Episode Format that provides structure, models, language, and duration. Edit it on the Format view.">Episode Format<select id="buildEpisodeProfile"></select></label>
               </div>
               <div class="actions"><button id="saveEpisodeSettings" type="button"><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save settings</button></div>
             </details>
             <div class="actions">
               <button id="saveEpisode" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save draft</button>
+              <label id="transcriptEffortLabel" data-help="Reasoning effort for the transcript model." hidden>Effort<select id="transcriptEffort"></select></label>
               <button id="generateTranscript" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Generate transcript</button>
               <label class="bulk-check" data-help="Queues audio automatically only after transcript generation succeeds."><input id="autoGenerateTts" type="checkbox"> Generate TTS after transcript</label>
             </div>
@@ -524,18 +560,18 @@
             <div class="separator"></div>
             <p class="muted">Format: <code>## Segmento</code>, then <code>Speaker [optional delivery cue]: spoken text</code>. One turn per line.</p>
             <div class="actions">
-              <label style="display:inline-grid" data-help="Loads an existing Markdown script instead of generating one."><span class="label-icon"><svg class="icon" aria-hidden="true"><use href="#i-file-up"/></svg>Import transcript</span><input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
-              <span id="wordCount" class="muted" style="margin-left:auto">0 words</span>
+              <label class="inline-grid" data-help="Loads an existing Markdown script instead of generating one."><span class="label-icon"><svg class="icon" aria-hidden="true"><use href="#i-file-up"/></svg>Import transcript</span><input id="transcriptFile" type="file" accept=".md,text/markdown,text/plain"></label>
+              <span id="wordCount" class="muted push-right">0 words</span>
             </div>
             <p id="transcriptLengthWarning" class="warning" hidden></p>
-            <textarea id="transcript" class="transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
+            <textarea id="transcript" class="transcript" aria-label="Episode transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
             <div class="actions"><button id="saveTranscript" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save transcript</button></div>
           </section>
-          <section id="transcript-prompt-panel" hidden>
+          <section id="transcript-prompt-panel" role="tabpanel" aria-labelledby="transcriptPromptTab" hidden>
             <p class="muted">Rules resolve from each speaker's TTS model. References: <a href="https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/speech-synthesis-v2.5" target="_blank" rel="noreferrer">MiMo</a> · <a href="https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices" target="_blank" rel="noreferrer">ElevenLabs</a> · <a href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noreferrer">Chatterbox</a>.</p>
             <div id="transcriptCapabilitySummary" class="speaker-summary"></div>
-            <label data-help="Shows non-editable syntax and capability constraints resolved from selected models.">Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly style="min-height:160px"></textarea></label>
-            <label data-help="Adds reviewed creative direction without replacing provider rules.">Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" style="min-height:100px" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
+            <label data-help="Shows non-editable syntax and capability constraints resolved from selected models.">Locked provider/model rules<textarea id="transcriptLockedPrompt" readonly></textarea></label>
+            <label data-help="Adds reviewed creative direction without replacing provider rules.">Episode-specific transcript guidance<textarea id="transcriptPromptGuidance" placeholder="Optional additions. Locked capability rules cannot be replaced."></textarea></label>
             <div class="actions"><button id="resetTranscriptPrompt"><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg>Clear guidance</button><button id="saveTranscriptPrompt" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save guidance</button></div>
           </section>
         </section>
@@ -556,8 +592,8 @@
           <audio id="previewAudio" controls hidden></audio>
           <div class="separator"></div>
           <div class="actions"><button id="applyLatestProfiles"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Apply latest profiles</button><button id="renderAudio" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg>Render MP3</button></div>
-          <progress id="renderProgress" value="0" max="1" hidden></progress>
-          <p id="renderStatus" class="muted"></p>
+          <progress id="renderProgress" value="0" max="1" aria-label="TTS render progress" hidden></progress>
+          <p id="renderStatus" class="muted" role="status" aria-live="polite"></p>
           <div id="episodePlayerActions" class="actions"></div>
         </section>
         </div>
@@ -605,7 +641,7 @@
         </div>
         <div class="view-body">
         <section class="panel">
-          <div id="configModelStatus" class="model-status" role="status" aria-live="polite"></div>
+          <div class="model-refresh-row"><div id="configModelStatus" class="model-status" role="status" aria-live="polite"></div><button id="configRefreshModels" class="icon-btn" title="Refresh models" aria-label="Refresh models"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg></button></div>
           <div id="configProviders"></div>
           <div class="actions"><button id="addCompatibleConnection"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add OpenAI compatible connection</button></div>
         </section>
@@ -622,7 +658,7 @@
           <div class="view-header"><div><h2 id="modelDialogTitle">Active models</h2><p id="modelDialogStatus" class="muted"></p></div><button id="closeModelDialog" type="button" class="icon-btn" title="Close" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
           <div class="grid">
             <label>Search models<input id="modelSearch" type="search" placeholder="Search discovered models"></label>
-            <label class="bulk-check" style="align-self: end"><input id="modelSelectedOnly" type="checkbox"> Selected only</label>
+            <label class="bulk-check align-end"><input id="modelSelectedOnly" type="checkbox"> Selected only</label>
           </div>
           <div class="actions"><button id="toggleFilteredModels" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check-check"/></svg>Select all filtered</button><span id="modelSelectionCount" class="muted"></span></div>
           <div id="modelSelectionList" class="model-list"></div>
@@ -640,6 +676,7 @@
       <div class="activity-heading">Notifications</div>
       <div id="notificationFeed" class="notice-list" aria-live="polite"><span class="muted">No notifications</span></div>
       <div class="activity-heading">Jobs</div>
+      <button id="retryJobs" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Retry jobs</button>
       <div id="serverActivity" class="activity-list"><span class="muted">Loading…</span></div>
     </aside>
   </div>
@@ -673,6 +710,7 @@
     let configState = null;
     let activeSpeakerProfileId = viewSelections.speakerProfileId || "";
     let activeEpisodeProfileId = viewSelections.episodeProfileId || "";
+    let formatFormId = "";
     let previewUrl = "";
     let elevenVoices = [];
     let chatterboxVoices = [];
@@ -685,7 +723,6 @@
     let jobPollTimer = null;
     let modelPollTimer = null;
     let hadActiveJobs = false;
-    const autoTtsTranscriptJobs = new Set();
     let notifications = [];
     const RIGHTBAR_KEY = "pod-god.rightbar.v1";
     let rightbarOpen = false;
@@ -725,6 +762,42 @@
       try { sessionStorage.setItem(VIEW_SELECTIONS_KEY, JSON.stringify(viewSelections)); } catch {}
     }
 
+    const mobileChatQuery = matchMedia("(max-width: 1200px)");
+    const mobileRightbarQuery = matchMedia("(max-width: 820px)");
+    const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    function visibleFocusable(container) {
+      return [...container.querySelectorAll(focusableSelector)].filter((node) => !node.hidden && node.getClientRects().length > 0);
+    }
+
+    function updateOverlayState() {
+      const mobileChatOpen = mobileChatQuery.matches && $("podcastAssistant").classList.contains("chat-open");
+      const mobileRightbarOpen = mobileRightbarQuery.matches && rightbarOpen;
+      $("appMain").inert = mobileRightbarOpen;
+      document.querySelectorAll("main > .view").forEach((node) => { node.inert = mobileChatOpen; });
+      $("podcastAssistant").querySelector(".assistant-sidebar").inert = mobileChatOpen;
+      const chat = $("podcastAssistant").querySelector(".assistant-chat");
+      for (const [name, value] of [["role", "dialog"], ["aria-modal", "true"], ["aria-label", "Podcast assistant chat"]]) {
+        if (mobileChatOpen) chat.setAttribute(name, value); else chat.removeAttribute(name);
+      }
+      for (const [name, value] of [["role", "dialog"], ["aria-modal", "true"]]) {
+        if (mobileRightbarOpen) $("rightbar").setAttribute(name, value); else $("rightbar").removeAttribute(name);
+      }
+    }
+
+    function activeModal() {
+      if (!$("chatHistoryPanel").hidden) return $("chatHistoryPanel");
+      if (mobileRightbarQuery.matches && rightbarOpen) return $("rightbar");
+      if (mobileChatQuery.matches && $("podcastAssistant").classList.contains("chat-open")) return $("podcastAssistant").querySelector(".assistant-chat");
+      return null;
+    }
+
+    function setAssistantChatOpen(open, moveFocus = true) {
+      $("podcastAssistant").classList.toggle("chat-open", open);
+      updateOverlayState();
+      if (moveFocus) requestAnimationFrame(() => (open ? $("plannerChatInput") : $("assistantChatToggle")).focus());
+    }
+
     function notify(message, type = "") {
       const entry = { id: crypto.randomUUID(), message: String(message || ""), type: type || "info", at: Date.now(), read: rightbarOpen };
       notifications = [entry, ...notifications].slice(0, 30);
@@ -742,7 +815,7 @@
       $("rightbarBadge").textContent = String(unread);
     }
 
-    function setRightbarOpen(open) {
+    function setRightbarOpen(open, moveFocus = true) {
       rightbarOpen = open;
       try { sessionStorage.setItem(RIGHTBAR_KEY, open ? "open" : "closed"); } catch {}
       $("rightbar").hidden = !open;
@@ -752,6 +825,8 @@
         clearToasts();
         renderNotifications();
       }
+      updateOverlayState();
+      if (moveFocus) requestAnimationFrame(() => (open ? $("rightbarClose") : $("rightbarToggle")).focus());
     }
 
     function showToast(entry) {
@@ -873,15 +948,20 @@
     }
 
     function setView(view) {
-      const aliases = { planner: "episodes", knowledge: "episodes", profiles: "speakers", formats: "transcript" };
+      const previous = activeViewName();
+      if (previous === "config" && configDirty) syncConfigForm();
+      if (previous === "format" && profilesDirty) syncFormatForm();
+      if (previous === "speakers" && profilesDirty) syncSpeakerForm();
+      const aliases = { planner: "episodes", knowledge: "episodes", profiles: "speakers", formats: "format" };
       const candidate = aliases[view] || view;
-      const selected = ["config", "speakers", "episodes", "transcript", "tts", "player"].includes(candidate) ? candidate : "episodes";
+      const selected = ["config", "speakers", "format", "episodes", "transcript", "tts", "player"].includes(candidate) ? candidate : "episodes";
       document.querySelectorAll(".view").forEach((node) => { node.hidden = node.id !== `view-${selected}`; });
       if (location.hash !== `#${selected}`) history.replaceState(null, "", `#${selected}`);
       if (selected === "transcript") renderTranscriptSections();
       if (selected === "tts") renderTtsView();
       if (selected === "player") renderPlayer();
       if (selected === "config") renderConfigView();
+      if (selected === "format") renderFormatView();
       if (selected === "episodes") { renderEpisodeList(); loadPlannerChatThread(); }
       renderPodcastAssistant();
     }
@@ -921,16 +1001,23 @@
       const navOnly = autoNavOnly || chatFolded;
       $("podcastAssistant").hidden = false;
       $("podcastAssistant").classList.toggle("nav-only", navOnly);
-      if (navOnly) $("podcastAssistant").classList.remove("chat-open");
+      if (navOnly) setAssistantChatOpen(false, false);
+      $("podcastAssistant").querySelector(".assistant-chat").inert = navOnly;
+      $("podcastAssistant").querySelector(".assistant-chat").setAttribute("aria-hidden", String(navOnly));
       $("appMain").classList.add("assistant-active");
       $("appMain").classList.toggle("nav-only", navOnly);
       $("chatFoldToggle").hidden = autoNavOnly;
       $("chatFoldToggle").setAttribute("aria-pressed", String(chatFolded));
       $("chatFoldToggle").title = chatFolded ? "Unfold chat" : "Fold chat";
       $("chatFoldToggle").setAttribute("aria-label", chatFolded ? "Unfold chat" : "Fold chat");
-      document.querySelectorAll(".assistant-util").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+      document.querySelectorAll(".assistant-util[data-view]").forEach((button) => {
+        const active = button.dataset.view === view;
+        button.classList.toggle("active", active);
+        if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
+      });
       const focus = view === "episodes" ? "Episodes"
         : view === "speakers" ? "Hosts"
+        : view === "format" ? "Format"
         : view === "transcript" ? (activeTranscriptSection === "prompt" ? "Prompt & Cues" : "Script")
         : view === "tts" ? "TTS Generation"
         : view === "player" ? "Player"
@@ -944,6 +1031,7 @@
       const steps = [
         ["Describe idea", hasEpisodes, "chat"],
         ["Hosts", hasEpisodes, "speakers"],
+        ["Format", hasEpisodes, "format"],
         [`Episodes ${created.length}`, hasEpisodes, "episodes"],
         [`Scripts ${transcriptCount}/${created.length}`, Boolean(created.length && transcriptCount === created.length), "transcript"],
         [`Audio ${audioCount}/${created.length}`, Boolean(created.length && audioCount === created.length), "tts"],
@@ -952,11 +1040,12 @@
       $("assistantProgress").innerHTML = steps.map(([label, done, target], index) => {
         const stepState = done ? "done" : index === currentIndex ? "current" : "pending";
         const mark = done ? "circle-check" : index === currentIndex ? "circle-dot" : "circle";
-        return `<li data-state="${stepState}"><button type="button"${target === view ? ' class="active"' : ""} data-assistant-target="${target}">${icon(mark, "step-mark")}${escapeHtml(label)}</button></li>`;
+        return `<li data-state="${stepState}"><button type="button"${target === view ? ' class="active" aria-current="step"' : ""} data-assistant-target="${target}">${icon(mark, "step-mark")}${escapeHtml(label)}</button></li>`;
       }).join("");
       const nextSteps = [
         { text: "Describe your podcast idea in the chat, then apply the assistant's episode list.", target: "chat", highlight: "#plannerChatInput", go: "Write your idea" },
         { text: "Optional: review your hosts and voices, then press Save hosts.", target: "speakers", highlight: "#saveProfiles", go: "Open Hosts" },
+        { text: "Optional: review the episode format — language, duration, models.", target: "format", highlight: "#saveFormat", go: "Open Format" },
         { text: "Press Start on the next episode to generate its script and audio.", target: "episodes", highlight: "[data-start-episode]", go: "Open Episodes" },
         { text: "Generate or edit the script for the next episode.", target: "transcript", highlight: "#generateTranscript", go: "Open Script" },
         { text: "Render MP3 audio for each finished script.", target: "tts", highlight: "#renderAudio", go: "Open TTS Generator" },
@@ -985,24 +1074,39 @@
     }
 
     function renderModelStatus() {
-      const summary = modelProviders().map(([name, provider]) => providerStatusPill(name, provider)).join("");
+      const summary = (modelCatalog.status === "error" ? `<span class="status-pill error" title="${escapeHtml(modelCatalog.error || "Could not load model catalog.")}">Model catalog · Error</span>` : "")
+        + modelProviders().map(([name, provider]) => providerStatusPill(name, provider)).join("");
       for (const id of ["modelStatus", "configModelStatus"]) $(id).innerHTML = summary;
-      $("refreshModels").disabled = modelCatalog.status === "loading";
+      for (const id of ["refreshModels", "configRefreshModels"]) $(id).disabled = modelCatalog.status === "loading";
+    }
+
+    function renderModelSelectors() {
+      // ponytail: one funnel for every model-dependent surface; add new selectors here only
+      renderModelStatus();
+      if (!state) return;
+      if (profilesDirty) { syncSpeakerForm(); syncFormatForm(); }
+      if (configDirty) syncConfigForm();
+      renderProfileOptions();
+      renderBuildOptions();
+      renderChatControls();
+      renderEpisodeSettingsFields();
+      renderFormatView();
+      renderConfigView();
+      renderTtsView();
+      renderJobIndicators();
     }
 
     async function loadModelCatalog() {
       clearTimeout(modelPollTimer);
-      modelCatalog = await api("/api/models");
-      renderModelStatus();
-      if (state) {
-        syncSpeakerForm();
-        syncConfigForm();
-        renderProfileOptions();
-        renderChatControls();
-        renderConfigView();
-        renderTtsView();
-        renderJobIndicators();
+      try {
+        modelCatalog = await api("/api/models");
+      } catch (error) {
+        modelCatalog.status = "error";
+        modelCatalog.error = error.message || String(error);
+        renderModelStatus();
+        throw error;
       }
+      renderModelSelectors();
       if (modelCatalog.status === "loading") modelPollTimer = setTimeout(() => loadModelCatalog().catch((error) => notify(error.message, "error")), 700);
     }
 
@@ -1042,6 +1146,7 @@
       const episodeLocked = episodeIsBusy() || !currentEpisode;
       $("saveConfig").disabled = !configDirty;
       $("saveProfiles").disabled = !profilesDirty;
+      $("saveFormat").disabled = !profilesDirty;
       $("saveEpisode").disabled = episodeLocked || !(episodeDraftDirty || transcriptPromptDirty);
       $("saveTranscript").disabled = episodeLocked || !transcriptDirty;
       $("saveTranscriptPrompt").disabled = episodeLocked || !transcriptPromptDirty;
@@ -1077,7 +1182,14 @@
 
     async function refreshJobs() {
       clearTimeout(jobPollTimer);
-      jobsState = await api("/api/jobs");
+      try {
+        jobsState = await api("/api/jobs");
+        $("retryJobs").hidden = true;
+      } catch (error) {
+        $("serverActivity").innerHTML = '<span class="warning">Could not load jobs.</span>';
+        $("retryJobs").hidden = false;
+        throw error;
+      }
       const running = activeJobs().length > 0;
       renderServerActivity();
       renderJobIndicators();
@@ -1085,21 +1197,12 @@
         const latest = jobsState.jobs[0];
         if (currentEpisode) await refreshState(currentEpisode.id);
         if (latest?.status === "completed") {
-          const isWarning = latest.message?.includes("too short");
+          const isWarning = /too short|could not start/i.test(latest.message || "");
           notify(latest.message || (latest.type === "transcript" ? "Transcript ready." : "MP3 render complete."), isWarning ? "warning" : "ok");
         }
         if (["failed", "interrupted"].includes(latest?.status)) notify(latest.error || latest.message, "error");
       }
       hadActiveJobs = running;
-      for (const job of jobsState.jobs.filter((item) => autoTtsTranscriptJobs.has(item.id) && !["queued", "running"].includes(item.status))) {
-        autoTtsTranscriptJobs.delete(job.id);
-        if (job.status !== "completed") continue;
-        try {
-          await queueTts(job.episodeId);
-        } catch (error) {
-          notify(`Transcript saved, but automatic TTS could not start: ${error.message || String(error)}`, "error");
-        }
-      }
       if (activeJobs().length > 0) {
         clearTimeout(jobPollTimer);
         jobPollTimer = setTimeout(() => refreshJobs().catch((error) => notify(error.message, "error")), 1000);
@@ -1116,16 +1219,23 @@
     }
 
     async function refreshState(preferredEpisodeId = currentEpisode?.id) {
-      if (profilesDirty) syncSpeakerForm();
+      if (profilesDirty) { syncSpeakerForm(); syncFormatForm(); }
       if (configDirty) syncConfigForm();
       const pendingProfiles = profilesDirty ? state?.profiles : null;
       const pendingConfig = configState;
       const pendingDraft = episodeDraftDirty || transcriptDirty || transcriptPromptDirty ? captureEpisodeDraft() : null;
-      state = await api("/api/state");
+      try {
+        state = await api("/api/state");
+        $("retryState").hidden = true;
+      } catch (error) {
+        $("retryState").hidden = false;
+        throw error;
+      }
       if (pendingProfiles) state.profiles = pendingProfiles;
       configState = configDirty ? pendingConfig : structuredClone(state.config || { providers: { mimo: {}, elevenlabs: {}, openai: {}, chatterbox: {} }, compatibleConnections: [] });
       renderProfileOptions();
       renderBuildOptions();
+      renderFormatView();
       renderChatControls();
       renderEpisodeList();
       renderConfigView();
@@ -1341,7 +1451,7 @@
 
     function modelSelectionRow(id, suggested, active, onlyTts) {
       const mode = onlyTts ? "tts" : modelMode(active || suggested);
-      return `<label class="model-row" data-model-id="${escapeHtml(id)}" data-search="${escapeHtml(id.toLowerCase())}"><input type="checkbox" data-model-active${active?.text || active?.tts ? " checked" : ""}><span>${escapeHtml(id)}</span><select data-model-type>${modelTypeOptions(mode, onlyTts)}</select></label>`;
+      return `<div class="model-row" data-model-id="${escapeHtml(id)}" data-search="${escapeHtml(id.toLowerCase())}"><input type="checkbox" data-model-active aria-label="Activate ${escapeHtml(id)}"${active?.text || active?.tts ? " checked" : ""}><span>${escapeHtml(id)}</span><select data-model-type aria-label="${escapeHtml(id)} capability">${modelTypeOptions(mode, onlyTts)}</select></div>`;
     }
 
     function openModelDialog(kind, id) {
@@ -1430,6 +1540,60 @@
       $("spInstructions").value = profile.instructions || "";
       renderSpeakerCards(profile);
       updateSaveButtons();
+    }
+
+    // ponytail: hardcoded from OpenAI docs — the models endpoint does not enumerate supported efforts
+    function effortLevelsForModel(modelId) {
+      const id = String(modelId || "");
+      if (!id.startsWith("compat:openai:")) return [];
+      const raw = id.slice("compat:openai:".length);
+      if (/^gpt-5\.6/.test(raw)) return ["none", "low", "medium", "high", "xhigh", "max"];
+      if (/^gpt-5\.5-pro(?:-|$)/.test(raw)) return ["medium", "high", "xhigh"];
+      if (/^gpt-5\.5/.test(raw)) return ["none", "low", "medium", "high", "xhigh"];
+      return [];
+    }
+
+    function effortOptions(modelId, selected) {
+      return option("", "(default)", !selected) + effortLevelsForModel(modelId).map((level) => option(level, level, level === selected)).join("");
+    }
+
+    function renderFormatEffortFields(format) {
+      $("fmtOutlineEffort").innerHTML = effortOptions($("fmtOutlineModel").value, format?.outlineEffort || "");
+      $("fmtTranscriptEffort").innerHTML = effortOptions($("fmtTranscriptModel").value, format?.transcriptEffort || "");
+      $("fmtOutlineEffort").closest("label").hidden = !effortLevelsForModel($("fmtOutlineModel").value).length;
+      $("fmtTranscriptEffort").closest("label").hidden = !effortLevelsForModel($("fmtTranscriptModel").value).length;
+    }
+
+    function renderFormatView() {
+      if (!state) return;
+      const formats = state.profiles.episodeProfiles;
+      const format = formats.find((item) => item.id === activeEpisodeProfileId) || formats[0];
+      if (!format) { formatFormId = ""; return; }
+      activeEpisodeProfileId = format.id;
+      $("formatSelect").innerHTML = formats.map((item) => option(item.id, item.name, item.id === format.id)).join("");
+      $("fmtName").value = format.name || "";
+      $("fmtDescription").value = format.description || "";
+      $("fmtLanguage").innerHTML = languageOptions(format.language || "es-419");
+      $("fmtMinutes").value = format.targetMinutes ?? 18;
+      $("fmtOutlineModel").innerHTML = textModelOptions(format.outlineModel || "");
+      $("fmtTranscriptModel").innerHTML = textModelOptions(format.transcriptModel || "");
+      renderFormatEffortFields(format);
+      formatFormId = format.id;
+      updateSaveButtons();
+    }
+
+    function syncFormatForm() {
+      const format = state?.profiles.episodeProfiles.find((item) => item.id === formatFormId);
+      if (!format) return;
+      // ponytail: empty selects (catalog still loading) must not wipe stored values
+      format.name = $("fmtName").value || format.name;
+      format.description = $("fmtDescription").value;
+      if ($("fmtLanguage").value) format.language = $("fmtLanguage").value;
+      format.targetMinutes = Number($("fmtMinutes").value) || format.targetMinutes;
+      if ($("fmtOutlineModel").value) format.outlineModel = $("fmtOutlineModel").value;
+      if ($("fmtTranscriptModel").value) format.transcriptModel = $("fmtTranscriptModel").value;
+      format.outlineEffort = $("fmtOutlineEffort").value;
+      format.transcriptEffort = $("fmtTranscriptEffort").value;
     }
 
     function voiceProvider(model) {
@@ -1533,14 +1697,14 @@
 
     function renderSpeakerCards(profile) {
       activeSpeakerIndex = Math.min(activeSpeakerIndex, Math.max(0, profile.speakers.length - 1));
-      $("speakerSidebar").innerHTML = profile.speakers.map((speaker, index) => `<button type="button" data-speaker-nav="${index}" class="${index === activeSpeakerIndex ? "active" : ""}" title="${escapeHtml(speaker.name)}">${index + 1}. ${escapeHtml(speaker.name || `Speaker ${index + 1}`)}</button>`).join("");
+      $("speakerSidebar").innerHTML = profile.speakers.map((speaker, index) => `<button type="button" data-speaker-nav="${index}" class="${index === activeSpeakerIndex ? "active" : ""}" aria-pressed="${index === activeSpeakerIndex}" title="${escapeHtml(speaker.name)}">${index + 1}. ${escapeHtml(speaker.name || `Speaker ${index + 1}`)}</button>`).join("");
       $("speakerCards").innerHTML = profile.speakers.map((speaker, index) => {
         const resolvedModel = speaker.ttsModelOverride || profile.voiceModel;
         return `<fieldset data-speaker-index="${index}"${index === activeSpeakerIndex ? "" : " hidden"}>
           <legend>Speaker ${index + 1}</legend>
           <div class="speaker-head">${resolvedModel ? `<span class="badge" title="Resolved TTS model">TTS: ${escapeHtml(modelLabel(resolvedModel))}</span>` : ""}<button type="button" class="danger icon-btn remove-speaker" data-index="${index}" title="Remove speaker" aria-label="Remove speaker"${profile.speakers.length === 1 ? " disabled" : ""}>${icon("trash-2")}</button></div>
           <div class="grid">
-            <label>Name<input data-field="name" value="${escapeHtml(speaker.name)}"></label>
+            <label>Name<input data-field="name" required value="${escapeHtml(speaker.name)}"></label>
             <label>Model override<select data-field="ttsModelOverride">${modelOptions(speaker.ttsModelOverride || "", true)}</select></label>
             <label class="full">Voice ID${voiceSelector(resolvedModel, speaker.voiceId, index)}</label>
             <label class="full">Accent override<input data-field="accent" list="accent-list-${index}" value="${escapeHtml(speaker.accent || "")}" placeholder="Use episode language default"><datalist id="accent-list-${index}">${accentOptions()}</datalist></label>
@@ -1565,6 +1729,20 @@
       if (!input) return fallback ?? null;
       const value = input.value.trim();
       return value ? Number(value) : null;
+    }
+
+    function validateControls(container) {
+      let invalid = [...container.querySelectorAll("input, select, textarea")].find((control) => !control.checkValidity());
+      if (!invalid) return true;
+      const hiddenSpeaker = invalid.closest("fieldset[data-speaker-index][hidden]");
+      if (hiddenSpeaker) {
+        activeSpeakerIndex = Number(hiddenSpeaker.dataset.speakerIndex);
+        renderSpeakerCards(state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId));
+        invalid = [...container.querySelectorAll("input, select, textarea")].find((control) => !control.checkValidity());
+      }
+      invalid.reportValidity();
+      invalid.focus();
+      return false;
     }
 
     function syncSpeakerForm() {
@@ -1624,23 +1802,13 @@
     function renderEpisodeSettingsFields() {
       const format = state?.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
       $("episodeHosts").innerHTML = (state?.profiles.speakerProfiles || []).map((item) => option(item.id, item.name, item.id === (currentEpisode?.speakerProfileId || format?.speakerProfileId))).join("");
-      $("epOutlineModel").innerHTML = textModelOptions(format?.outlineModel || "");
-      $("epTranscriptModel").innerHTML = textModelOptions(format?.transcriptModel || "");
-      $("epLanguage").innerHTML = languageOptions(format?.language || "es-419");
-      $("epMinutes").value = format?.targetMinutes ?? 18;
+      $("transcriptEffort").innerHTML = effortOptions(format?.transcriptModel, format?.transcriptEffort || "");
+      $("transcriptEffortLabel").hidden = !effortLevelsForModel(format?.transcriptModel).length;
     }
 
     async function saveEpisodeSettings() {
       if (!currentEpisode) throw new Error("Select a saved episode first.");
-      const format = state.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
-      if (!format) throw new Error("Select an Episode Format.");
-      format.outlineModel = $("epOutlineModel").value;
-      format.transcriptModel = $("epTranscriptModel").value;
-      format.language = $("epLanguage").value;
-      format.targetMinutes = Number($("epMinutes").value);
-      await saveProfiles();
-      await saveEpisode();
-      notify("Episode settings saved.", "ok");
+      if (await saveEpisode() !== false) notify("Episode settings saved.", "ok");
     }
 
     function addSpeakerProfile(copy) {
@@ -1659,12 +1827,17 @@
     }
 
     async function saveProfiles() {
+      const view = activeViewName();
+      if (["speakers", "format"].includes(view) && !validateControls($(`view-${view}`))) return false;
       syncSpeakerForm();
+      syncFormatForm();
       const result = await api("/api/profiles", { method: "PUT", body: JSON.stringify(state.profiles) });
       state.profiles = result.profiles || result;
       profilesDirty = false;
       renderProfileOptions();
       renderBuildOptions();
+      renderFormatView();
+      renderEpisodeSettingsFields();
       renderTtsView();
       if (result.warnings?.length) notify(`Profiles saved with warnings: ${result.warnings.join(" ")}`, "warning");
       else notify("Profiles saved.", "ok");
@@ -1693,6 +1866,7 @@
 
     async function saveConfig() {
       if (!configState) throw new Error("Config is not loaded yet.");
+      if (!validateControls($("view-config"))) return false;
       syncConfigForm();
       const value = await api("/api/config", { method: "PUT", body: JSON.stringify(configState) });
       configState = structuredClone(value.config);
@@ -1703,11 +1877,7 @@
       delete voiceRequests.elevenlabs;
       delete voiceRequests.chatterbox;
       configDirty = false;
-      renderModelStatus();
-      renderConfigView();
-      renderProfileOptions();
-      renderBuildOptions();
-      renderTtsView();
+      renderModelSelectors();
       if (value.warnings?.length) {
         alert(`Config saved with warnings:\n\n${value.warnings.join("\n")}`);
         notify(`Config saved with warnings: ${value.warnings.join(" ")}`, "warning");
@@ -1758,6 +1928,9 @@
       }
       const chatModel = plannerChatThread?.lastModel || $("plannerChatModel").value || activePlan?.planningModel || "";
       $("plannerChatModel").innerHTML = textModelOptions(chatModel);
+      const chatEffort = (activePlan ? activePlan.planningEffort : $("plannerChatEffort").value) || "";
+      $("plannerChatEffort").innerHTML = effortOptions(chatModel, chatEffort);
+      $("plannerChatEffortLabel").hidden = !effortLevelsForModel(chatModel).length;
       const chatKb = plannerChatThread?.kbId || $("plannerChatKb").value || "";
       $("plannerChatKb").innerHTML = option("", "None", !chatKb) + state.knowledgeBases.map((item) => option(item.id, item.name, item.id === chatKb)).join("");
       renderPlannerChatHistory();
@@ -1775,9 +1948,13 @@
       $("chatPillModel").title = "Model: " + modelText;
       $("chatPillKb").textContent = kbText;
       $("chatPillKb").title = "Knowledge base: " + kbText;
+      $("chatPillEffort").hidden = !effortLevelsForModel(modelSel.value).length;
+      $("chatPillEffort").textContent = $("plannerChatEffort").value || "effort";
+      $("chatPillEffort").title = "Reasoning effort: " + ($("plannerChatEffort").value || "(default)");
     }
 
     function setChatControlsOpen(open) {
+      $("chatControlsPanel").hidden = !open;
       $("chatControlsPanel").classList.toggle("closed", !open);
       $("chatControlsToggle").setAttribute("aria-expanded", String(open));
     }
@@ -1794,6 +1971,7 @@
       if (!activePlan) return null;
       const plan = structuredClone(activePlan);
       plan.planningModel = $("plannerChatModel").value || plan.planningModel;
+      plan.planningEffort = $("plannerChatEffort").value;
       return plan;
     }
 
@@ -1892,8 +2070,7 @@
     }
 
     async function startEpisode(id) {
-      const { job } = await api(`/api/episodes/${encodeURIComponent(id)}/generate`, { method: "POST" });
-      autoTtsTranscriptJobs.add(job.id);
+      const { job } = await api(`/api/episodes/${encodeURIComponent(id)}/generate`, { method: "POST", body: JSON.stringify({ autoTts: true }) });
       trackJob(job);
       notify("Episode started: script first, then audio.", "ok");
     }
@@ -1921,8 +2098,9 @@
     async function deletePlannedEpisode(plannedId) {
       const planned = activePlan?.episodes.find((item) => item.id === plannedId);
       if (!confirm(`Remove planned episode "${planned?.title || plannedId}"?`)) return;
-      activePlan.episodes = activePlan.episodes.filter((item) => item.id !== plannedId);
-      await saveActivePlan();
+      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}/episodes/${encodeURIComponent(plannedId)}`, { method: "DELETE" });
+      loadPlanForm(data.plan);
+      await refreshPlanIndex();
       notify("Planned episode removed.", "ok");
     }
 
@@ -1959,8 +2137,13 @@
       }
     }
 
+    function hasUnsavedEpisodeChanges() {
+      return episodeDraftDirty || transcriptDirty || transcriptPromptDirty;
+    }
+
     async function selectEpisode(id, pendingDraft = null) {
-      if (!id) return resetEpisodeForm();
+      if (id !== currentEpisode?.id && hasUnsavedEpisodeChanges() && pendingDraft?.id !== id && !confirm("Discard unsaved episode changes?")) return false;
+      if (!id) { resetEpisodeForm(); return true; }
       currentEpisode = await api(`/api/episodes/${id}`);
       rememberViewSelection("episodeId", id);
       transcriptPromptDirty = false;
@@ -1984,6 +2167,7 @@
       renderTtsView();
       renderJobIndicators();
       renderPodcastAssistant();
+      return true;
     }
 
     function captureEpisodeDraft() {
@@ -2021,6 +2205,7 @@
 
     async function saveEpisode() {
       if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
+      if (activeViewName() === "transcript" && !validateControls($("view-transcript"))) return false;
       const value = await api("/api/episodes", {
         method: "POST",
         body: JSON.stringify({
@@ -2043,7 +2228,6 @@
     async function saveTranscript() {
       if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
       currentEpisode = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcript").value }) });
-      episodeDraftDirty = false;
       transcriptDirty = false;
       await refreshState(currentEpisode.id);
       const warning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
@@ -2052,10 +2236,9 @@
     }
 
     async function generateTranscript() {
-      await saveEpisode();
+      if (await saveEpisode() === false) return;
       const generateTts = $("autoGenerateTts").checked;
-      const { job } = await api(`/api/episodes/${currentEpisode.id}/generate`, { method: "POST" });
-      if (generateTts) autoTtsTranscriptJobs.add(job.id);
+      const { job } = await api(`/api/episodes/${currentEpisode.id}/generate`, { method: "POST", body: JSON.stringify({ autoTts: generateTts }) });
       trackJob(job);
       notify(generateTts ? "Transcript job queued. TTS will start when it completes." : "Transcript job queued.");
     }
@@ -2347,7 +2530,7 @@
     async function renameRenderedEpisode(id) {
       const episode = playerEpisode(id);
       if (!episode) return;
-      const name = prompt("Podcast name", episode.name)?.trim();
+      const name = prompt("Episode name", episode.name)?.trim();
       if (!name || name === episode.name) return;
       const updated = await api(`/api/episodes/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) });
       const index = state.episodes.findIndex((item) => item.id === id);
@@ -2357,7 +2540,7 @@
       renderBuildOptions();
       renderPlayer();
       renderTtsView();
-      notify(`Renamed podcast to ${name}.`, "ok");
+      notify(`Renamed episode to ${name}.`, "ok");
     }
 
     async function openJobInPlayer(id) {
@@ -2428,6 +2611,10 @@
       $("transcript-prompt-panel").hidden = activeTranscriptSection !== "prompt";
       $("transcriptScriptTab").classList.toggle("active", activeTranscriptSection === "script");
       $("transcriptPromptTab").classList.toggle("active", activeTranscriptSection === "prompt");
+      $("transcriptScriptTab").setAttribute("aria-selected", String(activeTranscriptSection === "script"));
+      $("transcriptPromptTab").setAttribute("aria-selected", String(activeTranscriptSection === "prompt"));
+      $("transcriptScriptTab").tabIndex = activeTranscriptSection === "script" ? 0 : -1;
+      $("transcriptPromptTab").tabIndex = activeTranscriptSection === "prompt" ? 0 : -1;
       renderTranscriptPrompt();
       renderPodcastAssistant();
     }
@@ -2467,6 +2654,7 @@
     async function renderAudio() {
       if (!currentEpisode) throw new Error("Select a saved episode first.");
       const languageOverride = $("ttsLanguageOverride").value;
+      if ((episodeDraftDirty || transcriptPromptDirty) && await saveEpisode() === false) return;
       await saveTranscript();
       const lengthWarning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
       await queueTts(currentEpisode.id, languageOverride, lengthWarning);
@@ -2510,14 +2698,9 @@
 
     async function changeEpisodeSelection(event) {
       const id = event.target.value;
-      if ((episodeDraftDirty || transcriptDirty || transcriptPromptDirty) && id !== currentEpisode?.id && !confirm("Discard unsaved episode changes?")) {
-        event.target.value = currentEpisode?.id || "";
-        return;
-      }
-      episodeDraftDirty = false;
-      transcriptDirty = false;
-      transcriptPromptDirty = false;
-      await selectEpisode(id);
+      if (await selectEpisode(id)) return;
+      $("savedEpisodeSelect").value = currentEpisode?.id || "";
+      $("ttsEpisodeSelect").value = currentEpisode?.id || "";
     }
 
     document.querySelectorAll("nav button[data-view]").forEach((button) => button.addEventListener("click", () => { location.hash = button.dataset.view; }));
@@ -2541,6 +2724,7 @@
       if (button) button.textContent = `${index + 1}. ${event.target.value || `Speaker ${index + 1}`}`;
     });
     $("refreshModels").addEventListener("click", guard(refreshModels));
+    $("configRefreshModels").addEventListener("click", guard(refreshModels));
     $("deleteSpeakerProfile").addEventListener("click", guard(async () => {
       const id = activeSpeakerProfileId;
       const profile = state.profiles.speakerProfiles.find((item) => item.id === id);
@@ -2587,7 +2771,7 @@
       const start = event.target.closest("[data-start-episode]");
       if (start) return guard(() => startEpisode(start.dataset.startEpisode))();
       const open = event.target.closest("[data-open-episode]");
-      if (open) { location.hash = "transcript"; return guard(() => selectEpisode(open.dataset.openEpisode))(); }
+      if (open) return guard(async () => { if (await selectEpisode(open.dataset.openEpisode)) location.hash = "transcript"; })();
       const play = event.target.closest("[data-play-episode]");
       if (play) return guard(async () => { await playEpisode(play.dataset.playEpisode); location.hash = "player"; })();
       const create = event.target.closest("[data-create-planned]");
@@ -2607,10 +2791,17 @@
     $("ttsLanguageOverride").addEventListener("change", renderTtsView);
     $("transcriptScriptTab").addEventListener("click", () => { activeTranscriptSection = "script"; rememberViewSelection("transcriptSection", "script"); renderTranscriptSections(); });
     $("transcriptPromptTab").addEventListener("click", guard(async () => { activeTranscriptSection = "prompt"; rememberViewSelection("transcriptSection", "prompt"); await resolveTranscriptPrompt(); renderTranscriptSections(); }));
+    $("view-transcript").querySelector('[role="tablist"]').addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const prompt = event.key === "ArrowRight" || event.key === "End";
+      (prompt ? $("transcriptPromptTab") : $("transcriptScriptTab")).click();
+      requestAnimationFrame(() => (prompt ? $("transcriptPromptTab") : $("transcriptScriptTab")).focus());
+    });
     $("transcriptPromptGuidance").addEventListener("input", () => { transcriptPromptDirty = true; episodeDraftDirty = true; renderTranscriptPrompt(); updateSaveButtons(); });
     $("resetTranscriptPrompt").addEventListener("click", () => { $("transcriptPromptGuidance").value = ""; transcriptPromptDirty = true; episodeDraftDirty = true; updateSaveButtons(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); });
-    $("saveTranscriptPrompt").addEventListener("click", guard(async () => { await saveEpisode(); notify("Transcript guidance saved.", "ok"); }));
-    $("saveEpisode").addEventListener("click", guard(async () => { await saveEpisode(); notify("Episode draft saved.", "ok"); }));
+    $("saveTranscriptPrompt").addEventListener("click", guard(async () => { if (await saveEpisode() !== false) notify("Transcript guidance saved.", "ok"); }));
+    $("saveEpisode").addEventListener("click", guard(async () => { if (await saveEpisode() !== false) notify("Episode draft saved.", "ok"); }));
     $("generateTranscript").addEventListener("click", guard(generateTranscript));
     $("saveTranscript").addEventListener("click", guard(saveTranscript));
     $("previewButtons").addEventListener("click", guard((event) => {
@@ -2720,6 +2911,30 @@
       if (event.target.id !== "speakerProfileSelect") profilesDirty = true;
       updateSaveButtons();
     });
+    $("view-format").addEventListener("input", (event) => {
+      if (event.target.id !== "formatSelect") profilesDirty = true;
+      updateSaveButtons();
+    });
+    $("saveFormat").addEventListener("click", guard(saveProfiles));
+    $("formatSelect").addEventListener("change", (event) => {
+      syncFormatForm();
+      activeEpisodeProfileId = event.target.value;
+      rememberViewSelection("episodeProfileId", event.target.value);
+      renderFormatView();
+    });
+    for (const id of ["fmtOutlineModel", "fmtTranscriptModel"]) {
+      $(id).addEventListener("change", () => {
+        const format = state?.profiles.episodeProfiles.find((item) => item.id === formatFormId);
+        renderFormatEffortFields(format);
+      });
+    }
+    $("transcriptEffort").addEventListener("change", guard(async () => {
+      const format = state?.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
+      if (!format) return;
+      format.transcriptEffort = $("transcriptEffort").value;
+      // ponytail: wholesale PUT on change; fine for a pill
+      await saveProfiles();
+    }));
     $("transcript").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); updateSaveButtons(); });
     window.addEventListener("beforeunload", (event) => {
       if (!configDirty && !profilesDirty && !episodeDraftDirty && !transcriptDirty && !transcriptPromptDirty) return;
@@ -2729,16 +2944,44 @@
     $("transcriptFile").addEventListener("change", guard(async (event) => {
       const file = event.target.files[0];
       if (!file) return;
-      $("transcript").value = await file.text();
-      transcriptDirty = true;
-      updateWordCount();
-      notify(`Imported ${file.name}. Save transcript to validate it.`, "ok");
+      try {
+        $("transcript").value = await file.text();
+        transcriptDirty = true;
+        updateWordCount();
+        updateSaveButtons();
+        notify(`Imported ${file.name}. Save transcript to validate it.`, "ok");
+      } finally {
+        event.target.value = "";
+      }
     }));
 
     $("rightbarToggle").addEventListener("click", () => setRightbarOpen(true));
     $("rightbarClose").addEventListener("click", () => setRightbarOpen(false));
     $("toasts").addEventListener("click", () => setRightbarOpen(true));
-    setRightbarOpen(rightbarOpen);
+    $("retryJobs").addEventListener("click", guard(refreshJobs));
+    $("retryState").addEventListener("click", guard(() => refreshState(currentEpisode?.id)));
+    setRightbarOpen(rightbarOpen, rightbarOpen);
+
+    document.addEventListener("keydown", (event) => {
+      if ($("modelDialog").open) return;
+      const modal = activeModal();
+      if (event.key === "Escape") {
+        if (!$("chatHistoryPanel").hidden) setChatHistoryOpen(false);
+        else if (mobileRightbarQuery.matches && rightbarOpen) setRightbarOpen(false);
+        else if (mobileChatQuery.matches && $("podcastAssistant").classList.contains("chat-open")) setAssistantChatOpen(false);
+        else if (!$("chatControlsPanel").hidden) setChatControlsOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !modal) return;
+      const controls = visibleFocusable(modal);
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+    mobileChatQuery.addEventListener("change", updateOverlayState);
+    mobileRightbarQuery.addEventListener("change", updateOverlayState);
 
     setView(location.hash.slice(1));
     Promise.all([loadModelCatalog(), refreshState(rememberedEpisodeId), refreshJobs()])
@@ -2755,8 +2998,12 @@
     }
 
     function setChatHistoryOpen(open) {
+      const changed = $("chatHistoryPanel").hidden === open;
       $("chatHistoryPanel").hidden = !open;
       $("chatHistoryToggle").setAttribute("aria-expanded", String(open));
+      for (const selector of ["plannerChatMessages", "plannerChatBusy"]) $(selector).inert = open;
+      $("chatControlsPanel").closest(".chat-input-row").inert = open;
+      if (changed) requestAnimationFrame(() => (open ? $("chatHistoryNew") : $("chatHistoryToggle")).focus());
     }
 
     function summarizeProposal(type, proposal) {
@@ -2834,13 +3081,23 @@
       if (!text) return;
       const model = $("plannerChatModel").value;
       if (!model) throw new Error("Select a text model first.");
-      plannerChatBusy = true; $("plannerChatBusyText").textContent = "Thinking…"; $("plannerChatBusy").hidden = false; $("plannerChatInput").value = "";
+      plannerChatBusy = true;
+      $("plannerChatBusyText").textContent = "Thinking…";
+      $("plannerChatBusy").hidden = false;
+      $("plannerChatInput").disabled = true;
+      $("plannerChatSend").disabled = true;
       try {
         if (!activePlan) await createNewPlan();
         const data = await api("/api/plans/chat", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, planId: activePlan.id, text, model, kbId: $("plannerChatKb").value, planDraft: capturePlanDraft(), activeContext: assistantContext(), workspaceDraft: assistantWorkspaceDraft() }) });
         plannerChatThreadId = data.threadId;
+        $("plannerChatInput").value = "";
         await loadPlannerChatThread();
-      } finally { plannerChatBusy = false; $("plannerChatBusy").hidden = true; }
+      } finally {
+        plannerChatBusy = false;
+        $("plannerChatBusy").hidden = true;
+        $("plannerChatInput").disabled = false;
+        $("plannerChatSend").disabled = false;
+      }
     }
 
     async function deletePlannerChat(threadId = plannerChatThreadId) {
@@ -2854,14 +3111,13 @@
 
     function openAssistantTarget(target) {
       if (!target) return false;
-      const legacyTargets = { "planner:plan": "chat", "planner:episodes": "episodes", planner: "episodes", formats: "transcript" };
+      const legacyTargets = { "planner:plan": "chat", "planner:episodes": "episodes", planner: "episodes", formats: "format" };
       const resolved = legacyTargets[target] || target;
       if (resolved === "chat") {
         chatFolded = false;
-        $("podcastAssistant").classList.add("chat-open");
         if (["transcript", "tts", "player", "config"].includes(activeViewName())) setView("episodes");
         else renderPodcastAssistant();
-        requestAnimationFrame(() => $("plannerChatInput").focus());
+        setAssistantChatOpen(true);
         return true;
       }
       if (resolved === "speakers" && activePlan?.speakerProfileId) loadSpeakerForm(activePlan.speakerProfileId);
@@ -2876,7 +3132,7 @@
       if (step.action === "generatePlan") return generateActivePlan();
       if (step.action === "createEpisodes") return createEpisodeDrafts(ids.length ? ids : (activePlan?.episodes || []).filter((item) => !item.createdEpisodeId).map((item) => item.id));
       const episodeId = ids[0] || currentEpisode?.id || activePlan?.episodes.find((item) => item.createdEpisodeId)?.createdEpisodeId || "";
-      if (["generateTranscript", "generateTts", "openPlayer"].includes(step.action) && episodeId && currentEpisode?.id !== episodeId) await selectEpisode(episodeId);
+      if (["generateTranscript", "generateTts", "openPlayer"].includes(step.action) && episodeId && currentEpisode?.id !== episodeId && !await selectEpisode(episodeId)) return;
       if (step.action === "generateTranscript") return generateTranscript();
       if (step.action === "generateTts") return renderAudio();
       if (step.action === "openPlayer" && episodeId) { selectPlayerEpisode(episodeId); location.hash = "player"; }
@@ -2887,29 +3143,41 @@
       if (message?.role !== "assistant") return;
       const parsed = JSON.parse(message.content);
       if (!parsed.proposal) return;
-      const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index }) });
-      await refreshState(data.episode?.id || currentEpisode?.id);
-      if (data.plan?.id) loadPlanForm(data.plan);
-      await refreshPlanIndex();
-      await loadPlannerChatThread();
-      if (data.appliedType === "speakerProfile") {
-        loadSpeakerForm(data.plan?.speakerProfileId || activePlan?.speakerProfileId);
-        notify(`Hosts applied — updated ${data.updatedEpisodes ?? 0} episode(s).${data.warnings?.length ? ` ${data.warnings.join(" ")}` : ""}`, data.warnings?.length ? "warning" : "ok");
-      } else {
-        notify(data.warnings?.length ? `Proposal applied with warnings: ${data.warnings.join(" ")}` : "Proposal applied.", data.warnings?.length ? "warning" : "ok");
+      const buttons = document.querySelectorAll(`[data-apply-assistant="${index}"]`);
+      buttons.forEach((button) => { button.disabled = true; });
+      try {
+        const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index }) });
+        await refreshState(data.episode?.id || currentEpisode?.id);
+        if (data.plan?.id) loadPlanForm(data.plan);
+        await refreshPlanIndex();
+        await loadPlannerChatThread();
+        if (data.appliedType === "speakerProfile") {
+          loadSpeakerForm(data.plan?.speakerProfileId || activePlan?.speakerProfileId);
+          notify(`Hosts applied — updated ${data.updatedEpisodes ?? 0} episode(s).${data.warnings?.length ? ` ${data.warnings.join(" ")}` : ""}`, data.warnings?.length ? "warning" : "ok");
+        } else {
+          notify(data.warnings?.length ? `Proposal applied with warnings: ${data.warnings.join(" ")}` : "Proposal applied.", data.warnings?.length ? "warning" : "ok");
+        }
+        if (continueWorkflow) await runAssistantStep(parsed.nextStep);
+      } finally {
+        buttons.forEach((button) => { button.disabled = false; });
       }
-      if (continueWorkflow) await runAssistantStep(parsed.nextStep);
     }
 
     $("plannerChatSend").addEventListener("click", guard(sendPlannerChat));
     $("plannerChatInput").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); guard(sendPlannerChat)(); } });
-    $("plannerChatModel").addEventListener("change", updateChatPills);
+    $("plannerChatModel").addEventListener("change", () => {
+      $("plannerChatEffort").innerHTML = effortOptions($("plannerChatModel").value, $("plannerChatEffort").value);
+      $("plannerChatEffortLabel").hidden = !effortLevelsForModel($("plannerChatModel").value).length;
+      updateChatPills();
+    });
+    $("plannerChatEffort").addEventListener("change", updateChatPills);
+    $("chatPillEffort").addEventListener("click", () => { const open = !$("chatControlsPanel").classList.contains("closed"); if (open) setChatControlsOpen(false); else { setChatControlsOpen(true); $("plannerChatEffort").focus(); } });
     $("plannerChatKb").addEventListener("change", updateChatPills);
     $("chatControlsToggle").addEventListener("click", () => setChatControlsOpen($("chatControlsPanel").classList.contains("closed")));
     $("chatPillModel").addEventListener("click", () => { const open = !$("chatControlsPanel").classList.contains("closed"); if (open) setChatControlsOpen(false); else { setChatControlsOpen(true); $("plannerChatModel").focus(); } });
     $("chatPillKb").addEventListener("click", () => { const open = !$("chatControlsPanel").classList.contains("closed"); if (open) setChatControlsOpen(false); else { setChatControlsOpen(true); $("plannerChatKb").focus(); } });
-    $("assistantChatToggle").addEventListener("click", () => $("podcastAssistant").classList.add("chat-open"));
-    $("assistantChatClose").addEventListener("click", () => $("podcastAssistant").classList.remove("chat-open"));
+    $("assistantChatToggle").addEventListener("click", () => setAssistantChatOpen(true));
+    $("assistantChatClose").addEventListener("click", () => setAssistantChatOpen(false));
     $("chatFoldToggle").addEventListener("click", () => { $("podcastAssistant").classList.add("animate-fold"); chatFolded = !chatFolded; renderPodcastAssistant(); setTimeout(() => $("podcastAssistant").classList.remove("animate-fold"), 200); });
     document.querySelectorAll(".toolbar label[data-help]").forEach((label) => { label.title = label.dataset.help; label.removeAttribute("data-help"); });
     $("chatHistoryToggle").addEventListener("click", () => setChatHistoryOpen(true));
@@ -2933,7 +3201,7 @@
       if (!openAssistantTarget(go.dataset.nextTarget)) return;
       const highlight = go.dataset.nextHighlight ? document.querySelector(go.dataset.nextHighlight) : null;
       if (!highlight) return;
-      highlight.scrollIntoView({ block: "center", behavior: "smooth" });
+      highlight.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       highlight.classList.remove("cta-pulse");
       requestAnimationFrame(() => highlight.classList.add("cta-pulse"));
       setTimeout(() => highlight.classList.remove("cta-pulse"), 3000);

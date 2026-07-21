@@ -2,7 +2,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,26 +14,24 @@ function relativePath(path) {
   return relative(root, path).replaceAll('\\', '/');
 }
 
-async function readJson(path) {
-  return JSON.parse(await readFile(path, 'utf8'));
-}
-
 async function collectWrites(newVersion) {
   const writes = [];
-  const pkg = await readJson(pkgPath);
+  const pkgOriginal = await readFile(pkgPath, 'utf8');
+  const pkg = JSON.parse(pkgOriginal);
   const currentVersion = pkg.version;
 
   if (pkg.version !== newVersion) {
     pkg.version = newVersion;
-    writes.push({ path: pkgPath, content: `${JSON.stringify(pkg, null, 2)}\n`, from: currentVersion });
+    writes.push({ path: pkgPath, content: `${JSON.stringify(pkg, null, 2)}\n`, original: pkgOriginal, from: currentVersion });
   }
 
-  const lock = await readJson(lockPath);
+  const lockOriginal = await readFile(lockPath, 'utf8');
+  const lock = JSON.parse(lockOriginal);
   if (lock.version !== newVersion || lock.packages?.['']?.version !== newVersion) {
     const from = lock.version;
     lock.version = newVersion;
     if (lock.packages?.['']) lock.packages[''].version = newVersion;
-    writes.push({ path: lockPath, content: `${JSON.stringify(lock, null, 2)}\n`, from });
+    writes.push({ path: lockPath, content: `${JSON.stringify(lock, null, 2)}\n`, original: lockOriginal, from });
   }
 
   return { currentVersion, writes };
@@ -52,6 +50,19 @@ async function confirm(currentVersion, newVersion, writes) {
     return (await rl.question('Proceed? [y/N] ')).toLowerCase() === 'y';
   } finally {
     rl.close();
+  }
+}
+
+export async function applyWrites(writes, write = writeFile) {
+  const completed = [];
+  try {
+    for (const item of writes) {
+      await write(item.path, item.content);
+      completed.push(item);
+    }
+  } catch (error) {
+    await Promise.allSettled(completed.map((item) => write(item.path, item.original)));
+    throw error;
   }
 }
 
@@ -74,11 +85,13 @@ async function main() {
     process.exit(2);
   }
 
-  await Promise.all(writes.map((write) => writeFile(write.path, write.content)));
+  await applyWrites(writes);
   console.log(`Updated ${writes.length} file(s) to ${newVersion}`);
 }
 
-main().catch((error) => {
-  console.error('Error:', error.message);
-  process.exit(3);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error('Error:', error.message);
+    process.exit(3);
+  });
+}
