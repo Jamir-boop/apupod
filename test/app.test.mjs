@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -373,6 +374,11 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
     body: JSON.stringify({ name: "blocked.md", content: "blocked" }),
   });
   assert.equal(response.status, 403);
+  response = await fetch(`${baseUrl}/api/models/refresh`, {
+    method: "POST",
+    headers: { Origin: "http://127.0.0.1:1" },
+  });
+  assert.equal(response.status, 403);
 
   response = await fetch(`${baseUrl}/api/knowledge`, {
     method: "POST",
@@ -606,6 +612,170 @@ test("model catalog uses provider APIs without exposing keys", { concurrency: fa
   assert.doesNotMatch(JSON.stringify(catalog), /test-(mimo|eleven)-key/);
 });
 
+test("provider responses are rejected before exceeding memory limits", { concurrency: false }, async (t) => {
+  const oldMimo = process.env.MIMO_API_KEY;
+  const oldEleven = process.env.ELEVENLABS_API_KEY;
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  delete process.env.ELEVENLABS_API_KEY;
+  t.after(() => {
+    if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo;
+    if (oldEleven === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = oldEleven;
+  });
+  let oversizedError = false;
+  const fetchImpl = async () => oversizedError
+    ? new Response("x".repeat(70 * 1024), { status: 502 })
+    : new Response("{}", { headers: { "Content-Length": String(9 * 1024 * 1024) } });
+  const { baseUrl } = await startTestServer(t, "podcast-response-limit-", { fetchImpl });
+  const catalog = await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/models`)).json();
+    return value.status === "error" ? value : null;
+  });
+  assert.match(catalog.providers.mimo.error, /response exceeds 8388608 byte limit/);
+  oversizedError = true;
+  assert.equal((await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" })).status, 202);
+  const refreshed = await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/models`)).json();
+    return value.providers.mimo.error?.includes("65536") ? value : null;
+  });
+  assert.match(refreshed.providers.mimo.error, /response exceeds 65536 byte limit/);
+});
+
+test("MiMo TTS accepts base64 audio responses larger than the ordinary JSON limit", { concurrency: false }, async (t) => {
+  const oldMimo = process.env.MIMO_API_KEY;
+  const oldEleven = process.env.ELEVENLABS_API_KEY;
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  delete process.env.ELEVENLABS_API_KEY;
+  t.after(() => {
+    if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo;
+    if (oldEleven === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = oldEleven;
+  });
+  const wav = silentWav(24_000, 1, 140);
+  const fetchImpl = async (url) => String(url).endsWith("/models")
+    ? Response.json({ data: [{ id: "mimo-v2.5-tts" }] })
+    : Response.json({ choices: [{ message: { audio: { data: wav.toString("base64") } } }] });
+  const { baseUrl } = await startTestServer(t, "podcast-mimo-large-response-", { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  const response = await fetch(`${baseUrl}/api/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      speakerProfileId: state.profiles.speakerProfiles[0].id,
+      episodeProfileId: state.profiles.episodeProfiles[0].id,
+      speakerIndex: 0,
+      languageOverride: "en-US",
+      text: "Large response test.",
+    }),
+  });
+  assert.equal(response.status, 200, response.status === 200 ? "" : await response.text());
+  assert.equal(Number(response.headers.get("content-length")), wav.length);
+});
+
+test("concurrent config saves receive matching nonblocking catalog snapshots", { concurrency: false }, async (t) => {
+  const previousKeys = Object.fromEntries(["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "CHATTERBOX_API_KEY"].map((key) => [key, process.env[key]]));
+  delete process.env.MIMO_API_KEY;
+  delete process.env.ELEVENLABS_API_KEY;
+  delete process.env.CHATTERBOX_API_KEY;
+  process.env.OPENAI_API_KEY = "test-openai-key";
+  t.after(() => {
+    for (const [key, value] of Object.entries(previousKeys)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  let blockModels = false;
+  let releaseModels;
+  const modelGate = new Promise((resolve) => { releaseModels = resolve; });
+  t.after(() => releaseModels());
+  const fetchImpl = async (url) => {
+    const value = String(url);
+    if (blockModels && value.endsWith("/models")) await modelGate;
+    const source = value.includes("provider-a.test") ? "a" : value.includes("provider-b.test") ? "b" : "initial";
+    return Response.json({ data: [{ id: `model-${source}` }] });
+  };
+  const { baseUrl } = await startTestServer(t, "podcast-config-revisions-", { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+  const config = await (await fetch(`${baseUrl}/api/config`)).json();
+  const hold = request(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" } });
+  const holdDone = new Promise((resolve, reject) => {
+    hold.on("response", (response) => { response.resume(); response.on("end", resolve); });
+    hold.on("error", reject);
+  });
+  hold.write('{"name":"hold.md","content":"');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  blockModels = true;
+  const configA = structuredClone(config);
+  const configB = structuredClone(config);
+  configA.providers.openai.baseUrl = "http://provider-a.test/v1";
+  configB.providers.openai.baseUrl = "http://provider-b.test/v1";
+  const save = (body) => fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((response) => response.json());
+  const pendingA = save(configA);
+  const pendingB = save(configB);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  hold.end('x"}');
+  await holdDone;
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/config`)).json()).providers.openai.baseUrl === configB.providers.openai.baseUrl);
+  const unrelated = fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "concurrent.md", content: "# Concurrent" }) });
+  assert.equal(await Promise.race([unrelated.then((response) => response.status), new Promise((resolve) => setTimeout(() => resolve("timeout"), 1_000))]), 201);
+  releaseModels();
+  const [resultA, resultB] = await Promise.all([pendingA, pendingB]);
+  assert.equal(resultA.config.providers.openai.baseUrl, configA.providers.openai.baseUrl);
+  assert.equal(resultA.modelCatalog.providers.openai.discoveredModels[0].rawId, "model-a");
+  assert.equal(resultB.config.providers.openai.baseUrl, configB.providers.openai.baseUrl);
+  assert.equal(resultB.modelCatalog.providers.openai.discoveredModels[0].rawId, "model-b");
+  assert.equal((await (await fetch(`${baseUrl}/api/models`)).json()).providers.openai.discoveredModels[0].rawId, "model-b");
+});
+
+test("repeated manual model refreshes coalesce while config saves still force a refresh", { concurrency: false }, async (t) => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "refresh-test-key";
+  t.after(() => { if (previousKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousKey; });
+  let modelCalls = 0;
+  let blockModels = false;
+  let releaseModels;
+  let markModelsStarted;
+  const modelGate = new Promise((resolve) => { releaseModels = resolve; });
+  const modelsStarted = new Promise((resolve) => { markModelsStarted = resolve; });
+  t.after(() => releaseModels());
+  const fetchImpl = async (url) => {
+    if ((String(url).includes("api.openai.com") || String(url).includes("forced-refresh.test")) && String(url).endsWith("/models")) {
+      modelCalls += 1;
+      if (blockModels) { markModelsStarted(); await modelGate; }
+    }
+    return Response.json({ data: [{ id: "gpt-4o-mini" }] });
+  };
+  const { baseUrl } = await startTestServer(t, "podcast-refresh-coalesce-", { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+  const initialCalls = modelCalls;
+  blockModels = true;
+  assert.equal((await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" })).status, 202);
+  await modelsStarted;
+  assert.equal((await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" })).status, 202);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(modelCalls, initialCalls + 1);
+
+  const config = await (await fetch(`${baseUrl}/api/config`)).json();
+  config.providers.openai.baseUrl = "http://forced-refresh.test/v1";
+  const save = fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
+  releaseModels();
+  const saved = await save;
+  assert.equal(saved.status, 200, await saved.text());
+  assert.ok(modelCalls >= initialCalls + 2);
+});
+
+test("failed transcript replacement restores episode metadata", async (t) => {
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-transcript-rollback-");
+  let response = await fetch(`${baseUrl}/api/episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Rollback", episodeProfileId: "episode-chisme-crianza" }) });
+  const episode = await response.json();
+  const directory = join(rootDir, "data", "episodes", episode.id);
+  const metadataPath = join(directory, "episode.json");
+  const before = await readFile(metadataPath, "utf8");
+  await mkdir(join(directory, "transcript.md"));
+  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria: Idea ${index + 1}.`).join("\n\n");
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
+  assert.equal(response.status, 500);
+  assert.equal(await readFile(metadataPath, "utf8"), before);
+});
+
 test("transcript jobs return 202 and run through one FIFO queue", { concurrency: false }, async (t) => {
   const oldMimo = process.env.MIMO_API_KEY;
   const oldEleven = process.env.ELEVENLABS_API_KEY;
@@ -748,11 +918,13 @@ test("short generated transcripts save with warning and can be retried", { concu
 
 test("TTS jobs report progress and publish MP3", { concurrency: false }, async (t) => {
   const oldMimo = process.env.MIMO_API_KEY;
+  const oldMimoBase = process.env.MIMO_BASE_URL;
   const oldEleven = process.env.ELEVENLABS_API_KEY;
   process.env.MIMO_API_KEY = "test-mimo-key";
   delete process.env.ELEVENLABS_API_KEY;
   t.after(() => {
     if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo;
+    if (oldMimoBase === undefined) delete process.env.MIMO_BASE_URL; else process.env.MIMO_BASE_URL = oldMimoBase;
     if (oldEleven === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = oldEleven;
   });
   let ttsCalls = 0;
@@ -838,6 +1010,19 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   assert.equal(saved.status, "ready");
   assert.equal(saved.audioUrl, `/artifacts/${episode.id}/episode.mp3`);
   await assert.rejects(readFile(unusedClip), { code: "ENOENT" });
+
+  const config = (await (await fetch(`${baseUrl}/api/state`)).json()).config;
+  config.providers.mimo.baseUrl = "https://replacement.example/v1";
+  response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, { method: "POST" });
+  const providerChangeJob = (await response.json()).job;
+  assert.equal(response.status, 202);
+  await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return value.jobs.find((item) => item.id === providerChangeJob.id)?.status === "completed";
+  }, 30_000);
+  assert.equal(ttsCalls, 8);
 
   const audioPath = join(rootDir, "data", "episodes", episode.id, "episode.mp3");
   const previousAudio = await readFile(audioPath);
@@ -929,11 +1114,12 @@ test("transcript prompt adds cues, supports no KB, and renames placeholder", { c
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoTts: true }),
   });
   assert.equal(response.status, 202);
-  await waitFor(async () => {
+  const finishedJobs = await waitFor(async () => {
     const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
     const job = jobs.jobs.find((item) => item.episodeId === episode.id);
     return job?.type === "tts" && job.status === "completed" ? jobs : null;
   }, 30_000);
+  assert.deepEqual(finishedJobs.jobs.filter((job) => job.episodeId === episode.id).map((job) => job.type).sort(), ["transcript", "tts"]);
   const generated = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
   assert.equal(generated.name, "Generated Title");
   assert.match(generated.transcript, /\[pause\]/);
@@ -993,6 +1179,31 @@ test("server restart marks active jobs interrupted", { concurrency: false }, asy
   assert.match(saved.lastError, /server restart/);
 });
 
+test("job history keeps the newest 30 persisted jobs", async (t) => {
+  const { baseUrl } = await startTestServer(t, "podcast-job-history-", {}, async (rootDir) => {
+    const episodesDir = join(rootDir, "data", "episodes");
+    await mkdir(episodesDir, { recursive: true });
+    for (let index = 0; index < 35; index += 1) {
+      const id = `episode-${String(index).padStart(2, "0")}`;
+      const timestamp = new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString();
+      await mkdir(join(episodesDir, id));
+      await writeFile(join(episodesDir, id, "episode.json"), JSON.stringify({
+        id,
+        name: `Episode ${index}`,
+        status: "transcript_ready",
+        audioReady: false,
+        updatedAt: timestamp,
+        job: { id: `job-${String(index).padStart(2, "0")}`, episodeId: id, type: "transcript", status: "completed", phase: "complete", queuedAt: timestamp, updatedAt: timestamp },
+      }));
+    }
+  });
+  const jobs = (await (await fetch(`${baseUrl}/api/jobs`)).json()).jobs;
+  assert.equal(jobs.length, 30);
+  assert.equal(jobs[0].id, "job-34");
+  assert.equal(jobs.at(-1).id, "job-05");
+  assert.ok(!jobs.some((job) => job.id === "job-04"));
+});
+
 test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", { concurrency: false }, async (t) => {
   const rootDir = await mkdtemp(join(tmpdir(), "podcast-cleanup-"));
   t.after(() => rm(rootDir, { recursive: true, force: true }));
@@ -1020,10 +1231,15 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   const legacyChatPath = join(rootDir, "data", "chat", "legacy-tts.json");
   await writeFile(legacyChatPath, JSON.stringify({ threadId: "legacy-tts", kind: "tts", messages: [] }));
   await writeFile(join(clipsDir, `${"e".repeat(64)}.wav`), silentWav());
+  const cachedSilence = join(clipsDir, "silence-1200ms.wav");
+  await writeFile(cachedSilence, silentWav());
   const corruptDir = join(rootDir, "data", "episodes", "corrupt-episode");
   await mkdir(corruptDir, { recursive: true });
   await writeFile(join(corruptDir, "episode.json"), "{bad json");
   await writeFile(join(corruptDir, "outline.json"), "preserve");
+  const deletingDir = join(rootDir, "data", "episodes", "pending-delete.deleting");
+  await mkdir(deletingDir, { recursive: true });
+  await writeFile(join(deletingDir, "partial-audio.wav"), "partial");
 
   server = await createPodcastServer({ rootDir });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -1040,7 +1256,9 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   for (const name of ["tts-script.md", "tts-script.draft.md"]) await assert.rejects(readFile(join(healthyDir, name)), { code: "ENOENT" });
   await assert.rejects(readFile(legacyChatPath), { code: "ENOENT" });
   await assert.rejects(readFile(join(clipsDir, `${"e".repeat(64)}.wav`)), { code: "ENOENT" });
+  assert.ok((await readFile(cachedSilence)).length > 0);
   assert.equal(await readFile(join(corruptDir, "outline.json"), "utf8"), "preserve");
+  await assert.rejects(readFile(join(deletingDir, "partial-audio.wav")), { code: "ENOENT" });
 
   state.config.providers.mimo.enabled = false;
   response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.config) });
@@ -1071,12 +1289,12 @@ test("TTS rejects missing FFmpeg before provider calls", { concurrency: false },
   const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria: Idea ${index + 1}.`).join("\n\n");
   await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
   const callsBeforeRender = providerCalls;
-  const oldPath = process.env.Path;
-  process.env.Path = "";
+  const oldPath = process.env.PATH;
+  process.env.PATH = "";
   try {
     response = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, { method: "POST" });
   } finally {
-    if (oldPath === undefined) delete process.env.Path; else process.env.Path = oldPath;
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
   }
   assert.equal(response.status, 503);
   assert.match((await response.json()).error, /FFmpeg or FFprobe is unavailable/);
@@ -1164,6 +1382,133 @@ test("gpt-5.5/5.6 on the built-in OpenAI connection use the Responses API", { co
   assert.equal(response.status, 200);
   assert.equal(responsesCalls.length, 2);
   assert.equal(chatCalls.filter((call) => call.url === "https://llm.example/v1/chat/completions").length, 1);
+});
+
+test("OpenCode Go reuses login credentials and routes both model protocols", { concurrency: false }, async (t) => {
+  const previous = Object.fromEntries(["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "CHATTERBOX_API_KEY", "OPENCODE_GO_API_KEY", "XDG_DATA_HOME"].map((name) => [name, process.env[name]]));
+  for (const name of ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "CHATTERBOX_API_KEY", "OPENCODE_GO_API_KEY"]) delete process.env[name];
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+
+  const calls = [];
+  const chatModels = ["grok-4.5", "glm-5.2", "glm-5.1", "glm-5", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni", "hy3", "hy3-preview"];
+  const messagesModels = ["minimax-m3", "minimax-m2.7", "minimax-m2.5", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus"];
+  const returnedModels = [...chatModels, ...messagesModels, "future-unknown"];
+  const generatedPlan = { episodeFormat: { name: "OpenCode format", description: "Protocol test" }, episodes: [{ number: 1, title: "Only" }] };
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    if (String(url).endsWith("/models")) return Response.json({ data: returnedModels.map((id) => ({ id })) });
+    if (String(url).endsWith("/chat/completions")) return Response.json({ choices: [{ message: { content: JSON.stringify(generatedPlan) } }] });
+    if (String(url).endsWith("/messages")) return Response.json({ content: [{ type: "text", text: JSON.stringify(generatedPlan) }] });
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  let authPath;
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-opencode-go-", { fetchImpl }, async (directory) => {
+    const dataHome = join(directory, "xdg");
+    authPath = join(dataHome, "opencode", "auth.json");
+    await mkdir(join(dataHome, "opencode"), { recursive: true });
+    await writeFile(authPath, JSON.stringify({ "opencode-go": { type: "api", key: "go-login-secret" } }), { mode: 0o600 });
+    process.env.XDG_DATA_HOME = dataHome;
+  });
+
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  assert.equal(state.config.providers.opencodeGo.hasApiKey, true);
+  assert.equal(state.config.providers.opencodeGo.credentialSource, "opencode-login");
+  assert.deepEqual(state.config.providers.opencodeGo.activeModels, {});
+  let catalog = await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/models`)).json();
+    return value.providers.opencodeGo.status === "ready" ? value : null;
+  });
+  const discoveredById = new Map(catalog.providers.opencodeGo.discoveredModels.map((model) => [model.rawId, model]));
+  for (const id of chatModels) assert.deepEqual({ protocol: discoveredById.get(id)?.protocol, supported: discoveredById.get(id)?.supported }, { protocol: "chat", supported: true });
+  for (const id of messagesModels) assert.deepEqual({ protocol: discoveredById.get(id)?.protocol, supported: discoveredById.get(id)?.supported }, { protocol: "messages", supported: true });
+  assert.deepEqual({ protocol: discoveredById.get("future-unknown")?.protocol, supported: discoveredById.get("future-unknown")?.supported }, { protocol: null, supported: false });
+  assert.deepEqual(catalog.providers.opencodeGo.textModels, []);
+  assert.equal(calls.find((call) => call.url.endsWith("/models")).options.headers.Authorization, "Bearer go-login-secret");
+
+  state.config.providers.opencodeGo.activeModels = {
+    "kimi-k3": { text: true, tts: true },
+    "minimax-m3": { text: true, tts: false },
+    "future-unknown": { text: true, tts: false },
+  };
+  let response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.config) });
+  const configured = await response.json();
+  assert.equal(response.status, 200, configured.error);
+  assert.deepEqual(configured.config.providers.opencodeGo.activeModels["kimi-k3"], { text: true, tts: false });
+  assert.equal(configured.config.providers.opencodeGo.activeModels["future-unknown"], undefined);
+  assert.deepEqual(configured.modelCatalog.providers.opencodeGo.textModels.map((model) => model.id), ["compat:opencode-go:kimi-k3", "compat:opencode-go:minimax-m3"]);
+  assert.doesNotMatch(JSON.stringify(configured), /go-login-secret/);
+  assert.doesNotMatch(await readFile(join(rootDir, "data", "config.json"), "utf8"), /go-login-secret/);
+  assert.doesNotMatch(await readFile(join(rootDir, ".env"), "utf8"), /go-login-secret/);
+
+  const generationCalls = () => calls.filter((call) => call.url.endsWith("/chat/completions") || call.url.endsWith("/messages")).length;
+  const callsBeforeUnsupported = generationCalls();
+  response = await fetch(`${baseUrl}/api/plans`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Unsupported Go plan", speakerProfileId: state.profiles.speakerProfiles[0].id, planningModel: "compat:opencode-go:future-unknown", theme: "Routing", audience: "Developers", goal: "Reject unknown", episodeCount: 1 }),
+  });
+  const unsupportedPlan = (await response.json()).plan;
+  assert.equal(response.status, 201);
+  response = await fetch(`${baseUrl}/api/plans/${unsupportedPlan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Unsupported or inactive text model/i);
+  assert.equal(generationCalls(), callsBeforeUnsupported);
+
+  response = await fetch(`${baseUrl}/api/plans`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "OpenCode Go plan", speakerProfileId: state.profiles.speakerProfiles[0].id, planningModel: "compat:opencode-go:kimi-k3", theme: "Routing", audience: "Developers", goal: "Verify Go", episodeCount: 1 }),
+  });
+  let plan = (await response.json()).plan;
+  assert.equal(response.status, 201);
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  const generated = await response.json();
+  plan = generated.plan;
+  assert.equal(response.status, 200, generated.error);
+  const chatCall = calls.find((call) => call.url.endsWith("/chat/completions"));
+  assert.equal(chatCall.url, "https://opencode.ai/zen/go/v1/chat/completions");
+  assert.equal(chatCall.options.headers.Authorization, "Bearer go-login-secret");
+  assert.equal(JSON.parse(chatCall.options.body).model, "kimi-k3");
+
+  process.env.OPENCODE_GO_API_KEY = "go-env-secret";
+  response = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" });
+  assert.equal(response.status, 202);
+  await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/models`)).json();
+    return value.providers.opencodeGo.status === "ready" && calls.filter((call) => call.url.endsWith("/models")).at(-1)?.options.headers.Authorization === "Bearer go-env-secret" ? value : null;
+  });
+  assert.equal((await (await fetch(`${baseUrl}/api/config`)).json()).providers.opencodeGo.credentialSource, "environment");
+
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...plan, planningModel: "compat:opencode-go:minimax-m3" }) });
+  plan = (await response.json()).plan;
+  response = await fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ replaceExisting: true }) });
+  assert.equal(response.status, 200);
+  const messagesCall = calls.find((call) => call.url.endsWith("/messages"));
+  assert.equal(messagesCall.url, "https://opencode.ai/zen/go/v1/messages");
+  assert.equal(messagesCall.options.headers["x-api-key"], "go-env-secret");
+  assert.equal(messagesCall.options.headers["anthropic-version"], "2023-06-01");
+  const messagesBody = JSON.parse(messagesCall.options.body);
+  assert.equal(messagesBody.model, "minimax-m3");
+  assert.equal(messagesBody.messages[0].role, "user");
+  assert.equal(typeof messagesBody.max_tokens, "number");
+
+  delete process.env.OPENCODE_GO_API_KEY;
+  await writeFile(authPath, '{"opencode-go":{"type":"api","key":"malformed-secret"', { mode: 0o600 });
+  response = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" });
+  assert.equal(response.status, 202);
+  catalog = await waitFor(async () => {
+    const value = await (await fetch(`${baseUrl}/api/models`)).json();
+    return value.providers.opencodeGo.status === "unconfigured" ? value : null;
+  });
+  assert.match(catalog.providers.opencodeGo.error, /auth file contains invalid JSON/);
+  assert.doesNotMatch(JSON.stringify(catalog), /malformed-secret/);
+  const redacted = await (await fetch(`${baseUrl}/api/config`)).json();
+  assert.equal(redacted.providers.opencodeGo.hasApiKey, false);
+  assert.equal(redacted.providers.opencodeGo.credentialSource, null);
 });
 
 test("built-in OpenAI discovers models and uses chat plus TTS endpoints", { concurrency: false }, async (t) => {
@@ -1385,13 +1730,19 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
     }
   });
   const calls = [];
+  let chatterboxOnline = true;
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url: String(url), options });
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "chatterbox-turbo" }] });
+    if (!chatterboxOnline) throw new Error("fetch failed");
+    if (String(url).endsWith("/models")) return Response.json({ data: [
+      { id: "chatterbox-turbo", capabilities: { text: false, tts: true } },
+      { id: "fallback-tts" },
+    ] });
     if (String(url).endsWith("/voices")) {
       const voices = [
         { id: "female", name: "Female", builtin: true, file: "voices/female.wav" },
         { id: "custom", name: "Custom", builtin: false, file: "voices/custom.wav" },
+        { id: "charlie_EN", name: "Charlie", builtin: false, file: "voices/charlie_EN.wav" },
         { name: "Missing ID", file: "voices/invalid.wav" },
       ];
       return Response.json(calls.filter((call) => call.url.endsWith("/voices")).length === 1 ? { object: "list", data: voices } : voices);
@@ -1399,25 +1750,31 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
     if (String(url).endsWith("/audio/speech")) return new Response(Buffer.from("chatterbox-audio"), { headers: { "Content-Type": "audio/mpeg" } });
     throw new Error(`Unexpected URL ${url}`);
   };
-  const { baseUrl } = await startTestServer(t, "podcast-chatterbox-", { fetchImpl });
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-chatterbox-", { fetchImpl });
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
   state.config.providers.chatterbox = { baseUrl: "http://127.0.0.1:8100/v1", modelsUrl: "", enabled: true, activeModels: { "chatterbox-turbo": { text: false, tts: true } } };
   let response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.config) });
   const configured = await response.json();
   assert.equal(response.status, 200);
   assert.deepEqual(configured.modelCatalog.providers.chatterbox.ttsModels.map((model) => model.id), ["compat:chatterbox:chatterbox-turbo"]);
+  assert.deepEqual(configured.modelCatalog.providers.chatterbox.discoveredModels.map((model) => model.suggested), [
+    { text: false, tts: true },
+    { text: false, tts: true },
+  ]);
+  assert.ok(calls.some((call) => call.url === "http://127.0.0.1:8100/v1/models"));
   response = await fetch(`${baseUrl}/api/tts/chatterbox/voices`);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { voices: [
     { id: "female", name: "Female", builtin: true },
     { id: "custom", name: "Custom", builtin: false },
+    { id: "charlie_EN", name: "Charlie", builtin: false },
   ] });
   const voiceCall = calls.find((call) => call.url.endsWith("/voices"));
   assert.equal(voiceCall.options.headers.Authorization, undefined);
   process.env.CHATTERBOX_API_KEY = "test-chatterbox-key";
   response = await fetch(`${baseUrl}/api/tts/chatterbox/voices`);
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).voices.map((voice) => voice.id), ["female", "custom"]);
+  assert.deepEqual((await response.json()).voices.map((voice) => voice.id), ["female", "custom", "charlie_EN"]);
   assert.equal(calls.filter((call) => call.url.endsWith("/voices"))[1].options.headers.Authorization, "Bearer test-chatterbox-key");
   delete process.env.CHATTERBOX_API_KEY;
   state.profiles.speakerProfiles[0].voiceModel = "compat:chatterbox:chatterbox-turbo";
@@ -1461,6 +1818,114 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   const ttsCalls = calls.filter((call) => call.url.endsWith("/audio/speech"));
   assert.equal(JSON.parse(ttsCalls.at(-1).options.body).input, "[laugh] Hello");
   assert.equal(JSON.parse(ttsCalls.at(-1).options.body).language, "en");
+
+  const charlieProfile = structuredClone(state.profiles.speakerProfiles[0]);
+  charlieProfile.id = "speaker-charlie";
+  charlieProfile.name = "Charlie";
+  charlieProfile.speakers = [{ ...charlieProfile.speakers[0], name: "Charlie", voiceId: "charlie_EN" }];
+  state.profiles.speakerProfiles.push(charlieProfile);
+  response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${baseUrl}/api/episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Charlie override", episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-charlie" }) });
+  const overrideEpisode = await response.json();
+  assert.equal(response.status, 201, overrideEpisode.error);
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeId: overrideEpisode.id }) });
+  transcriptPrompt = await response.json();
+  assert.equal(response.status, 200, transcriptPrompt.error);
+  assert.deepEqual(transcriptPrompt.capabilities.map((item) => item.speaker), ["Charlie"]);
+  assert.match(transcriptPrompt.lockedPrompt, /Chatterbox \(Charlie/);
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-charlie" }) });
+  assert.deepEqual((await response.json()).capabilities.map((item) => item.speaker), ["Charlie"]);
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeId: overrideEpisode.id, speakerIndex: 0, text: "Hello", cue: "warm" }) });
+  assert.equal(response.status, 200);
+  const legacyPath = join(rootDir, "data", "episodes", overrideEpisode.id, "episode.json");
+  const legacyEpisode = JSON.parse(await readFile(legacyPath, "utf8"));
+  delete legacyEpisode.episodeProfile;
+  delete legacyEpisode.speakerProfile;
+  await writeFile(legacyPath, JSON.stringify(legacyEpisode, null, 2));
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeId: overrideEpisode.id }) });
+  assert.deepEqual((await response.json()).capabilities.map((item) => item.speaker), ["Charlie"]);
+
+  chatterboxOnline = false;
+  response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.config) });
+  assert.equal((await response.json()).modelCatalog.providers.chatterbox.status, "error");
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeId: overrideEpisode.id, speakerIndex: 0, text: "Hello", cue: "warm" }) });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Charlie: Chatterbox is unavailable at http:\/\/127\.0\.0\.1:8100\/v1: .*fetch failed/);
+});
+
+test("Podcast Assistant sees Chatterbox voices and tolerates offline discovery", { concurrency: false }, async (t) => {
+  const previousMimoKey = process.env.MIMO_API_KEY;
+  process.env.MIMO_API_KEY = "assistant-voices-test-key";
+  t.after(() => { if (previousMimoKey === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = previousMimoKey; });
+  let voicesOnline = true;
+  let voiceCalls = 0;
+  let blockVoices = false;
+  let releaseVoices;
+  let markVoicesStarted;
+  const voiceGate = new Promise((resolve) => { releaseVoices = resolve; });
+  const voicesStarted = new Promise((resolve) => { markVoicesStarted = resolve; });
+  t.after(() => releaseVoices());
+  const prompts = [];
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith("/voices")) {
+      voiceCalls += 1;
+      if (blockVoices) { markVoicesStarted(); await voiceGate; }
+      if (!voicesOnline) throw new Error("offline");
+      return Response.json({ data: [{ id: "charlie_EN", name: "Charlie", builtin: false }] });
+    }
+    if (String(url).endsWith("/chat/completions")) {
+      const request = JSON.parse(options.body);
+      const prompt = request.messages[1].content;
+      prompts.push({ url: String(url), system: request.messages[0].content, prompt });
+      const exact = prompt.includes("Use exact voice ID charlie_EN");
+      const content = exact
+        ? JSON.stringify({ message: "Create Charlie.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Charlie", voiceModel: "compat:chatterbox:chatterbox-multilingual-v3", speakers: [{ name: "Charlie", voiceId: "charlie_EN" }] } } } })
+        : JSON.stringify({ message: voicesOnline ? "Which Chatterbox voice should Charlie use?" : "Chatterbox voice discovery is unavailable.", questions: ["Choose an exact voice ID."], proposal: null });
+      return Response.json({ choices: [{ message: { content } }] });
+    }
+    return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }, { id: "chatterbox-multilingual-v3", capabilities: { text: false, tts: true } }] });
+  };
+  const { baseUrl } = await startTestServer(t, "podcast-assistant-chatterbox-voices-", { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).providers.mimo.textModels.some((item) => item.id === "mimo-v2.5-pro"));
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  state.config.providers.chatterbox = { baseUrl: "http://127.0.0.1:8100/v1", modelsUrl: "", enabled: true, activeModels: { "chatterbox-multilingual-v3": { text: false, tts: true } } };
+  let response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.config) });
+  assert.equal(response.status, 200);
+  const originalMimoBaseUrl = state.config.providers.mimo.baseUrl;
+  const planningModel = state.profiles.episodeProfiles[0].outlineModel;
+  response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Charlie plan", speakerProfileId: state.profiles.speakerProfiles[0].id, planningModel, theme: "Testing", audience: "Developers", goal: "Teach" }) });
+  const plan = (await response.json()).plan;
+  blockVoices = true;
+  const firstChat = fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Use Chatterbox for Charlie", model: planningModel }) });
+  await voicesStarted;
+  const changedConfig = structuredClone(state.config);
+  changedConfig.providers.mimo.baseUrl = "http://new-mimo.test/v1";
+  response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changedConfig) });
+  assert.equal(response.status, 200);
+  releaseVoices();
+  response = await firstChat;
+  let chat = await response.json();
+  assert.equal(response.status, 200, chat.error);
+  assert.equal(chat.message.proposal, null);
+  assert.match(prompts[0].system, /ask them to choose before proposing/);
+  assert.match(prompts[0].prompt, /"chatterboxVoices":\[\{"id":"charlie_EN","name":"Charlie","builtin":false\}\]/);
+  assert.match(prompts[0].url, new RegExp(`^${originalMimoBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.equal(voiceCalls, 1);
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Use exact voice ID charlie_EN", model: planningModel }) });
+  chat = await response.json();
+  assert.equal(response.status, 200, chat.error);
+  assert.equal(chat.message.proposal.speakerProfile.value.speakers[0].voiceId, "charlie_EN");
+  assert.equal(voiceCalls, 2);
+  voicesOnline = false;
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Check voices again", model: planningModel }) });
+  assert.equal(response.status, 200, (await response.clone().json()).error);
+  assert.equal(voiceCalls, 2);
+  assert.equal((await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" })).status, 202);
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+  response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Refresh voices", model: planningModel }) });
+  assert.equal(response.status, 200, (await response.clone().json()).error);
+  assert.equal(voiceCalls, 3);
 });
 
 test("profile saves warn for existing unavailable saved models", { concurrency: false }, async (t) => {
@@ -1581,6 +2046,72 @@ test("content planner validates generation inputs", async (t) => {
   response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...plan, knowledgeBaseId: "missing" }) });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "Knowledge base does not exist.");
+});
+
+test("plan generation does not block unrelated writes while waiting for the model", { concurrency: false }, async (t) => {
+  const oldMimo = process.env.MIMO_API_KEY;
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  t.after(() => { if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo; });
+  let releaseModel;
+  let markModelStarted;
+  const modelGate = new Promise((resolve) => { releaseModel = resolve; });
+  const modelStarted = new Promise((resolve) => { markModelStarted = resolve; });
+  t.after(() => releaseModel());
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }] });
+    if (String(url).endsWith("/chat/completions")) {
+      markModelStarted();
+      await modelGate;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ episodes: [{ number: 1, title: "Episode" }] }) } }] });
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  const { baseUrl } = await startTestServer(t, "podcast-unlocked-generation-", { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Unlocked", speakerProfileId: state.profiles.speakerProfiles[0].id, episodeFormatId: state.profiles.episodeProfiles[0].id, planningModel: "mimo-v2.5-pro", theme: "Theme", audience: "Audience", goal: "Goal", episodeCount: 1 }) });
+  const plan = (await response.json()).plan;
+  const generation = fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  await modelStarted;
+  const mutation = fetch(`${baseUrl}/api/knowledge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "concurrent.md", content: "# Concurrent" }) });
+  const mutationStatus = await Promise.race([mutation.then((result) => result.status), new Promise((resolve) => setTimeout(() => resolve("timeout"), 1_000))]);
+  releaseModel();
+  assert.equal(mutationStatus, 201);
+  response = await generation;
+  assert.equal(response.status, 200);
+});
+
+test("plan generation detects edits even when updatedAt is unchanged", { concurrency: false }, async (t) => {
+  const oldMimo = process.env.MIMO_API_KEY;
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  t.after(() => { if (oldMimo === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = oldMimo; });
+  let releaseModel;
+  let markModelStarted;
+  const modelGate = new Promise((resolve) => { releaseModel = resolve; });
+  const modelStarted = new Promise((resolve) => { markModelStarted = resolve; });
+  t.after(() => releaseModel());
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }] });
+    markModelStarted();
+    await modelGate;
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ episodes: [{ number: 1, title: "Generated" }] }) } }] });
+  };
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-plan-snapshot-conflict-", { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+  const state = await (await fetch(`${baseUrl}/api/state`)).json();
+  let response = await fetch(`${baseUrl}/api/plans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Conflict", speakerProfileId: state.profiles.speakerProfiles[0].id, episodeFormatId: state.profiles.episodeProfiles[0].id, planningModel: "mimo-v2.5-pro", theme: "Original", audience: "Audience", goal: "Goal", episodeCount: 1 }) });
+  const plan = (await response.json()).plan;
+  const generation = fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  await modelStarted;
+  const path = join(rootDir, "data", "plans", `${plan.id}.json`);
+  const edited = JSON.parse(await readFile(path, "utf8"));
+  edited.theme = "Edited without changing timestamp";
+  await writeFile(path, JSON.stringify(edited, null, 2) + "\n");
+  releaseModel();
+  response = await generation;
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /changed while content was being generated/);
+  assert.equal(JSON.parse(await readFile(path, "utf8")).theme, edited.theme);
 });
 
 test("plan generation derives intent from chat when setup fields are empty", { concurrency: false }, async (t) => {
@@ -1820,6 +2351,15 @@ test("planner generates plans, creates formats and drafts, and chats", { concurr
   const speakerProposalIndex = speakerThread.messages.findIndex((message) => message.role === "assistant");
   const blockedEpisodePath = join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json");
   const blockedEpisode = JSON.parse(await readFile(blockedEpisodePath, "utf8"));
+  const profilesPath = join(rootDir, "data", "profiles.json");
+  const profilesWithUnrelatedWarning = JSON.parse(await readFile(profilesPath, "utf8"));
+  const unrelatedSpeaker = structuredClone(profilesWithUnrelatedWarning.speakerProfiles[0]);
+  unrelatedSpeaker.id = "unrelated-stale-speaker";
+  unrelatedSpeaker.name = "Unrelated stale speaker";
+  unrelatedSpeaker.voiceModel = "unrelated-stale-tts";
+  unrelatedSpeaker.speakers = unrelatedSpeaker.speakers.map((speaker) => ({ ...speaker, ttsModelOverride: "" }));
+  profilesWithUnrelatedWarning.speakerProfiles.push(unrelatedSpeaker);
+  await writeFile(profilesPath, JSON.stringify(profilesWithUnrelatedWarning, null, 2));
   const beforeFailedApply = await (await fetch(`${baseUrl}/api/state`)).json();
   const beforeFailedPlan = (await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan;
   await writeFile(blockedEpisodePath, JSON.stringify({ ...blockedEpisode, job: { id: "blocked", type: "tts", status: "running" } }, null, 2));
@@ -1835,6 +2375,7 @@ test("planner generates plans, creates formats and drafts, and chats", { concurr
   assert.equal(response.status, 200, appliedSpeaker.error);
   const createdSpeaker = appliedSpeaker.profiles.speakerProfiles.find((item) => item.name === "Assistant Speaker");
   assert.ok(createdSpeaker);
+  assert.doesNotMatch(appliedSpeaker.warnings.join(" "), /unrelated-stale-tts/);
   assert.equal(appliedSpeaker.plan.speakerProfileId, createdSpeaker.id);
   const stateAfterSpeakerApply = await (await fetch(`${baseUrl}/api/state`)).json();
   assert.ok(stateAfterSpeakerApply.profiles.speakerProfiles.some((item) => item.id === createdSpeaker.id));
@@ -1955,9 +2496,19 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.doesNotMatch(html, /\son[a-z]+=/);
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(join(process.cwd(), "package-lock.json"), "utf8"));
-  assert.equal(manifest.version, "0.14.2");
-  assert.equal(lock.version, "0.14.2");
-  assert.equal(lock.packages[""].version, "0.14.2");
+  assert.equal(manifest.version, "0.17.0");
+  assert.equal(lock.version, "0.17.0");
+  assert.equal(lock.packages[""].version, "0.17.0");
+  assert.match(html, /providerCard\("opencodeGo", "OpenCode Go", \["text"\]/);
+  assert.match(html, /https:\/\/opencode\.ai\/docs\/go\//);
+  assert.match(html, /providers\.opencodeGo\?\.textModels/);
+  assert.match(html, /\["compatible", "openai", "opencodeGo", "chatterbox"\]/);
+  assert.match(html, /providerId === "opencodeGo" \? "opencode-go" : providerId/);
+  assert.doesNotMatch(html, /function providerConnectionId\(/);
+  assert.match(html, /customModelControls"\)\.hidden = !target\.allowCustom/);
+  assert.match(html, /profileProposal && profilesDirty && await saveProfiles\(\) === false/);
+  assert.match(html, /activeSpeakerProfileId = data\.appliedId/);
+  assert.match(html, /const voiceModel = discoveredModels\("tts"\)\[0\]\?\.id \|\| ""/);
   assert.doesNotMatch(html, /id="epSegments"|id="epBriefing"|id="epOutlineModel"|id="epTranscriptModel"|id="epLanguage"|id="epMinutes"|data-draft-field="numSegments"|data-draft-field="defaultBriefing"/);
   assert.match(html, /id="view-format" class="view" hidden/);
   assert.match(html, /id="formatSelect"/);
@@ -1983,6 +2534,15 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /<label class="full" data-help="Grounds this episode in uploaded source material\.">Knowledge Base<select id="buildKnowledge"><\/select><\/label>/);
   assert.match(html, /id="serverActivity"/);
   assert.match(html, /id="notificationFeed"/);
+  assert.match(html, /id="notifyTranscript"/);
+  assert.match(html, /id="notifyTts"/);
+  assert.match(html, /pod-god\.notifications\.v1/);
+  assert.match(html, /let notifiedJobIds = new Set\(\)/);
+  assert.doesNotMatch(html, /jobStatuses|jobWatchStartedAt/);
+  assert.match(html, /Notification\.requestPermission\(\)/);
+  assert.match(html, /document\.visibilityState === "visible" && document\.hasFocus\(\)/);
+  assert.match(html, /id="transcriptSaveStatus"/);
+  assert.match(html, /id="refreshTtsModels"/);
   assert.match(html, /<details class="notice-item"/);
   assert.match(html, /<details class="job-item"/);
   assert.match(html, /\.job-item\[open\]\[data-job-id\]/);
@@ -2105,12 +2665,16 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.doesNotMatch(html, /autoTtsTranscriptJobs/);
   assert.match(html, /JSON\.stringify\(\{ autoTts: generateTts \}\)/);
   assert.match(html, /function hasUnsavedEpisodeChanges\(\)/);
+  assert.match(html, /\["buildEpisodeProfile", "episodeHosts", "buildKnowledge", "episodeName", "additionalInstructions"\]/);
+  assert.match(html, /profilesChanged \? \{ episodeProfileId, speakerProfileId \} : \{ episodeId: currentEpisode\.id \}/);
   assert.match(html, /if \(previous === "config" && configDirty\) syncConfigForm\(\)/);
   assert.match(html, /if \(previous === "format" && profilesDirty\) syncFormatForm\(\)/);
   assert.match(html, /transcriptDirty = true;\s*updateWordCount\(\);\s*updateSaveButtons\(\)/);
   assert.match(html, /role="tablist" aria-label="Transcript sections"/);
   assert.match(html, /role="log" aria-live="polite"/);
   assert.match(html, /aria-label="Episode transcript"/);
+  assert.match(html, /id="transcriptText"/);
+  assert.doesNotMatch(html, /id="transcript"/);
   assert.match(html, /aria-label="TTS render progress"/);
   assert.match(html, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(html, /\.rightbar \{ position: fixed; top: 0; right: 0; z-index: 65/);

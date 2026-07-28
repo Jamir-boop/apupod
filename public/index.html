@@ -164,12 +164,11 @@
     .model-row[hidden] { display: none; }
     audio { width: min(100%, 700px); margin-top: 12px; }
     progress { width: min(100%, 700px); height: 14px; accent-color: var(--accent); }
-    .rightbar { position: static; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto minmax(0, 1fr); min-width: 0; width: 320px; height: 100%; padding: 18px 14px; background: var(--surface-1); border-left: 1px solid var(--line); overflow: hidden; }
+    .rightbar { position: static; display: flex; flex-direction: column; min-width: 0; width: 320px; height: 100%; padding: 18px 14px; background: var(--surface-1); border-left: 1px solid var(--line); overflow: hidden; }
     .rightbar[hidden] { display: none; }
     .rightbar-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
     .rightbar-header h2 { margin: 0; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
     .rightbar-header button { padding: 5px 9px; font-size: 12px; }
-    .rightbar-toggle { position: fixed; top: 12px; right: 12px; z-index: 55; padding: 7px 10px; }
     .rightbar-toggle[hidden] { display: none; }
     .rightbar-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: #FFFFFF; background: var(--danger); font-size: 11px; text-align: center; }
     .rightbar-badge[hidden] { display: none; }
@@ -184,8 +183,12 @@
     .toast[data-type="warning"] { border-color: var(--accent); }
     .toast[data-type="error"] { border-color: var(--danger); }
     .activity-heading { margin: 12px 0 7px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .notification-settings { display: grid; gap: 7px; padding: 9px; border: 1px solid var(--line); background: var(--surface-0); }
+    .notification-settings .bulk-check { color: var(--text); font-size: 12px; }
+    .notification-settings p { margin: 0; font-size: 11px; }
     .notice-list, .activity-list { display: grid; grid-auto-rows: max-content; align-content: start; min-width: 0; max-width: 100%; min-height: 0; gap: 7px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-    .notice-list { margin-bottom: 12px; }
+    .notice-list { flex: 0 1 35%; min-height: 80px; margin-bottom: 12px; }
+    .activity-list { flex: 1 1 auto; min-height: 80px; }
     .notice-item, .job-item { min-width: 0; max-width: 100%; overflow: hidden; border: 1px solid var(--line); background: var(--surface-0); font-size: 12px; }
     button.job-item { width: 100%; padding: 6px 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
     .notice-item[data-type="ok"] { border-color: var(--success); }
@@ -360,7 +363,9 @@
       main.assistant-active { padding: 0; }
       .grid, .grid.three { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
-      .toolbar { grid-template-columns: 1fr 1fr; }
+      .toolbar { grid-template-columns: 1fr; }
+      #profiles-speakers > .toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      #profiles-speakers > .toolbar label { grid-column: 1 / -1; }
       .model-row { grid-template-columns: auto minmax(0, 1fr); }
       .model-row select { grid-column: 1 / -1; }
       .player-layout { grid-template-columns: 1fr; }
@@ -432,6 +437,7 @@
             <button type="button" class="assistant-util" data-view="config"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Config</button>
             <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
             <button type="button" class="assistant-util" data-view="player"><svg class="icon" aria-hidden="true"><use href="#i-audio-lines"/></svg>Player</button>
+            <button id="rightbarToggle" class="assistant-util rightbar-toggle" type="button" title="Notifications and jobs" aria-label="Open activity"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg>Activity<span id="rightbarBadge" class="rightbar-badge" hidden>0</span></button>
             <button type="button" id="assistantChatToggle" class="assistant-util assistant-chat-toggle"><svg class="icon" aria-hidden="true"><use href="#i-message-square"/></svg>Chat</button>
             <button type="button" id="retryState" class="assistant-util" hidden><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Retry workspace</button>
           </nav>
@@ -508,7 +514,7 @@
         </div>
         <div class="view-body">
         <section class="panel">
-          <div class="toolbar">
+          <div class="toolbar single-column">
             <label>Format<select id="formatSelect"></select></label>
           </div>
           <div class="grid">
@@ -564,8 +570,8 @@
               <span id="wordCount" class="muted push-right">0 words</span>
             </div>
             <p id="transcriptLengthWarning" class="warning" hidden></p>
-            <textarea id="transcript" class="transcript" aria-label="Episode transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
-            <div class="actions"><button id="saveTranscript" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save transcript</button></div>
+            <textarea id="transcriptText" class="transcript" aria-label="Episode transcript" spellcheck="true" placeholder="Generate or import transcript here."></textarea>
+            <div class="actions"><button id="saveTranscript" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save transcript</button><span id="transcriptSaveStatus" class="muted" role="status" aria-live="polite"></span></div>
           </section>
           <section id="transcript-prompt-panel" role="tabpanel" aria-labelledby="transcriptPromptTab" hidden>
             <p class="muted">Rules resolve from each speaker's TTS model. References: <a href="https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/speech-synthesis-v2.5" target="_blank" rel="noreferrer">MiMo</a> · <a href="https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices" target="_blank" rel="noreferrer">ElevenLabs</a> · <a href="https://github.com/resemble-ai/chatterbox" target="_blank" rel="noreferrer">Chatterbox</a>.</p>
@@ -588,10 +594,10 @@
           </div>
           <div id="ttsSummary" class="speaker-summary"><p class="muted">Select a saved episode with a transcript.</p></div>
           <div id="previewButtons" class="actions"></div>
-          <p class="warning">Preview every voice before rendering. MiMo preset TTS is blocked outside English/Chinese; other languages require a compatible ElevenLabs model and <code>ELEVENLABS_API_KEY</code>.</p>
+          <p class="muted">Preview every voice before rendering. Model, voice, provider, and language problems appear above.</p>
           <audio id="previewAudio" controls hidden></audio>
           <div class="separator"></div>
-          <div class="actions"><button id="applyLatestProfiles"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Apply latest profiles</button><button id="renderAudio" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg>Render MP3</button></div>
+          <div class="actions"><button id="refreshTtsModels"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Refresh models</button><button id="applyLatestProfiles"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Apply latest profiles</button><button id="renderAudio" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg>Render MP3</button></div>
           <progress id="renderProgress" value="0" max="1" aria-label="TTS render progress" hidden></progress>
           <p id="renderStatus" class="muted" role="status" aria-live="polite"></p>
           <div id="episodePlayerActions" class="actions"></div>
@@ -662,17 +668,26 @@
           </div>
           <div class="actions"><button id="toggleFilteredModels" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check-check"/></svg>Select all filtered</button><span id="modelSelectionCount" class="muted"></span></div>
           <div id="modelSelectionList" class="model-list"></div>
-          <div class="grid">
-            <label>Custom model ID<input id="customModelId" placeholder="Model ID not returned by /models"></label>
-            <label>Custom model type<select id="customModelType"><option value="text">LLM</option><option value="tts">TTS</option><option value="both">Both</option></select></label>
+          <div id="customModelControls">
+            <div class="grid">
+              <label>Custom model ID<input id="customModelId" placeholder="Model ID not returned by /models"></label>
+              <label>Custom model type<select id="customModelType"><option value="text">LLM</option><option value="tts">TTS</option><option value="both">Both</option></select></label>
+            </div>
+            <div class="actions"><button id="addCustomModel" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add custom model</button></div>
           </div>
-          <div class="actions"><button id="addCustomModel" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add custom model</button><button id="applyModelSelection" type="button" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Apply model selection</button></div>
+          <div class="actions"><button id="applyModelSelection" type="button" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Apply model selection</button></div>
         </div>
       </dialog>
     </main>
 
     <aside id="rightbar" class="rightbar" aria-label="Notifications and jobs" hidden>
       <div class="rightbar-header"><h2>Activity</h2><button id="rightbarClose" type="button" class="icon-btn" title="Close activity" aria-label="Close activity"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <div class="activity-heading">Desktop alerts</div>
+      <div class="notification-settings">
+        <label class="bulk-check"><input id="notifyTranscript" type="checkbox"> Transcript success and failure</label>
+        <label class="bulk-check"><input id="notifyTts" type="checkbox"> TTS success and failure</label>
+        <p id="notificationPermissionStatus" class="muted"></p>
+      </div>
       <div class="activity-heading">Notifications</div>
       <div id="notificationFeed" class="notice-list" aria-live="polite"><span class="muted">No notifications</span></div>
       <div class="activity-heading">Jobs</div>
@@ -681,7 +696,6 @@
     </aside>
   </div>
 
-  <button id="rightbarToggle" class="rightbar-toggle" type="button" title="Notifications and jobs" aria-label="Open notifications"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span id="rightbarBadge" class="rightbar-badge" hidden>0</span></button>
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
   <audio id="playerAudio" preload="metadata" hidden></audio>
@@ -704,7 +718,7 @@
     const rememberedEpisodeId = viewSelections.episodeId || "";
     const rememberedPlanId = viewSelections.planId || "";
     let state;
-    let modelCatalog = { status: "loading", languages: [], providers: { mimo: { textModels: [], ttsModels: [], discoveredModels: [] }, elevenlabs: { ttsModels: [], discoveredModels: [] }, openai: { textModels: [], ttsModels: [], discoveredModels: [] }, chatterbox: { textModels: [], ttsModels: [], discoveredModels: [] }, compatible: [] } };
+    let modelCatalog = { status: "loading", languages: [], providers: { mimo: { textModels: [], ttsModels: [], discoveredModels: [] }, elevenlabs: { ttsModels: [], discoveredModels: [] }, openai: { textModels: [], ttsModels: [], discoveredModels: [] }, opencodeGo: { textModels: [], ttsModels: [], discoveredModels: [] }, chatterbox: { textModels: [], ttsModels: [], discoveredModels: [] }, compatible: [] } };
     let jobsState = { activeJobId: null, jobs: [] };
     let currentEpisode = null;
     let configState = null;
@@ -714,6 +728,7 @@
     let previewUrl = "";
     let elevenVoices = [];
     let chatterboxVoices = [];
+    let chatterboxVoicesLoaded = false;
     const voiceRequests = {};
     let configDirty = false;
     let profilesDirty = false;
@@ -722,9 +737,12 @@
     let modelDialogTarget = null;
     let jobPollTimer = null;
     let modelPollTimer = null;
-    let hadActiveJobs = false;
+    let jobsInitialized = false;
+    let notifiedJobIds = new Set();
     let notifications = [];
     const RIGHTBAR_KEY = "pod-god.rightbar.v1";
+    const NOTIFICATION_SETTINGS_KEY = "pod-god.notifications.v1";
+    let notificationSettings = loadNotificationSettings();
     let rightbarOpen = false;
     try { rightbarOpen = sessionStorage.getItem(RIGHTBAR_KEY) === "open"; } catch {}
     let toastEntries = [];
@@ -755,6 +773,42 @@
       } catch {
         return {};
       }
+    }
+
+    function loadNotificationSettings() {
+      try {
+        const value = JSON.parse(localStorage.getItem(NOTIFICATION_SETTINGS_KEY) || "{}");
+        return { transcript: value?.transcript === true, tts: value?.tts === true };
+      } catch { return { transcript: false, tts: false }; }
+    }
+
+    function renderNotificationSettings() {
+      const supported = "Notification" in window && window.isSecureContext;
+      const denied = supported && Notification.permission === "denied";
+      $("notifyTranscript").checked = notificationSettings.transcript;
+      $("notifyTts").checked = notificationSettings.tts;
+      $("notifyTranscript").disabled = !supported || denied;
+      $("notifyTts").disabled = !supported || denied;
+      $("notificationPermissionStatus").textContent = !supported
+        ? "Desktop alerts are unavailable in this browser or context."
+        : denied ? "Notifications are blocked in browser settings."
+        : Notification.permission === "granted" ? "Alerts appear only while this app is unfocused."
+        : "Enable an alert to request browser permission.";
+    }
+
+    async function setNotificationSetting(type, enabled) {
+      if (enabled && (!("Notification" in window) || !window.isSecureContext)) return renderNotificationSettings();
+      if (enabled && Notification.permission !== "granted") {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          notificationSettings[type] = false;
+          renderNotificationSettings();
+          return notify(permission === "denied" ? "Desktop notifications were blocked. Enable them in browser settings to opt in." : "Desktop notification permission was not granted.", "warning");
+        }
+      }
+      notificationSettings[type] = enabled;
+      localStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(notificationSettings));
+      renderNotificationSettings();
     }
 
     function rememberViewSelection(key, value) {
@@ -887,11 +941,11 @@
         ? (providers.compatible || []).flatMap((provider) => provider.textModels || [])
         : (providers.compatible || []).flatMap((provider) => provider.ttsModels || []);
       const items = kind === "text"
-        ? [...(providers.mimo?.textModels || []), ...(providers.openai?.textModels || []), ...(providers.chatterbox?.textModels || []), ...compatibleItems]
+        ? [...(providers.mimo?.textModels || []), ...(providers.openai?.textModels || []), ...(providers.opencodeGo?.textModels || []), ...(providers.chatterbox?.textModels || []), ...compatibleItems]
         : [...(providers.mimo?.ttsModels || []), ...(providers.elevenlabs?.ttsModels || []), ...(providers.openai?.ttsModels || []), ...(providers.chatterbox?.ttsModels || []), ...compatibleItems];
       return [...new Map(items.map((model) => [model.id, {
         ...model,
-        label: ["compatible", "openai", "chatterbox"].includes(model.provider)
+        label: ["compatible", "openai", "opencodeGo", "chatterbox"].includes(model.provider)
           ? `${model.connectionName} - ${model.name || model.rawId || model.id}`
           : `${model.provider === "elevenlabs" ? "ElevenLabs" : "MiMo"} - ${model.name || model.id}${model.requiresAlphaAccess ? " - alpha access" : ""}`,
       }])).values()];
@@ -915,8 +969,6 @@
 
     function modelLabel(modelId) { return discoveredModels("tts").find((model) => model.id === modelId)?.label || modelId; }
 
-    function textModelLabel(modelId) { return discoveredModels("text").find((model) => model.id === modelId)?.label || modelId; }
-
     function languageById(id) { return (modelCatalog.languages || []).find((language) => language.id === id); }
 
     function languageOptions(selected) {
@@ -929,8 +981,19 @@
 
     function modelLanguageError(modelId, language) {
       if (!language) return "Episode language is unavailable.";
-      if (modelId === "mimo-v2.5-tts") return ["en", "zh"].includes(language.apiCode) ? "" : `MiMo preset TTS does not support ${language.name}; choose ElevenLabs.`;
       const model = discoveredModels("tts").find((item) => item.id === modelId);
+      if (modelId === "mimo-v2.5-tts" && model) return ["en", "zh"].includes(language.apiCode) ? "" : `MiMo preset TTS does not support ${language.name}; choose ElevenLabs.`;
+      if (!model) {
+        const parsed = String(modelId).match(/^compat:([^:]+):(.+)$/);
+        const provider = modelId === "mimo-v2.5-tts" ? modelCatalog.providers?.mimo
+          : String(modelId).startsWith("eleven") ? modelCatalog.providers?.elevenlabs
+            : parsed && [modelCatalog.providers?.openai, modelCatalog.providers?.chatterbox, ...(modelCatalog.providers?.compatible || [])].find((item) => item?.id === parsed[1]);
+        const name = provider?.name || (modelId === "mimo-v2.5-tts" ? "MiMo" : String(modelId).startsWith("eleven") ? "ElevenLabs" : "Provider");
+        if (provider?.status === "loading") return `${name} models are still loading; retry shortly.`;
+        if (provider?.status === "error") return `${name} is unavailable: ${provider.error || "connection failed"}. Start or reconnect it, then refresh models.`;
+        if (provider?.status === "unconfigured") return `${name} is not configured.`;
+        return `TTS model "${modelId}" is unavailable. Refresh models or select an active model.`;
+      }
       if (model?.provider === "compatible") return "";
       if (model?.provider === "elevenlabs" && model.languages?.length && !model.languages.some((item) => item.id === language.apiCode)) return `${model.name} does not support ${language.name}.`;
       return "";
@@ -942,7 +1005,9 @@
       const language = selectedTtsLanguage();
       if (!speakerProfile) return ["Speaker profile is unavailable."];
       return speakerProfile.speakers.map((speaker) => {
-        const error = modelLanguageError(speaker.ttsModelOverride || speakerProfile.voiceModel, language);
+        const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
+        const error = modelLanguageError(model, language)
+          || (ttsProvider(model) === "chatterbox" && chatterboxVoicesLoaded && !chatterboxVoices.some((voice) => voice.id === speaker.voiceId) ? `Chatterbox voice "${speaker.voiceId}" is unavailable.` : "");
         return error ? `${speaker.name}: ${error}` : "";
       }).filter(Boolean);
     }
@@ -1062,6 +1127,7 @@
         ["MiMo", modelCatalog.providers?.mimo],
         ["ElevenLabs", modelCatalog.providers?.elevenlabs],
         ["OpenAI", modelCatalog.providers?.openai],
+        ["OpenCode Go", modelCatalog.providers?.opencodeGo],
         ["Chatterbox", modelCatalog.providers?.chatterbox],
         ...((modelCatalog.providers?.compatible || []).map((provider) => [provider.name, provider])),
       ].filter(([, provider]) => provider);
@@ -1115,6 +1181,10 @@
       modelCatalog.status = "loading";
       renderModelStatus();
       await loadModelCatalog();
+      chatterboxVoices = [];
+      chatterboxVoicesLoaded = false;
+      delete voiceRequests.chatterbox;
+      renderTtsView();
     }
 
     function activeJobs() { return jobsState.jobs.filter((job) => ["queued", "running"].includes(job.status)); }
@@ -1150,6 +1220,14 @@
       $("saveEpisode").disabled = episodeLocked || !(episodeDraftDirty || transcriptPromptDirty);
       $("saveTranscript").disabled = episodeLocked || !transcriptDirty;
       $("saveTranscriptPrompt").disabled = episodeLocked || !transcriptPromptDirty;
+      const setLabel = (id, label) => { const text = [...$(id).childNodes].find((node) => node.nodeType === Node.TEXT_NODE); if (text) text.textContent = label; };
+      setLabel("saveConfig", configDirty ? "Save config" : "Saved");
+      setLabel("saveProfiles", profilesDirty ? "Save hosts" : "Saved");
+      setLabel("saveFormat", profilesDirty ? "Save format" : "Saved");
+      setLabel("saveEpisode", currentEpisode && !(episodeDraftDirty || transcriptPromptDirty) ? "Saved" : "Save draft");
+      setLabel("saveTranscript", currentEpisode?.transcript && !transcriptDirty ? "Saved" : "Save transcript");
+      setLabel("saveTranscriptPrompt", currentEpisode && !transcriptPromptDirty ? "Saved" : "Save guidance");
+      $("transcriptSaveStatus").textContent = !currentEpisode ? "" : transcriptDirty ? "Unsaved changes." : currentEpisode.transcript ? "Transcript saved." : "No saved transcript.";
     }
 
     function renderJobIndicators() {
@@ -1163,7 +1241,7 @@
       $("generateTranscript").disabled = episodeDisabled;
       $("autoGenerateTts").disabled = episodeDisabled;
       updateSaveButtons();
-      for (const id of ["buildEpisodeProfile", "episodeHosts", "saveEpisodeSettings", "buildKnowledge", "episodeName", "additionalInstructions", "transcriptPromptGuidance", "transcriptFile", "transcript", "resetTranscriptPrompt"]) $(id).disabled = episodeDisabled;
+      for (const id of ["buildEpisodeProfile", "episodeHosts", "saveEpisodeSettings", "buildKnowledge", "episodeName", "additionalInstructions", "transcriptPromptGuidance", "transcriptFile", "transcriptText", "resetTranscriptPrompt"]) $(id).disabled = episodeDisabled;
       $("applyLatestProfiles").disabled = episodeBusy || !currentEpisode || episodeProfilesAreCurrent();
       $("renderAudio").disabled = episodeBusy || ttsCompatibilityErrors().length > 0 || !currentEpisode?.transcript;
       renderEpisodeList();
@@ -1180,6 +1258,31 @@
       renderTranscriptPrompt();
     }
 
+    async function openJobResult(job) {
+      if (job.type === "tts" && job.status === "completed") return openJobInPlayer(job.episodeId);
+      if (!await selectEpisode(job.episodeId)) return;
+      location.hash = job.type === "transcript" ? "transcript" : "tts";
+    }
+
+    function notifyJobResult(job) {
+      const failed = ["failed", "interrupted"].includes(job.status);
+      const message = job.error || job.message || (job.type === "transcript" ? "Transcript ready." : "MP3 render complete.");
+      const warning = !failed && /too short|could not start/i.test(message);
+      notify(message, failed ? "error" : warning ? "warning" : "ok");
+      if (!notificationSettings[job.type] || document.visibilityState === "visible" && document.hasFocus()) return;
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      try {
+        const alert = new Notification(`${job.type === "transcript" ? "Transcript" : "TTS"} ${failed ? "failed" : "ready"}`, {
+          body: `${job.episodeName || job.episodeId}: ${message}`,
+          icon: "/icon.png",
+          tag: `pod-god-${job.id}`,
+        });
+        alert.onclick = () => { window.focus(); alert.close(); void openJobResult(job).catch((error) => notify(error.message || String(error), "error")); };
+      } catch (error) {
+        notify(`Desktop notification failed: ${error.message || error}`, "warning");
+      }
+    }
+
     async function refreshJobs() {
       clearTimeout(jobPollTimer);
       try {
@@ -1190,19 +1293,20 @@
         $("retryJobs").hidden = false;
         throw error;
       }
-      const running = activeJobs().length > 0;
+      const terminalJobs = jobsState.jobs.filter((job) => ["completed", "failed", "interrupted"].includes(job.status));
+      const finishedJobs = [];
+      if (jobsInitialized) {
+        for (const job of terminalJobs) {
+          if (notifiedJobIds.has(job.id)) continue;
+          finishedJobs.push(job);
+          notifyJobResult(job);
+        }
+      }
+      notifiedJobIds = new Set(terminalJobs.map((job) => job.id));
+      jobsInitialized = true;
       renderServerActivity();
       renderJobIndicators();
-      if (hadActiveJobs && !running) {
-        const latest = jobsState.jobs[0];
-        if (currentEpisode) await refreshState(currentEpisode.id);
-        if (latest?.status === "completed") {
-          const isWarning = /too short|could not start/i.test(latest.message || "");
-          notify(latest.message || (latest.type === "transcript" ? "Transcript ready." : "MP3 render complete."), isWarning ? "warning" : "ok");
-        }
-        if (["failed", "interrupted"].includes(latest?.status)) notify(latest.error || latest.message, "error");
-      }
-      hadActiveJobs = running;
+      if (currentEpisode && finishedJobs.some((job) => job.episodeId === currentEpisode.id)) await refreshState(currentEpisode.id);
       if (activeJobs().length > 0) {
         clearTimeout(jobPollTimer);
         jobPollTimer = setTimeout(() => refreshJobs().catch((error) => notify(error.message, "error")), 1000);
@@ -1211,7 +1315,6 @@
 
     function trackJob(job) {
       jobsState.jobs = [job, ...jobsState.jobs.filter((item) => item.id !== job.id)];
-      hadActiveJobs = true;
       renderServerActivity();
       renderJobIndicators();
       clearTimeout(jobPollTimer);
@@ -1299,7 +1402,7 @@
 
     function syncConfigForm() {
       if (!configState) return;
-      for (const id of ["mimo", "elevenlabs", "openai", "chatterbox"]) {
+      for (const id of ["mimo", "elevenlabs", "openai", "opencodeGo", "chatterbox"]) {
         const row = document.querySelector(`[data-provider-id="${id}"]`);
         if (!row) continue;
         const provider = configState.providers[id];
@@ -1358,11 +1461,15 @@
       const pills = [];
       const used = usedProfileModels();
       for (const [id, capability] of Object.entries(activeModels || {})) {
-        const profileId = ["mimo", "elevenlabs"].includes(connectionId) ? id : `compat:${connectionId}:${id}`;
+        const profileId = modelIdForProvider(connectionId, id);
         if (capability.text) pills.push(`<span class="model-pill llm${used.text.has(profileId) ? " used" : ""}">LLM · ${escapeHtml(id)}</span>`);
         if (capability.tts) pills.push(`<span class="model-pill tts${used.tts.has(profileId) ? " used" : ""}">TTS · ${escapeHtml(id)}</span>`);
       }
       return pills.join("") || '<span class="muted">No active models.</span>';
+    }
+
+    function modelIdForProvider(providerId, rawId) {
+      return ["mimo", "elevenlabs"].includes(providerId) ? rawId : `compat:${providerId === "opencodeGo" ? "opencode-go" : providerId}:${rawId}`;
     }
 
     function providerStatus(provider) {
@@ -1423,6 +1530,7 @@
       const p = configState.providers;
       $("configProviders").innerHTML = [
         providerCard("openai", "OpenAI", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.openai.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.openai.apiKey || "")}" placeholder="${p.openai.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.openai.baseUrl || "https://api.openai.com/v1")}"></label><label>LLM base URL override<input data-field="llmBaseUrl" value="${escapeHtml(p.openai.llmBaseUrl || "")}" placeholder="Optional"></label><label>TTS base URL override<input data-field="ttsBaseUrl" value="${escapeHtml(p.openai.ttsBaseUrl || "")}" placeholder="Optional"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.openai.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
+        providerCard("opencodeGo", "OpenCode Go", ["text"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.opencodeGo.enabled !== false ? " checked" : ""}></label><label>Credential source<input readonly value="${escapeHtml(p.opencodeGo.credentialSource === "environment" ? "OPENCODE_GO_API_KEY" : p.opencodeGo.credentialSource === "opencode-login" ? "OpenCode login" : "Not found")}"></label><label>Base URL<input readonly value="https://opencode.ai/zen/go/v1"></label><label>Documentation<a href="https://opencode.ai/docs/go/" target="_blank" rel="noreferrer">OpenCode Go API</a></label>`, openConnections),
         providerCard("elevenlabs", "ElevenLabs", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.elevenlabs.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.elevenlabs.apiKey || "")}" placeholder="${p.elevenlabs.hasApiKey ? "Key saved on server" : "Paste key"}"></label>`, openConnections),
         providerCard("chatterbox", "Chatterbox", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.chatterbox.enabled === true ? " checked" : ""}></label><label>API key, optional<input data-field="apiKey" type="password" value="${escapeHtml(p.chatterbox.apiKey || "")}" placeholder="${p.chatterbox.hasApiKey ? "Key saved on server" : "Optional"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.chatterbox.baseUrl || "")}" placeholder="http://127.0.0.1:8000/v1"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.chatterbox.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
         providerCard("mimo", "MiMo", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.mimo.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.mimo.apiKey || "")}" placeholder="${p.mimo.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.mimo.baseUrl || "")}"></label>`, openConnections),
@@ -1437,21 +1545,23 @@
       if (modelDialogTarget.kind === "provider") return {
         connection: configState.providers[modelDialogTarget.id],
         provider: modelCatalog.providers?.[modelDialogTarget.id],
-        name: modelDialogTarget.id === "mimo" ? "MiMo" : modelDialogTarget.id === "elevenlabs" ? "ElevenLabs" : modelDialogTarget.id === "openai" ? "OpenAI" : "Chatterbox",
-        onlyTts: ["elevenlabs", "chatterbox"].includes(modelDialogTarget.id),
+        name: modelDialogTarget.id === "mimo" ? "MiMo" : modelDialogTarget.id === "elevenlabs" ? "ElevenLabs" : modelDialogTarget.id === "openai" ? "OpenAI" : modelDialogTarget.id === "opencodeGo" ? "OpenCode Go" : "Chatterbox",
+        fixedType: ["elevenlabs", "chatterbox"].includes(modelDialogTarget.id) ? "tts" : modelDialogTarget.id === "opencodeGo" ? "text" : "",
+        allowCustom: modelDialogTarget.id !== "opencodeGo",
       };
       const connection = configState.compatibleConnections.find((item) => item.id === modelDialogTarget.id);
-      return { connection, provider: compatibleProvider(modelDialogTarget.id), name: connection?.name || "OpenAI compatible", onlyTts: false };
+      return { connection, provider: compatibleProvider(modelDialogTarget.id), name: connection?.name || "OpenAI compatible", fixedType: "", allowCustom: true };
     }
 
-    function modelTypeOptions(selected, onlyTts) {
-      if (onlyTts) return option("tts", "TTS", true);
+    function modelTypeOptions(selected, fixedType) {
+      if (fixedType) return option(fixedType, fixedType === "tts" ? "TTS" : "LLM", true);
       return [option("text", "LLM", selected === "text"), option("tts", "TTS", selected === "tts"), option("both", "Both", selected === "both")].join("");
     }
 
-    function modelSelectionRow(id, suggested, active, onlyTts) {
-      const mode = onlyTts ? "tts" : modelMode(active || suggested);
-      return `<div class="model-row" data-model-id="${escapeHtml(id)}" data-search="${escapeHtml(id.toLowerCase())}"><input type="checkbox" data-model-active aria-label="Activate ${escapeHtml(id)}"${active?.text || active?.tts ? " checked" : ""}><span>${escapeHtml(id)}</span><select data-model-type aria-label="${escapeHtml(id)} capability">${modelTypeOptions(mode, onlyTts)}</select></div>`;
+    function modelSelectionRow(id, model, active, fixedType) {
+      const supported = model?.supported !== false;
+      const mode = fixedType || modelMode(active || model?.suggested);
+      return `<div class="model-row" data-model-id="${escapeHtml(id)}" data-search="${escapeHtml(id.toLowerCase())}"><input type="checkbox" data-model-active aria-label="Activate ${escapeHtml(id)}"${supported && (active?.text || active?.tts) ? " checked" : ""}${supported ? "" : " disabled"}><span>${escapeHtml(id)}${supported ? "" : " · unsupported protocol"}</span><select data-model-type aria-label="${escapeHtml(id)} capability"${supported ? "" : " disabled"}>${modelTypeOptions(mode, fixedType)}</select></div>`;
     }
 
     function openModelDialog(kind, id) {
@@ -1468,8 +1578,9 @@
       $("modelSearch").value = "";
       $("modelSelectedOnly").checked = false;
       $("customModelId").value = "";
-      $("customModelType").innerHTML = modelTypeOptions(target.onlyTts ? "tts" : "text", target.onlyTts);
-      $("modelSelectionList").innerHTML = [...byId.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([rawId, model]) => modelSelectionRow(rawId, model.suggested, active[rawId], target.onlyTts)).join("") || '<p class="muted">No models discovered. Add a custom model ID below.</p>';
+      $("customModelControls").hidden = !target.allowCustom;
+      $("customModelType").innerHTML = modelTypeOptions(target.fixedType || "text", target.fixedType);
+      $("modelSelectionList").innerHTML = [...byId.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([rawId, model]) => modelSelectionRow(rawId, model, active[rawId], target.fixedType)).join("") || `<p class="muted">No models discovered.${target.allowCustom ? " Add a custom model ID below." : ""}</p>`;
       updateModelSelectionCount();
       $("modelDialog").showModal();
     }
@@ -1488,7 +1599,7 @@
     }
 
     function toggleFilteredModels() {
-      const boxes = [...$("modelSelectionList").querySelectorAll(".model-row:not([hidden]) [data-model-active]")];
+      const boxes = [...$("modelSelectionList").querySelectorAll(".model-row:not([hidden]) [data-model-active]:not(:disabled)")];
       const checked = boxes.length > 0 && boxes.every((box) => box.checked);
       boxes.forEach((box) => { box.checked = !checked; });
       updateModelSelectionCount();
@@ -1498,10 +1609,12 @@
     function addCustomModelRow() {
       const id = $("customModelId").value.trim();
       if (!id) throw new Error("Enter a custom model ID.");
-      if ([...$("modelSelectionList").querySelectorAll(".model-row")].some((row) => row.dataset.modelId === id)) throw new Error("Model already exists in this connection.");
       const target = selectedModelTarget();
+      if (!target.allowCustom) throw new Error("OpenCode Go accepts only models with a mapped API protocol.");
+      if ([...$("modelSelectionList").querySelectorAll(".model-row")].some((row) => row.dataset.modelId === id)) throw new Error("Model already exists in this connection.");
       const mode = $("customModelType").value;
-      $("modelSelectionList").insertAdjacentHTML("beforeend", modelSelectionRow(id, { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) }, { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) }, target.onlyTts));
+      const capability = { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) };
+      $("modelSelectionList").insertAdjacentHTML("beforeend", modelSelectionRow(id, { suggested: capability }, capability, target.fixedType));
       $("customModelId").value = "";
       updateModelSelectionCount();
     }
@@ -1510,14 +1623,15 @@
       const target = selectedModelTarget();
       const activeModels = {};
       $("modelSelectionList").querySelectorAll(".model-row").forEach((row) => {
-        if (!row.querySelector('[data-model-active]').checked) return;
+        const checkbox = row.querySelector('[data-model-active]');
+        if (checkbox.disabled || !checkbox.checked) return;
         const mode = row.querySelector('[data-model-type]').value;
         activeModels[row.dataset.modelId] = { text: ["text", "both"].includes(mode), tts: ["tts", "both"].includes(mode) };
       });
       const used = usedProfileModels();
       const affected = [];
       for (const [rawId, capability] of Object.entries(target.connection.activeModels || {})) {
-        const modelId = ["mimo", "elevenlabs"].includes(modelDialogTarget.id) ? rawId : `compat:${modelDialogTarget.id}:${rawId}`;
+        const modelId = modelIdForProvider(modelDialogTarget.id, rawId);
         if (capability.text && !activeModels[rawId]?.text && used.text.has(modelId)) affected.push(modelId);
         if (capability.tts && !activeModels[rawId]?.tts && used.tts.has(modelId)) affected.push(modelId);
       }
@@ -1600,6 +1714,11 @@
       return discoveredModels("tts").find((item) => item.id === model)?.provider || "";
     }
 
+    function defaultVoiceId(model) {
+      if (voiceProvider(model) === "chatterbox") return "default";
+      return providerVoices(model)[0]?.id || "";
+    }
+
     function providerVoices(model) {
       if (model === "mimo-v2.5-tts") return mimoVoices.map((id) => ({ id, label: id }));
       if (model.startsWith("compat:openai:")) {
@@ -1623,12 +1742,13 @@
       if (!["elevenlabs", "chatterbox"].includes(provider) || voiceRequests[provider]) return;
       voiceRequests[provider] = api(`/api/tts/${provider}/voices`).then((value) => {
         if (provider === "elevenlabs") elevenVoices = value.voices;
-        else chatterboxVoices = value.voices;
+        else { chatterboxVoices = value.voices; chatterboxVoicesLoaded = true; }
         syncSpeakerForm();
         const profile = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
         if (profile) renderSpeakerCards(profile);
         renderTtsView();
       }).catch((error) => {
+        if (provider === "chatterbox") chatterboxVoicesLoaded = false;
         delete voiceRequests[provider];
         notify(error.message || String(error), "error");
       });
@@ -1814,9 +1934,10 @@
     function addSpeakerProfile(copy) {
       syncSpeakerForm();
       const current = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
+      const voiceModel = discoveredModels("tts")[0]?.id || "";
       const base = copy ? structuredClone(current) : {
-        name: "New speaker profile", description: "", voiceModel: "mimo-v2.5-tts", instructions: "",
-        speakers: [{ name: "Speaker 1", backstory: "Required", personality: "Required", voiceId: "Chloe", style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "", chatterboxExaggeration: 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7, mimoTemperature: null, mimoTopP: null, mimoInstructionPreset: "", mimoInstructionText: "", elevenlabsStability: 0.5, elevenlabsSimilarityBoost: 0.75, elevenlabsStyle: 0, elevenlabsUseSpeakerBoost: true, elevenlabsSpeed: 1, elevenlabsSeed: null, elevenlabsTextNormalization: "auto" }],
+        name: "New speaker profile", description: "", voiceModel, instructions: "",
+        speakers: [{ name: "Speaker 1", backstory: "Required", personality: "Required", voiceId: defaultVoiceId(voiceModel), style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "", chatterboxExaggeration: 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7, mimoTemperature: null, mimoTopP: null, mimoInstructionPreset: "", mimoInstructionText: "", elevenlabsStability: 0.5, elevenlabsSimilarityBoost: 0.75, elevenlabsStyle: 0, elevenlabsUseSpeakerBoost: true, elevenlabsSpeed: 1, elevenlabsSeed: null, elevenlabsTextNormalization: "auto" }],
       };
       base.id = crypto.randomUUID();
       if (copy) base.name += " — Copy";
@@ -1874,6 +1995,7 @@
       modelCatalog = value.modelCatalog;
       elevenVoices = [];
       chatterboxVoices = [];
+      chatterboxVoicesLoaded = false;
       delete voiceRequests.elevenlabs;
       delete voiceRequests.chatterbox;
       configDirty = false;
@@ -2125,7 +2247,7 @@
       $("transcriptPromptGuidance").value = "";
       $("transcriptLockedPrompt").value = "";
       $("transcriptCapabilitySummary").innerHTML = '<p class="muted">Select an Episode Format to resolve provider rules.</p>';
-      $("transcript").value = "";
+      $("transcriptText").value = "";
       $("episodePlayerActions").innerHTML = "";
       updateWordCount();
       renderTranscriptSections();
@@ -2155,7 +2277,7 @@
       $("episodeName").value = currentEpisode.name;
       $("additionalInstructions").value = currentEpisode.additionalInstructions || "";
       $("transcriptPromptGuidance").value = currentEpisode.transcriptPromptGuidance || "";
-      $("transcript").value = currentEpisode.transcript || "";
+      $("transcriptText").value = currentEpisode.transcript || "";
       renderEpisodeSettingsFields();
       if (pendingDraft?.id === id) restoreEpisodeDraft(pendingDraft);
       else {
@@ -2179,7 +2301,7 @@
         name: $("episodeName").value,
         additionalInstructions: $("additionalInstructions").value,
         transcriptPromptGuidance: $("transcriptPromptGuidance").value,
-        transcript: $("transcript").value,
+        transcript: $("transcriptText").value,
         languageOverride: $("ttsLanguageOverride").value,
         episodeDraftDirty,
         transcriptDirty,
@@ -2194,7 +2316,7 @@
       $("episodeName").value = draft.name;
       $("additionalInstructions").value = draft.additionalInstructions;
       $("transcriptPromptGuidance").value = draft.transcriptPromptGuidance || "";
-      $("transcript").value = draft.transcript;
+      $("transcriptText").value = draft.transcript;
       $("ttsLanguageOverride").value = draft.languageOverride;
       episodeDraftDirty = draft.episodeDraftDirty;
       transcriptDirty = draft.transcriptDirty;
@@ -2227,7 +2349,7 @@
 
     async function saveTranscript() {
       if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
-      currentEpisode = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcript").value }) });
+      currentEpisode = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcriptText").value }) });
       transcriptDirty = false;
       await refreshState(currentEpisode.id);
       const warning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
@@ -2253,7 +2375,7 @@
     }
 
     function previewText(speakerName) {
-      const lines = $("transcript").value.split(/\r?\n/).map((line) => line.trim());
+      const lines = $("transcriptText").value.split(/\r?\n/).map((line) => line.trim());
       const line = lines.find((item) => item.startsWith(`${speakerName}:`) || item.startsWith(`${speakerName} [`)) || lines.find((item) => /:\s*\S/.test(item));
       if (!line) throw new Error("Save a transcript before previewing voices.");
       return line.slice(line.indexOf(":") + 1).trim().slice(0, 600);
@@ -2293,6 +2415,7 @@
       const { episodeProfile, speakerProfile } = currentEpisodeProfiles();
       $("applyLatestProfiles").disabled = episodeProfilesAreCurrent();
       if (!speakerProfile) return;
+      for (const speaker of speakerProfile.speakers) ensureProviderVoices(speaker.ttsModelOverride || speakerProfile.voiceModel);
       $("ttsLanguageOverride").innerHTML = ttsLanguageOptions($("ttsLanguageOverride").value);
       const language = selectedTtsLanguage();
       const errors = ttsCompatibilityErrors();
@@ -2625,9 +2748,12 @@
         transcriptPromptState = null;
         return renderTranscriptPrompt();
       }
+      const speakerProfileId = $("episodeHosts").value;
+      const savedSpeakerProfileId = currentEpisode?.speakerProfileId || currentEpisode?.speakerProfile?.id || currentEpisode?.episodeProfile?.speakerProfileId || "";
+      const profilesChanged = !currentEpisode || currentEpisode.episodeProfileId !== episodeProfileId || savedSpeakerProfileId !== speakerProfileId;
       transcriptPromptState = await api("/api/transcript-prompt/resolve", {
         method: "POST",
-        body: JSON.stringify({ episodeProfileId, guidance: $("transcriptPromptGuidance").value }),
+        body: JSON.stringify({ ...(profilesChanged ? { episodeProfileId, speakerProfileId } : { episodeId: currentEpisode.id }), guidance: $("transcriptPromptGuidance").value }),
       });
       renderTranscriptPrompt();
     }
@@ -2655,7 +2781,7 @@
       if (!currentEpisode) throw new Error("Select a saved episode first.");
       const languageOverride = $("ttsLanguageOverride").value;
       if ((episodeDraftDirty || transcriptPromptDirty) && await saveEpisode() === false) return;
-      await saveTranscript();
+      if (transcriptDirty) await saveTranscript();
       const lengthWarning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
       await queueTts(currentEpisode.id, languageOverride, lengthWarning);
     }
@@ -2674,7 +2800,7 @@
     }
 
     function updateWordCount() {
-      const spoken = $("transcript").value.split(/\r?\n/).filter((line) => /:\s*\S/.test(line)).map((line) => line.slice(line.indexOf(":") + 1)).join(" ");
+      const spoken = $("transcriptText").value.split(/\r?\n/).filter((line) => /:\s*\S/.test(line)).map((line) => line.slice(line.indexOf(":") + 1)).join(" ");
       const episodeProfile = currentEpisodeProfiles().episodeProfile || state?.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
       const text = spoken.replace(ttsCueRe, " ").trim();
       const words = text ? [...new Intl.Segmenter(episodeProfile?.language || "en", { granularity: "word" }).segment(text)].filter((part) => part.isWordLike).length : 0;
@@ -2809,6 +2935,7 @@
       if (button) return preview(Number(button.dataset.previewIndex));
     }));
     $("applyLatestProfiles").addEventListener("click", guard(applyLatestProfiles));
+    $("refreshTtsModels").addEventListener("click", guard(refreshModels));
     $("renderAudio").addEventListener("click", guard(renderAudio));
     $("episodePlayerActions").addEventListener("click", guard(async (event) => {
       const button = event.target.closest("[data-episode-player]");
@@ -2903,9 +3030,9 @@
     $("toggleFilteredModels").addEventListener("click", toggleFilteredModels);
     $("addCustomModel").addEventListener("click", guard(addCustomModelRow));
     $("applyModelSelection").addEventListener("click", applyModelSelection);
-    for (const id of ["buildEpisodeProfile", "buildKnowledge", "episodeName", "additionalInstructions"]) {
+    for (const id of ["buildEpisodeProfile", "episodeHosts", "buildKnowledge", "episodeName", "additionalInstructions"]) {
       $(id).addEventListener("input", () => { episodeDraftDirty = true; updateSaveButtons(); });
-      $(id).addEventListener("change", () => { episodeDraftDirty = true; updateSaveButtons(); if (id === "buildEpisodeProfile") { updateWordCount(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); } });
+      $(id).addEventListener("change", () => { episodeDraftDirty = true; updateSaveButtons(); if (["buildEpisodeProfile", "episodeHosts"].includes(id)) { updateWordCount(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); } });
     }
     $("view-speakers").addEventListener("input", (event) => {
       if (event.target.id !== "speakerProfileSelect") profilesDirty = true;
@@ -2935,7 +3062,7 @@
       // ponytail: wholesale PUT on change; fine for a pill
       await saveProfiles();
     }));
-    $("transcript").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); updateSaveButtons(); });
+    $("transcriptText").addEventListener("input", () => { transcriptDirty = true; updateWordCount(); updateSaveButtons(); });
     window.addEventListener("beforeunload", (event) => {
       if (!configDirty && !profilesDirty && !episodeDraftDirty && !transcriptDirty && !transcriptPromptDirty) return;
       event.preventDefault();
@@ -2945,7 +3072,7 @@
       const file = event.target.files[0];
       if (!file) return;
       try {
-        $("transcript").value = await file.text();
+        $("transcriptText").value = await file.text();
         transcriptDirty = true;
         updateWordCount();
         updateSaveButtons();
@@ -2957,9 +3084,12 @@
 
     $("rightbarToggle").addEventListener("click", () => setRightbarOpen(true));
     $("rightbarClose").addEventListener("click", () => setRightbarOpen(false));
+    $("notifyTranscript").addEventListener("change", (event) => { guard(() => setNotificationSetting("transcript", event.target.checked))(); });
+    $("notifyTts").addEventListener("change", (event) => { guard(() => setNotificationSetting("tts", event.target.checked))(); });
     $("toasts").addEventListener("click", () => setRightbarOpen(true));
     $("retryJobs").addEventListener("click", guard(refreshJobs));
     $("retryState").addEventListener("click", guard(() => refreshState(currentEpisode?.id)));
+    renderNotificationSettings();
     setRightbarOpen(rightbarOpen, rightbarOpen);
 
     document.addEventListener("keydown", (event) => {
@@ -3143,10 +3273,14 @@
       if (message?.role !== "assistant") return;
       const parsed = JSON.parse(message.content);
       if (!parsed.proposal) return;
+      const profileProposal = parsed.proposal.speakerProfile || parsed.proposal.episodeFormat;
       const buttons = document.querySelectorAll(`[data-apply-assistant="${index}"]`);
       buttons.forEach((button) => { button.disabled = true; });
       try {
+        if (profileProposal && profilesDirty && await saveProfiles() === false) return;
         const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index }) });
+        if (data.appliedType === "speakerProfile") activeSpeakerProfileId = data.appliedId;
+        if (data.appliedType === "episodeFormat") activeEpisodeProfileId = data.appliedId;
         await refreshState(data.episode?.id || currentEpisode?.id);
         if (data.plan?.id) loadPlanForm(data.plan);
         await refreshPlanIndex();

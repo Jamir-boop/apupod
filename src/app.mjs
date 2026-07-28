@@ -10,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
+import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -20,6 +21,15 @@ import { DEFAULT_DATA } from "./defaults.mjs";
 const HERE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
+const OPENCODE_GO_AUTH_VERSION = "2023-06-01";
+const OPENCODE_GO_CHAT_MODELS = new Set([
+  "grok-4.5", "glm-5.2", "glm-5.1", "glm-5", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5",
+  "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni", "hy3", "hy3-preview",
+]);
+const OPENCODE_GO_MESSAGES_MODELS = new Set([
+  "minimax-m3", "minimax-m2.7", "minimax-m2.5", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus",
+]);
 const ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const ELEVENLABS_MODELS_URL = "https://api.elevenlabs.io/v1/models";
 const ELEVENLABS_VOICES_URL = "https://api.elevenlabs.io/v2/voices?page_size=100&include_total_count=false";
@@ -27,6 +37,10 @@ const OPENAI_COMPATIBLE_MODELS_URL = "/models";
 const OPENAI_COMPATIBLE_CHAT_URL = "/chat/completions";
 const OPENAI_COMPATIBLE_TTS_URL = "/audio/speech";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_AUDIO_RESPONSE_BYTES = 128 * 1024 * 1024;
+const MAX_TTS_JSON_RESPONSE_BYTES = Math.ceil(MAX_AUDIO_RESPONSE_BYTES * 4 / 3) + 1024 * 1024;
+const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 const MODEL_TIMEOUT_MS = 15_000;
 const LLM_TIMEOUT_MS = 240_000;
 const TTS_TIMEOUT_MS = 120_000;
@@ -115,6 +129,7 @@ const DEFAULT_CONFIG = {
     mimo: { baseUrl: DEFAULT_MIMO_BASE_URL, enabled: true, activeModels: {} },
     elevenlabs: { enabled: true, activeModels: {} },
     openai: { baseUrl: DEFAULT_OPENAI_BASE_URL, llmBaseUrl: "", ttsBaseUrl: "", modelsUrl: "", enabled: true, activeModels: {} },
+    opencodeGo: { enabled: true, activeModels: {} },
     chatterbox: { baseUrl: "", modelsUrl: "", enabled: false, activeModels: {} },
   },
   compatibleConnections: [],
@@ -127,23 +142,28 @@ async function createAppContext(options = {}) {
   await ensureData(paths);
   const config = await readConfig(paths);
   if (activateReferencedModels(config, await readJson(paths.profiles))) await writeJsonAtomic(paths.config, config);
-  applyRuntimeConfig(config);
-  await interruptStaleJobs(paths);
-  await cleanupStoredArtifacts(paths);
-  await cleanupLegacyAssistantChats(paths);
   const context = {
     paths,
     fetchImpl,
     config,
     modelCatalog: createModelCatalog(),
-    modelRefresh: null,
+    modelRefreshTail: Promise.resolve(),
+    latestModelRefresh: null,
+    latestModelRefreshRevision: 0,
+    chatterboxVoiceCache: { revision: 0, voices: null },
     queue: [],
     activeJobId: null,
+    recentJobs: new Map(),
     mutationTail: Promise.resolve(),
     ffmpegCheck: null,
     chatBusy: new Map(),
   };
-  void refreshModelCatalog(context);
+  await cleanupInterruptedEpisodeDeletes(paths);
+  await interruptStaleJobs(paths);
+  for (const episode of (await listEpisodes(paths)).toReversed()) if (episode.job) rememberJob(context, episode.job);
+  await cleanupStoredArtifacts(context);
+  await cleanupLegacyAssistantChats(paths);
+  void queueModelCatalogRefresh(context).promise;
 
   return context;
 }
@@ -171,6 +191,20 @@ async function serializeMutation(context, action) {
     return await action();
   } finally {
     release();
+  }
+}
+
+const RETRY_MODEL_MUTATION = Symbol("retry-model-mutation");
+
+async function serializeWithLatestModelCatalog(context, action) {
+  for (;;) {
+    const latest = context.latestModelRefresh;
+    if (latest) await latest.promise;
+    const result = await serializeMutation(context, () => {
+      if (latest !== context.latestModelRefresh) return RETRY_MODEL_MUTATION;
+      return action();
+    });
+    if (result !== RETRY_MODEL_MUTATION) return result;
   }
 }
 
@@ -215,6 +249,7 @@ function defaultConfig() {
       mimo: { baseUrl: (process.env.MIMO_BASE_URL?.trim() || DEFAULT_MIMO_BASE_URL).replace(/\/+$/, ""), enabled: true, activeModels: {} },
       elevenlabs: { enabled: true, activeModels: {} },
       openai: structuredClone(DEFAULT_CONFIG.providers.openai),
+      opencodeGo: structuredClone(DEFAULT_CONFIG.providers.opencodeGo),
       chatterbox: structuredClone(DEFAULT_CONFIG.providers.chatterbox),
     },
     compatibleConnections: [],
@@ -246,6 +281,10 @@ function normalizeConfig(value) {
         modelsUrl: normalizeUrl(providers.openai?.modelsUrl || ""),
         enabled: providers.openai?.enabled !== false,
         activeModels: normalizeCapabilityMap(providers.openai?.activeModels || providers.openai?.modelCapabilities),
+      },
+      opencodeGo: {
+        enabled: providers.opencodeGo?.enabled !== false,
+        activeModels: normalizeOpenCodeGoCapabilityMap(providers.opencodeGo?.activeModels),
       },
       chatterbox: {
         baseUrl: normalizeUrl(providers.chatterbox?.baseUrl || ""),
@@ -284,6 +323,43 @@ function normalizeCapabilityMap(value) {
   }]));
 }
 
+function normalizeOpenCodeGoCapabilityMap(value) {
+  return Object.fromEntries(Object.entries(normalizeCapabilityMap(value)).filter(([id]) => openCodeGoProtocol(id)).map(([id, capability]) => [id, {
+    text: capability.text,
+    tts: false,
+  }]));
+}
+
+function openCodeGoProtocol(rawModelId) {
+  const modelId = String(rawModelId || "");
+  if (OPENCODE_GO_CHAT_MODELS.has(modelId)) return "chat";
+  if (OPENCODE_GO_MESSAGES_MODELS.has(modelId)) return "messages";
+  return null;
+}
+
+async function resolveOpenCodeGoCredential() {
+  const environmentKey = process.env.OPENCODE_GO_API_KEY?.trim();
+  if (environmentKey) return { key: environmentKey, source: "environment", error: null };
+  const dataHome = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share");
+  const authPath = join(dataHome, "opencode", "auth.json");
+  let auth;
+  try {
+    auth = await readFile(authPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return { key: "", source: null, error: "OpenCode Go login was not found. Run /connect in OpenCode or set OPENCODE_GO_API_KEY." };
+    return { key: "", source: null, error: "OpenCode Go auth file could not be read." };
+  }
+  let entry;
+  try {
+    entry = JSON.parse(auth)?.["opencode-go"];
+  } catch {
+    return { key: "", source: null, error: "OpenCode Go auth file contains invalid JSON." };
+  }
+  const key = entry?.type === "api" && typeof entry.key === "string" ? entry.key.trim() : "";
+  if (key) return { key, source: "opencode-login", error: null };
+  return { key: "", source: null, error: "OpenCode Go login was not found. Run /connect in OpenCode or set OPENCODE_GO_API_KEY." };
+}
+
 function activateReferencedModels(config, profiles) {
   let changed = false;
   const activate = (target, modelId, type) => {
@@ -296,11 +372,14 @@ function activateReferencedModels(config, profiles) {
   const activateComposite = (modelId, type) => {
     const parsed = parseCompatibleModelId(modelId);
     if (!parsed) return false;
+    if (parsed.connectionId === "opencode-go" && (type !== "text" || !openCodeGoProtocol(parsed.modelId))) return true;
     const target = parsed.connectionId === "openai"
       ? config.providers.openai.activeModels
-      : parsed.connectionId === "chatterbox"
-        ? config.providers.chatterbox.activeModels
-        : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)?.activeModels;
+      : parsed.connectionId === "opencode-go"
+        ? config.providers.opencodeGo.activeModels
+        : parsed.connectionId === "chatterbox"
+          ? config.providers.chatterbox.activeModels
+          : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)?.activeModels;
     if (target) activate(target, parsed.modelId, type);
     return true;
   };
@@ -317,7 +396,8 @@ function activateReferencedModels(config, profiles) {
   return changed;
 }
 
-function redactConfig(config) {
+async function redactConfig(config) {
+  const openCodeGoCredential = await resolveOpenCodeGoCredential();
   return {
     providers: {
       mimo: {
@@ -332,6 +412,11 @@ function redactConfig(config) {
         ...config.providers.openai,
         hasApiKey: Boolean(process.env.OPENAI_API_KEY?.trim()),
       },
+      opencodeGo: {
+        ...config.providers.opencodeGo,
+        hasApiKey: Boolean(openCodeGoCredential.key),
+        credentialSource: openCodeGoCredential.source,
+      },
       chatterbox: {
         ...config.providers.chatterbox,
         hasApiKey: Boolean(process.env.CHATTERBOX_API_KEY?.trim()),
@@ -344,36 +429,98 @@ function redactConfig(config) {
   };
 }
 
-function applyRuntimeConfig(config) {
-  process.env.MIMO_BASE_URL = config.providers.mimo.baseUrl || DEFAULT_MIMO_BASE_URL;
-}
-
-function mimoBaseUrl() {
-  return (process.env.MIMO_BASE_URL?.trim() || DEFAULT_MIMO_BASE_URL).replace(/\/+$/, "");
-}
-
-function createModelCatalog() {
+function createModelCatalog(credentials = null) {
+  const credential = (name) => credentials ? credentials[name] || "" : process.env[name]?.trim() || "";
   return {
     status: "loading",
     updatedAt: null,
     languages: structuredClone(LANGUAGE_OPTIONS),
     providers: {
-      mimo: { configured: Boolean(process.env.MIMO_API_KEY?.trim()), status: "loading", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
-      elevenlabs: { configured: Boolean(process.env.ELEVENLABS_API_KEY?.trim()), status: "loading", error: null, discoveredModels: [], ttsModels: [] },
-      openai: { id: "openai", name: "OpenAI", configured: Boolean(process.env.OPENAI_API_KEY?.trim()), status: "loading", error: null, textModels: [], ttsModels: [] },
+      mimo: { configured: Boolean(credential("MIMO_API_KEY")), status: "loading", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
+      elevenlabs: { configured: Boolean(credential("ELEVENLABS_API_KEY")), status: "loading", error: null, discoveredModels: [], ttsModels: [] },
+      openai: { id: "openai", name: "OpenAI", configured: Boolean(credential("OPENAI_API_KEY")), status: "loading", error: null, textModels: [], ttsModels: [] },
+      opencodeGo: { id: "opencode-go", name: "OpenCode Go", configured: Boolean(credential("OPENCODE_GO_API_KEY")), status: "loading", error: null, credentialSource: null, discoveredModels: [], textModels: [], ttsModels: [] },
       chatterbox: { id: "chatterbox", name: "Chatterbox", configured: false, status: "unconfigured", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
       compatible: [],
     },
   };
 }
 
-async function refreshModelCatalog(context) {
-  if (context.modelRefresh) return context.modelRefresh;
-  const catalog = context.modelCatalog;
+function modelDiscoverySnapshot(context) {
+  const config = structuredClone(context.config);
+  const names = new Set([
+    "MIMO_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "OPENAI_API_KEY",
+    "CHATTERBOX_API_KEY",
+    ...config.compatibleConnections.map((connection) => connection.apiKeyEnv),
+  ]);
+  const credentials = Object.fromEntries([...names].map((name) => [name, process.env[name]?.trim() || ""]));
+  return resolveOpenCodeGoCredential().then((openCodeGoCredential) => ({
+    config,
+    credentials: {
+      ...credentials,
+      OPENCODE_GO_API_KEY: openCodeGoCredential.key,
+    },
+    openCodeGoCredentialSource: openCodeGoCredential.source,
+    openCodeGoCredentialError: openCodeGoCredential.error,
+  }));
+}
+
+function queueModelCatalogRefresh(context, { force = false } = {}) {
+  if (!force && context.latestModelRefresh?.pending) return context.latestModelRefresh;
+  const revision = context.latestModelRefreshRevision + 1;
+  context.latestModelRefreshRevision = revision;
+  const snapshot = modelDiscoverySnapshot(context);
+  context.chatterboxVoiceCache.revision += 1;
+  context.chatterboxVoiceCache.voices = null;
+  context.modelCatalog = { ...structuredClone(context.modelCatalog), status: "loading" };
+  const promise = context.modelRefreshTail
+    .then(() => snapshot)
+    .then((value) => buildModelCatalog(context.fetchImpl, value))
+    .then((catalog) => {
+      if (context.latestModelRefreshRevision === revision) context.modelCatalog = catalog;
+      return catalog;
+    });
+  context.modelRefreshTail = promise.catch(() => {});
+  const refresh = { revision, snapshot, promise, pending: true };
+  context.latestModelRefresh = refresh;
+  void promise.then(() => { refresh.pending = false; }, () => { refresh.pending = false; });
+  return refresh;
+}
+
+async function awaitLatestModelCatalog(context) {
+  for (;;) {
+    const latest = context.latestModelRefresh;
+    if (!latest) return context.modelCatalog;
+    const catalog = await latest.promise;
+    if (latest === context.latestModelRefresh) return catalog;
+  }
+}
+
+async function modelRuntimeSnapshot(context) {
+  for (;;) {
+    const refresh = context.latestModelRefresh;
+    if (!refresh) {
+      const snapshot = await modelDiscoverySnapshot(context);
+      return { ...snapshot, paths: context.paths, fetchImpl: context.fetchImpl, modelCatalog: structuredClone(context.modelCatalog), chatterboxVoiceCache: context.chatterboxVoiceCache };
+    }
+    const [snapshot, modelCatalog] = await Promise.all([refresh.snapshot, refresh.promise]);
+    if (refresh === context.latestModelRefresh) {
+      return { ...snapshot, paths: context.paths, fetchImpl: context.fetchImpl, modelCatalog: structuredClone(modelCatalog), chatterboxVoiceCache: context.chatterboxVoiceCache };
+    }
+  }
+}
+
+async function buildModelCatalog(fetchImpl, snapshot) {
+  const catalog = createModelCatalog(snapshot.credentials);
+  const context = { ...snapshot, fetchImpl, modelCatalog: catalog };
   const mimo = catalog.providers.mimo;
   const elevenlabs = catalog.providers.elevenlabs;
   const openai = catalog.providers.openai;
   const openaiConnection = builtInOpenAiConnection(context.config);
+  const opencodeGo = catalog.providers.opencodeGo;
+  const openCodeGoConnection = builtInOpenCodeGoConnection(context.config);
   const chatterbox = catalog.providers.chatterbox;
   const chatterboxConnection = builtInChatterboxConnection(context.config);
   const compatible = context.config.compatibleConnections.map((connection) => ({
@@ -387,11 +534,13 @@ async function refreshModelCatalog(context) {
     discoveredModels: [],
   }));
   catalog.providers.compatible = compatible;
-  mimo.configured = Boolean(context.config.providers.mimo.enabled && process.env.MIMO_API_KEY?.trim());
-  elevenlabs.configured = Boolean(context.config.providers.elevenlabs.enabled && process.env.ELEVENLABS_API_KEY?.trim());
-  openai.configured = Boolean(openaiConnection.enabled && process.env.OPENAI_API_KEY?.trim());
+  mimo.configured = Boolean(context.config.providers.mimo.enabled && context.credentials.MIMO_API_KEY);
+  elevenlabs.configured = Boolean(context.config.providers.elevenlabs.enabled && context.credentials.ELEVENLABS_API_KEY);
+  openai.configured = Boolean(openaiConnection.enabled && context.credentials.OPENAI_API_KEY);
+  opencodeGo.configured = Boolean(openCodeGoConnection.enabled && context.credentials.OPENCODE_GO_API_KEY);
+  opencodeGo.credentialSource = snapshot.openCodeGoCredentialSource;
   chatterbox.configured = Boolean(chatterboxConnection.enabled && chatterboxConnection.baseUrl);
-  for (const provider of [mimo, elevenlabs, openai, chatterbox, ...compatible]) {
+  for (const provider of [mimo, elevenlabs, openai, opencodeGo, chatterbox, ...compatible]) {
     provider.status = provider.configured ? "loading" : "unconfigured";
     provider.error = provider.configured ? null : unconfiguredProviderMessage(context, provider);
     provider.ttsModels = [];
@@ -401,35 +550,30 @@ async function refreshModelCatalog(context) {
   catalog.status = "loading";
   catalog.languages = structuredClone(LANGUAGE_OPTIONS);
 
-  const refresh = (async () => {
-    await Promise.all([
-      mimo.configured ? loadMimoModels(context).catch((error) => setProviderError(mimo, error)) : null,
-      elevenlabs.configured ? loadElevenLabsModels(context).catch((error) => setProviderError(elevenlabs, error)) : null,
-      openai.configured ? loadCompatibleModels(context, openaiConnection, openai).catch((error) => setProviderError(openai, error)) : null,
-      chatterbox.configured ? loadCompatibleModels(context, chatterboxConnection, chatterbox).catch((error) => setProviderError(chatterbox, error)) : null,
-      ...context.config.compatibleConnections.map((connection) => {
-        const provider = compatible.find((item) => item.id === connection.id);
-        return provider?.configured ? loadCompatibleModels(context, connection, provider).catch((error) => setProviderError(provider, error)) : null;
-      }),
-    ]);
-    const configured = [mimo, elevenlabs, openai, chatterbox, ...compatible].filter((provider) => provider.configured);
-    const ready = configured.filter((provider) => provider.status === "ready").length;
-    mergeDiscoveredLanguages(catalog);
-    catalog.status = configured.length === 0 ? "unconfigured" : ready === configured.length ? "ready" : ready > 0 ? "partial" : "error";
-    catalog.updatedAt = new Date().toISOString();
-  })();
-  context.modelRefresh = refresh;
-  try {
-    await refresh;
-  } finally {
-    if (context.modelRefresh === refresh) context.modelRefresh = null;
-  }
+  await Promise.all([
+    mimo.configured ? loadMimoModels(context).catch((error) => setProviderError(mimo, error)) : null,
+    elevenlabs.configured ? loadElevenLabsModels(context).catch((error) => setProviderError(elevenlabs, error)) : null,
+    openai.configured ? loadCompatibleModels(context, openaiConnection, openai).catch((error) => setProviderError(openai, error)) : null,
+    opencodeGo.configured ? loadCompatibleModels(context, openCodeGoConnection, opencodeGo).catch((error) => setProviderError(opencodeGo, error)) : null,
+    chatterbox.configured ? loadCompatibleModels(context, chatterboxConnection, chatterbox).catch((error) => setProviderError(chatterbox, error)) : null,
+    ...context.config.compatibleConnections.map((connection) => {
+      const provider = compatible.find((item) => item.id === connection.id);
+      return provider?.configured ? loadCompatibleModels(context, connection, provider).catch((error) => setProviderError(provider, error)) : null;
+    }),
+  ]);
+  const configured = [mimo, elevenlabs, openai, opencodeGo, chatterbox, ...compatible].filter((provider) => provider.configured);
+  const ready = configured.filter((provider) => provider.status === "ready").length;
+  mergeDiscoveredLanguages(catalog);
+  catalog.status = configured.length === 0 ? "unconfigured" : ready === configured.length ? "ready" : ready > 0 ? "partial" : "error";
+  catalog.updatedAt = new Date().toISOString();
+  return catalog;
 }
 
 function unconfiguredProviderMessage(context, provider) {
   if (provider === context.modelCatalog.providers.mimo) return context.config.providers.mimo.enabled ? "API key is not configured." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.elevenlabs) return context.config.providers.elevenlabs.enabled ? "API key is not configured." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.openai) return context.config.providers.openai.enabled ? "API key is not configured." : "Provider is disabled.";
+  if (provider === context.modelCatalog.providers.opencodeGo) return context.config.providers.opencodeGo.enabled ? context.openCodeGoCredentialError || "OpenCode Go login was not found. Run /connect in OpenCode or set OPENCODE_GO_API_KEY." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.chatterbox) return context.config.providers.chatterbox.enabled ? "Base URL is not configured." : "Provider is disabled.";
   const connection = context.config.compatibleConnections.find((item) => item.id === provider.id);
   return connection?.enabled ? "Base URL is not configured." : "Connection is disabled.";
@@ -437,7 +581,7 @@ function unconfiguredProviderMessage(context, provider) {
 
 async function loadMimoModels(context) {
   const provider = context.modelCatalog.providers.mimo;
-  const data = await fetchJson(context.fetchImpl, `${mimoBaseUrl()}/models`, { "api-key": process.env.MIMO_API_KEY.trim() }, "MiMo models");
+  const data = await fetchJson(context.fetchImpl, `${context.config.providers.mimo.baseUrl}/models`, { "api-key": context.credentials.MIMO_API_KEY }, "MiMo models");
   const models = Array.isArray(data?.data) ? data.data : [];
   provider.discoveredModels = models.filter((model) => typeof model.id === "string" && !model.id.includes("-asr")).map((model) => ({
     id: model.id,
@@ -455,7 +599,7 @@ async function loadMimoModels(context) {
 
 async function loadElevenLabsModels(context) {
   const provider = context.modelCatalog.providers.elevenlabs;
-  const data = await fetchJson(context.fetchImpl, ELEVENLABS_MODELS_URL, { "xi-api-key": process.env.ELEVENLABS_API_KEY.trim() }, "ElevenLabs models");
+  const data = await fetchJson(context.fetchImpl, ELEVENLABS_MODELS_URL, { "xi-api-key": context.credentials.ELEVENLABS_API_KEY }, "ElevenLabs models");
   provider.discoveredModels = (Array.isArray(data) ? data : [])
     .filter((model) => model?.can_do_text_to_speech && typeof model.model_id === "string")
     .map((model) => ({
@@ -474,7 +618,7 @@ async function loadElevenLabsModels(context) {
 }
 
 async function loadCompatibleModels(context, connection, provider) {
-  const apiKey = process.env[connection.apiKeyEnv]?.trim();
+  const apiKey = context.credentials[connection.apiKeyEnv];
   if (connection.requiresApiKey && !apiKey) throw new Error("API key is not configured.");
   const requests = await Promise.allSettled(modelDiscoveryUrls(connection).map((url) => fetchJson(
     context.fetchImpl,
@@ -493,20 +637,22 @@ async function loadCompatibleModels(context, connection, provider) {
   for (const model of models) {
     const rawId = typeof model?.id === "string" ? model.id : "";
     if (!rawId) continue;
-    const capability = guessCompatibleCapability(rawId);
+    const protocol = connection.kind === "opencodeGo" ? openCodeGoProtocol(rawId) : null;
+    const capability = connection.kind === "opencodeGo" ? { text: Boolean(protocol), tts: false } : compatibleCapability(model);
     const shared = {
       id: compatibleModelId(connection.id, rawId),
       rawId,
       name: model?.name || rawId,
-      provider: ["openai", "chatterbox"].includes(connection.kind) ? connection.kind : "compatible",
+      provider: ["openai", "opencodeGo", "chatterbox"].includes(connection.kind) ? connection.kind : "compatible",
       connectionId: connection.id,
       connectionName: connection.name,
       suggested: capability,
+      ...(connection.kind === "opencodeGo" ? { protocol, supported: Boolean(protocol) } : {}),
     };
     discoveredModels.push(shared);
   }
   provider.discoveredModels = discoveredModels;
-  provider.textModels = discoveredModels.filter((model) => connection.activeModels?.[model.rawId]?.text);
+  provider.textModels = discoveredModels.filter((model) => model.supported !== false && connection.activeModels?.[model.rawId]?.text);
   provider.ttsModels = discoveredModels.filter((model) => connection.activeModels?.[model.rawId]?.tts);
   provider.status = "ready";
   provider.error = null;
@@ -528,12 +674,27 @@ async function fetchJson(fetchImpl, url, headers, label) {
   return fetchJsonWithBody(fetchImpl, url, { headers }, label, MODEL_TIMEOUT_MS);
 }
 
+async function readResponseBuffer(response, maximum, label) {
+  const limit = response.ok ? maximum : MAX_ERROR_RESPONSE_BYTES;
+  const declared = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declared) && declared > limit) throw new Error(`${label} response exceeds ${limit} byte limit.`);
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of response.body || []) {
+    const buffer = Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > limit) throw new Error(`${label} response exceeds ${limit} byte limit.`);
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, bytes);
+}
+
 async function fetchJsonWithBody(fetchImpl, url, options, label, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, { ...options, signal: controller.signal });
-    const text = await response.text();
+    const text = (await readResponseBuffer(response, MAX_JSON_RESPONSE_BYTES, label)).toString("utf8");
     let data;
     try {
       data = JSON.parse(text);
@@ -545,7 +706,8 @@ async function fetchJsonWithBody(fetchImpl, url, options, label, timeoutMs) {
     return data;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
-    throw error;
+    if (String(error?.message || error).startsWith(`${label} request`)) throw error;
+    throw new Error(`${label} request failed: ${error.message || error}`);
   } finally {
     clearTimeout(timer);
   }
@@ -556,8 +718,8 @@ async function fetchBytes(fetchImpl, url, options, label, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw new Error(`${label} request failed: HTTP ${response.status} ${await response.text() || response.statusText}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = await readResponseBuffer(response, MAX_AUDIO_RESPONSE_BYTES, label);
+    if (!response.ok) throw new Error(`${label} request failed: HTTP ${response.status} ${bytes.toString("utf8") || response.statusText}`);
     if (bytes.length === 0) throw new Error(`${label} returned empty audio.`);
     return {
       bytes,
@@ -566,7 +728,8 @@ async function fetchBytes(fetchImpl, url, options, label, timeoutMs) {
     };
   } catch (error) {
     if (error?.name === "AbortError") throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
-    throw error;
+    if (String(error?.message || error).startsWith(`${label} request`)) throw error;
+    throw new Error(`${label} request failed: ${error.message || error}`);
   } finally {
     clearTimeout(timer);
   }
@@ -608,12 +771,17 @@ function usesResponsesApi(rawModelId) {
 
 function compatibleConnection(context, connectionId) {
   if (connectionId === "openai") return builtInOpenAiConnection(context.config);
+  if (connectionId === "opencode-go") return builtInOpenCodeGoConnection(context.config);
   if (connectionId === "chatterbox") return builtInChatterboxConnection(context.config);
   return context.config.compatibleConnections.find((item) => item.id === connectionId);
 }
 
 function builtInOpenAiConnection(config) {
   return { id: "openai", name: "OpenAI", apiKeyEnv: "OPENAI_API_KEY", kind: "openai", requiresApiKey: true, ...config.providers.openai };
+}
+
+function builtInOpenCodeGoConnection(config) {
+  return { id: "opencode-go", name: "OpenCode Go", apiKeyEnv: "OPENCODE_GO_API_KEY", kind: "opencodeGo", requiresApiKey: true, baseUrl: OPENCODE_GO_BASE_URL, modelsUrl: `${OPENCODE_GO_BASE_URL}/models`, llmBaseUrl: "", ttsBaseUrl: "", ...config.providers.opencodeGo };
 }
 
 function builtInChatterboxConnection(config) {
@@ -637,16 +805,25 @@ function guessCompatibleCapability(modelId) {
   return { text: true, tts: false };
 }
 
+function compatibleCapability(model) {
+  const capabilities = model?.capabilities;
+  if (typeof capabilities?.text === "boolean" || typeof capabilities?.tts === "boolean") {
+    return { text: capabilities.text === true, tts: capabilities.tts === true };
+  }
+  return guessCompatibleCapability(model?.id);
+}
+
 function availableModelIds(context) {
   const providers = context.modelCatalog.providers;
   const openaiText = providers.openai.textModels.map((model) => model.id);
+  const openCodeGoText = providers.opencodeGo.textModels.map((model) => model.id);
   const openaiTts = providers.openai.ttsModels.map((model) => model.id);
   const chatterboxText = providers.chatterbox.textModels.map((model) => model.id);
   const chatterboxTts = providers.chatterbox.ttsModels.map((model) => model.id);
   const compatibleText = (providers.compatible || []).flatMap((provider) => provider.textModels.map((model) => model.id));
   const compatibleTts = (providers.compatible || []).flatMap((provider) => provider.ttsModels.map((model) => model.id));
   return {
-    textModels: new Set([...providers.mimo.textModels.map((model) => model.id), ...openaiText, ...chatterboxText, ...compatibleText]),
+    textModels: new Set([...providers.mimo.textModels.map((model) => model.id), ...openaiText, ...openCodeGoText, ...chatterboxText, ...compatibleText]),
     ttsModels: new Set([...providers.mimo.ttsModels, ...providers.elevenlabs.ttsModels, ...openaiTts, ...chatterboxTts, ...compatibleTts].map((model) => typeof model === "string" ? model : model.id)),
     languages: new Set(context.modelCatalog.languages.map((language) => language.id)),
   };
@@ -659,8 +836,12 @@ function isElevenLabsModel(context, model) {
 function isCompatibleTtsModel(context, modelId) {
   const parsed = parseCompatibleModelId(modelId);
   if (!parsed) return false;
+  return compatibleModelProvider(context, parsed.connectionId)?.ttsModels.some((model) => model.id === modelId) === true;
+}
+
+function compatibleModelProvider(context, connectionId) {
   return [context.modelCatalog.providers.openai, context.modelCatalog.providers.chatterbox, ...(context.modelCatalog.providers.compatible || [])]
-    .some((provider) => provider.id === parsed.connectionId && provider.ttsModels.some((model) => model.id === modelId));
+    .find((provider) => provider.id === connectionId);
 }
 
 function resolveLanguage(context, id) {
@@ -671,11 +852,29 @@ function resolveLanguage(context, id) {
 
 function modelLanguageError(context, modelId, language) {
   if (modelId === "mimo-v2.5-tts") {
+    const provider = context.modelCatalog.providers.mimo;
+    if (!provider.ttsModels.some((model) => model.id === modelId)) return provider.status === "loading"
+      ? "MiMo models are still loading; retry shortly."
+      : provider.status === "error" ? `MiMo is unavailable: ${provider.error || "connection failed"}.`
+        : provider.status === "unconfigured" ? "MiMo is not configured." : `TTS model "${modelId}" is not active.`;
     return MIMO_LANGUAGE_CODES.has(language.apiCode) ? "" : `MiMo preset TTS does not support ${language.name}; choose an ElevenLabs model.`;
   }
-  if (isCompatibleTtsModel(context, modelId)) return "";
+  const parsed = parseCompatibleModelId(modelId);
+  if (parsed) {
+    const provider = compatibleModelProvider(context, parsed.connectionId);
+    const connection = compatibleConnection(context, parsed.connectionId);
+    if (provider?.status === "loading") return `${provider.name} models are still loading; retry shortly.`;
+    if (provider?.status === "error") return `${provider.name} is unavailable${connection?.baseUrl ? ` at ${connection.baseUrl}` : ""}: ${provider.error || "connection failed"}. Start or reconnect it, then refresh models.`;
+    if (provider?.status === "unconfigured") return `${provider.name} is not configured.`;
+    if (isCompatibleTtsModel(context, modelId)) return "";
+  }
   if (!isElevenLabsModel(context, modelId)) return `Unknown TTS model "${modelId}".`;
-  const model = context.modelCatalog.providers.elevenlabs.ttsModels.find((item) => item.id === modelId);
+  const provider = context.modelCatalog.providers.elevenlabs;
+  const model = provider.ttsModels.find((item) => item.id === modelId);
+  if (!model) return provider.status === "loading"
+    ? "ElevenLabs models are still loading; retry shortly."
+    : provider.status === "error" ? `ElevenLabs is unavailable: ${provider.error || "connection failed"}.`
+      : provider.status === "unconfigured" ? "ElevenLabs is not configured." : `TTS model "${modelId}" is not active.`;
   if (model?.languages?.length && !model.languages.some((item) => item.id === language.apiCode)) {
     return `${model.name || modelId} does not support ${language.name}.`;
   }
@@ -711,7 +910,18 @@ async function interruptStaleJobs(paths) {
   }
 }
 
-async function cleanupStoredArtifacts(paths) {
+async function cleanupInterruptedEpisodeDeletes(paths) {
+  for (const entry of await readdir(paths.episodes, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.endsWith(".deleting")) continue;
+    const id = entry.name.slice(0, -9);
+    if (!ID_RE.test(id)) continue;
+    await rm(join(paths.episodes, entry.name), { recursive: true, force: true })
+      .catch((error) => console.warn(`[episode:${id}] deferred deletion cleanup failed: ${error.message || error}`));
+  }
+}
+
+async function cleanupStoredArtifacts(context) {
+  const { paths } = context;
   const profiles = await readJson(paths.profiles);
   let removed = 0;
   for (const entry of await readdir(paths.episodes, { withFileTypes: true })) {
@@ -747,11 +957,18 @@ async function cleanupStoredArtifacts(paths) {
         const languageId = episode.job?.type === "tts" && episode.job.options?.languageOverride || episodeProfile.language;
         const language = LANGUAGE_OPTIONS.find((item) => item.id === languageId);
         if (!language) throw new Error(`Unsupported saved language "${languageId}".`);
-        const turns = parseTranscript(transcript, speakerProfile.speakers, episodeProfile.numSegments).segments.flatMap((segment) => segment.turns);
-        for (const turn of turns) {
+        const turns = parseTranscript(transcript, speakerProfile.speakers, episodeProfile.numSegments).segments.flatMap((segment) =>
+          segment.turns.map((turn, index) => ({ turn, segmentEnd: index === segment.turns.length - 1 })));
+        for (let index = 0; index < turns.length; index += 1) {
+          const { turn } = turns[index];
           const speaker = speakerProfile.speakers.find((item) => item.name === turn.speaker);
           if (!speaker) throw new Error(`Speaker "${turn.speaker}" is unavailable.`);
-          usedKeys.add(clipCacheKey(turnClipDescriptor(speakerProfile, speaker, turn, language)));
+          const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
+          const textVariants = new Set([turn.text]);
+          try { textVariants.add(spokenTextForModel(context, model, turn.text, language)); } catch {}
+          for (const text of textVariants) usedKeys.add(clipCacheKey(turnClipDescriptor(context, speakerProfile, speaker, { ...turn, text }, language)));
+          const gap = pauseAfterTurnSeconds(turns, index);
+          if (gap > 0) usedKeys.add(`silence-${Math.round(gap * 1000)}ms`);
         }
       }
       for (const name of ["outline.json", "transcript.json", "concat.txt"]) {
@@ -821,11 +1038,20 @@ async function isNormalizedWav(path) {
 
 async function listJobsResponse(res, context) {
   const episodes = await listEpisodes(context.paths);
-  const jobs = episodes
-    .filter((episode) => episode.job)
-    .map((episode) => ({ ...episode.job, episodeName: episode.name }))
+  const names = new Map(episodes.map((episode) => [episode.id, episode.name]));
+  for (const episode of episodes.toReversed()) if (episode.job) rememberJob(context, episode.job);
+  const jobs = [...context.recentJobs.values()]
+    .filter((job) => names.has(job.episodeId))
+    .map((job) => ({ ...job, episodeName: names.get(job.episodeId) || job.episodeId }))
     .sort((a, b) => String(b.queuedAt || b.updatedAt).localeCompare(String(a.queuedAt || a.updatedAt)));
   sendJson(res, 200, { activeJobId: context.activeJobId, jobs });
+}
+
+function rememberJob(context, job) {
+  if (!job?.id) return;
+  context.recentJobs.delete(job.id);
+  context.recentJobs.set(job.id, structuredClone(job));
+  while (context.recentJobs.size > 30) context.recentJobs.delete(context.recentJobs.keys().next().value);
 }
 
 async function routeRequest(req, res, context) {
@@ -855,17 +1081,20 @@ async function routeRequest(req, res, context) {
       listPlans(context.paths),
       listEpisodes(context.paths),
     ]);
-    return sendJson(res, 200, { profiles, knowledgeBases, plans, episodes, config: redactConfig(context.config) });
+    return sendJson(res, 200, { profiles, knowledgeBases, plans, episodes, config: await redactConfig(context.config) });
   }
 
   if (method === "GET" && path === "/api/config") {
-    return sendJson(res, 200, redactConfig(context.config));
+    return sendJson(res, 200, await redactConfig(context.config));
   }
 
   if (method === "PUT" && path === "/api/config") {
     const value = await readJsonBody(req);
-    const saved = await serializeMutation(context, () => saveConfigRequest(context, value));
-    return sendJson(res, 200, saved);
+    const { saved, refresh } = await serializeMutation(context, async () => ({
+      saved: await saveConfigRequest(context, value),
+      refresh: queueModelCatalogRefresh(context, { force: true }),
+    }));
+    return sendJson(res, 200, { ...saved, modelCatalog: await refresh.promise });
   }
 
   if (method === "GET" && path === "/api/models") {
@@ -873,7 +1102,7 @@ async function routeRequest(req, res, context) {
   }
 
   if (method === "POST" && path === "/api/models/refresh") {
-    void refreshModelCatalog(context);
+    void queueModelCatalogRefresh(context).promise;
     return sendJson(res, 202, { status: "loading" });
   }
 
@@ -883,7 +1112,7 @@ async function routeRequest(req, res, context) {
 
   if (method === "PUT" && path === "/api/profiles") {
     const value = await readJsonBody(req);
-    const result = await serializeMutation(context, async () => {
+    const result = await serializeWithLatestModelCatalog(context, async () => {
       const models = availableModelIds(context);
       const current = await readJson(context.paths.profiles);
       mergeSavedProfileSelections(models, current);
@@ -915,7 +1144,7 @@ async function routeRequest(req, res, context) {
   }
 
   if (method === "POST" && path === "/api/plans") {
-    return serializeMutation(context, () => createPlanRequest(req, res, context));
+    return serializeWithLatestModelCatalog(context, () => createPlanRequest(req, res, context));
   }
 
   if (method === "POST" && path === "/api/plans/chat") {
@@ -927,11 +1156,12 @@ async function routeRequest(req, res, context) {
   }
 
   if (method === "POST" && path === "/api/preview") {
+    await awaitLatestModelCatalog(context);
     return previewVoice(req, res, context);
   }
 
   if (method === "GET" && path === "/api/tts/elevenlabs/voices") {
-    return listElevenLabsVoices(res, context.fetchImpl);
+    return listElevenLabsVoices(res, context);
   }
 
   if (method === "GET" && path === "/api/tts/chatterbox/voices") {
@@ -951,6 +1181,7 @@ async function routeRequest(req, res, context) {
   }
 
   if (method === "POST" && path === "/api/transcript-prompt/resolve") {
+    await awaitLatestModelCatalog(context);
     return resolveTranscriptPromptRequest(req, res, context);
   }
 
@@ -975,7 +1206,7 @@ async function routeRequest(req, res, context) {
     if (method === "GET" && !action) return getPlanResponse(res, context.paths, id);
     if (method === "PUT" && !action) return serializeMutation(context, () => updatePlanRequest(req, res, context, id));
     if (method === "DELETE" && !action) return serializeMutation(context, () => deletePlanRequest(res, context, id));
-    if (method === "POST" && action === "generate") return serializeMutation(context, () => generatePlanRequest(req, res, context, id));
+    if (method === "POST" && action === "generate") return generatePlanRequest(req, res, context, id);
     if (method === "POST" && action === "create-episodes") return serializeMutation(context, () => createPlanEpisodesRequest(req, res, context, id));
   }
 
@@ -986,10 +1217,13 @@ async function routeRequest(req, res, context) {
     if (method === "GET" && !action) return getEpisodeResponse(res, context.paths, id);
     if (method === "DELETE" && !action) return serializeMutation(context, () => deleteEpisodeRequest(res, context, id));
     if (method === "PATCH" && !action) return serializeMutation(context, () => renameEpisodeRequest(req, res, context.paths, id));
-    if (method === "PUT" && action === "transcript") return serializeMutation(context, () => saveTranscriptRequest(req, res, context, id));
+    if (method === "PUT" && action === "transcript") return serializeWithLatestModelCatalog(context, () => saveTranscriptRequest(req, res, context, id));
     if (method === "PUT" && action === "profiles") return serializeMutation(context, () => applyLatestProfilesRequest(res, context.paths, id));
-    if (method === "POST" && action === "generate") return serializeMutation(context, () => enqueueTranscriptJob(req, res, context, id));
-    if (method === "POST" && action === "render") return serializeMutation(context, () => enqueueTtsJob(req, res, context, id));
+    if (method === "POST" && action === "generate") return serializeWithLatestModelCatalog(context, () => enqueueTranscriptJob(req, res, context, id));
+    if (method === "POST" && action === "render") {
+      await ensureFfmpeg(context);
+      return serializeWithLatestModelCatalog(context, () => enqueueTtsJob(req, res, context, id));
+    }
   }
 
   const artifactMatch = path.match(/^\/artifacts\/([a-zA-Z0-9_-]+)\/episode\.mp3$/);
@@ -1068,16 +1302,38 @@ async function deleteKnowledgeBase(res, context, id) {
 async function deleteEpisodeRequest(res, context, id) {
   const episode = await loadEpisode(context.paths, id, false);
   if (isActiveJob(episode.job)) throw conflict("Wait for the episode's active job to finish before deleting it.");
-  await rm(episodeDir(context.paths, id), { recursive: true, force: true });
   // ponytail: linear scan over all plans, index it if plans ever number in the hundreds
+  const updates = [];
   for (const entry of await listPlans(context.paths)) {
     const plan = await loadPlan(context.paths, entry.id);
     if (!plan.episodes.some((item) => item.createdEpisodeId === id)) continue;
-    plan.episodes = plan.episodes.filter((item) => item.createdEpisodeId !== id);
-    plan.updatedAt = new Date().toISOString();
-    await savePlan(context.paths, plan);
+    updates.push({ before: plan, after: { ...plan, episodes: plan.episodes.filter((item) => item.createdEpisodeId !== id), updatedAt: new Date().toISOString() } });
   }
-  sendJson(res, 200, { id, deleted: true });
+  const directory = episodeDir(context.paths, id);
+  const staged = `${directory}.deleting`;
+  if (await exists(staged)) throw conflict("An interrupted deletion must be cleaned up by restarting the server.");
+  // ponytail: no cross-file journal; a crash before staging leaves the intact episode retryable but may detach plan links.
+  const applied = [];
+  try {
+    for (const update of updates) {
+      await savePlan(context.paths, update.after);
+      applied.push(update);
+    }
+    await rename(directory, staged);
+  } catch (error) {
+    const rollbackErrors = [];
+    for (const update of applied.reverse()) await savePlan(context.paths, update.before).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    if (rollbackErrors.length) throw new AggregateError([error, ...rollbackErrors], "Episode deletion failed and could not be fully rolled back.");
+    throw error;
+  }
+  let cleanupPending = false;
+  try {
+    await rm(staged, { recursive: true, force: true });
+  } catch (error) {
+    cleanupPending = true;
+    console.warn(`[episode:${id}] deletion committed; deferred cleanup failed: ${error.message || error}`);
+  }
+  sendJson(res, 200, { id, deleted: true, ...(cleanupPending ? { cleanupPending: true } : {}) });
 }
 
 async function deleteSpeakerProfileRequest(res, context, id) {
@@ -1367,10 +1623,11 @@ function normalizeGeneratedPlan(raw, plan) {
 }
 
 async function generatePlanRequest(req, res, context, id) {
+  const runtime = await modelRuntimeSnapshot(context);
   const current = await loadPlan(context.paths, id);
   const body = await readJsonBody(req);
   const plan = normalizePlanInput({ ...current, episodes: current.episodes }, current);
-  const { profiles: currentProfiles } = await validatePlanReferences(context, plan, { generation: true });
+  const { profiles: currentProfiles } = await validatePlanReferences(runtime, plan, { generation: true });
   if (current.episodes.length && body.replaceExisting !== true) throw conflict("Plan already has generated content. Confirm replacement.");
   const missingIntentFields = ["theme", "audience", "goal"].filter((field) => !String(plan[field] || "").trim());
   let chatContext = "";
@@ -1381,46 +1638,53 @@ async function generatePlanRequest(req, res, context, id) {
     if (!chatContext) throw badRequest("Fill Theme, Audience, and Goal, or describe the podcast in the assistant chat first.");
   }
   const kbContent = plan.knowledgeBaseId ? await readFile(join(context.paths.knowledge, `${plan.knowledgeBaseId}.md`), "utf8") : "";
-  const response = await callTextModel({ context, model: plan.planningModel, effort: plan.planningEffort, system: "You are a podcast content planner. Return valid JSON only.", prompt: buildPlanGenerationPrompt(plan, kbContent, currentProfiles, chatContext), maxTokens: 32_000, temperature: 0.5, topP: 0.9 });
+  const response = await callTextModel({ context: runtime, model: plan.planningModel, effort: plan.planningEffort, system: "You are a podcast content planner. Return valid JSON only.", prompt: buildPlanGenerationPrompt(plan, kbContent, currentProfiles, chatContext), maxTokens: 32_000, temperature: 0.5, topP: 0.9 });
   const content = response?.choices?.[0]?.message?.content;
   if (!content) throw badRequest("Content planner model did not return content.");
   const generated = normalizeGeneratedPlan(parseGeneratedPlan(content), plan);
-  plan.episodes = generated.episodes;
-  plan.episodeCount = generated.episodeCount;
-  plan.updatedAt = new Date().toISOString();
-  let profiles = currentProfiles;
-  let profilesWritten = false;
-  if (!plan.episodeFormatId) {
-    profiles = structuredClone(currentProfiles);
-    const usedIds = new Set(profiles.episodeProfiles.map((item) => item.id));
-    const episodeFormat = {
-      id: slugId("episode-format", generated.episodeFormat.name, usedIds),
-      revision: 1,
-      name: generated.episodeFormat.name,
-      description: generated.episodeFormat.description,
-      speakerProfileId: plan.speakerProfileId,
-      outlineModel: plan.planningModel,
-      transcriptModel: plan.planningModel,
-      language: plan.language,
-      targetMinutes: plan.targetMinutes,
-      numSegments: derivedNumSegments(plan.targetMinutes),
-    };
-    profiles.episodeProfiles.push(episodeFormat);
-    const models = availableModelIds(context);
-    mergeSavedProfileSelections(models, currentProfiles);
-    validateProfileData(profiles, models);
-    await writeJsonAtomic(context.paths.profiles, profiles);
-    profilesWritten = true;
-    plan.episodeFormatId = episodeFormat.id;
-  }
-  for (const episode of plan.episodes) episode.episodeProfileId = plan.episodeFormatId;
-  try {
-    await savePlan(context.paths, plan);
-  } catch (error) {
-    if (profilesWritten) await writeJsonAtomic(context.paths.profiles, currentProfiles);
-    throw error;
-  }
-  sendJson(res, 200, { plan, profiles });
+  return serializeMutation(context, async () => {
+    const [latestPlan, latestProfiles] = await Promise.all([loadPlan(context.paths, id), readJson(context.paths.profiles)]);
+    if (!isDeepStrictEqual(latestPlan, current) || !isDeepStrictEqual(latestProfiles, currentProfiles)) {
+      throw conflict("Plan or profiles changed while content was being generated. Review the changes and retry.");
+    }
+    await validatePlanReferences(context, plan, { generation: true, profiles: latestProfiles });
+    plan.episodes = generated.episodes;
+    plan.episodeCount = generated.episodeCount;
+    plan.updatedAt = new Date().toISOString();
+    let profiles = latestProfiles;
+    let profilesWritten = false;
+    if (!plan.episodeFormatId) {
+      profiles = structuredClone(latestProfiles);
+      const usedIds = new Set(profiles.episodeProfiles.map((item) => item.id));
+      const episodeFormat = {
+        id: slugId("episode-format", generated.episodeFormat.name, usedIds),
+        revision: 1,
+        name: generated.episodeFormat.name,
+        description: generated.episodeFormat.description,
+        speakerProfileId: plan.speakerProfileId,
+        outlineModel: plan.planningModel,
+        transcriptModel: plan.planningModel,
+        language: plan.language,
+        targetMinutes: plan.targetMinutes,
+        numSegments: derivedNumSegments(plan.targetMinutes),
+      };
+      profiles.episodeProfiles.push(episodeFormat);
+      const models = availableModelIds(context);
+      mergeSavedProfileSelections(models, latestProfiles);
+      validateProfileData(profiles, models);
+      await writeJsonAtomic(context.paths.profiles, profiles);
+      profilesWritten = true;
+      plan.episodeFormatId = episodeFormat.id;
+    }
+    for (const episode of plan.episodes) episode.episodeProfileId = plan.episodeFormatId;
+    try {
+      await savePlan(context.paths, plan);
+    } catch (error) {
+      if (profilesWritten) await writeJsonAtomic(context.paths.profiles, latestProfiles);
+      throw error;
+    }
+    sendJson(res, 200, { plan, profiles });
+  });
 }
 
 function slugId(prefix, name, used) {
@@ -1723,15 +1987,24 @@ function validateTranscriptCues(context, segments, speakerProfile, language) {
 
 async function resolveTranscriptPromptRequest(req, res, context) {
   const body = await readJsonBody(req);
+  const episodeId = String(body.episodeId || "").trim();
   const episodeProfileId = String(body.episodeProfileId || "").trim();
+  const speakerProfileId = String(body.speakerProfileId || "").trim();
   const guidance = String(body.guidance || "");
-  if (!episodeProfileId) throw badRequest("episodeProfileId is required.");
+  if (!episodeId && !episodeProfileId) throw badRequest("episodeId or episodeProfileId is required.");
   if (guidance.length > 50_000) throw badRequest("Transcript prompt guidance must contain at most 50000 characters.");
-  const profiles = await readJson(context.paths.profiles);
-  const episodeProfile = profiles.episodeProfiles.find((item) => item.id === episodeProfileId);
-  if (!episodeProfile) throw badRequest("Episode Format does not exist.");
-  const speakerProfile = profiles.speakerProfiles.find((item) => item.id === episodeProfile.speakerProfileId);
-  if (!speakerProfile) throw badRequest("Speaker profile does not exist.");
+  let episodeProfile;
+  let speakerProfile;
+  if (episodeId) {
+    assertSafeId(episodeId);
+    ({ episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, await loadEpisode(context.paths, episodeId, false)));
+  } else {
+    const profiles = await readJson(context.paths.profiles);
+    episodeProfile = profiles.episodeProfiles.find((item) => item.id === episodeProfileId);
+    if (!episodeProfile) throw badRequest("Episode Format does not exist.");
+    speakerProfile = profiles.speakerProfiles.find((item) => item.id === (speakerProfileId || episodeProfile.speakerProfileId));
+    if (!speakerProfile) throw badRequest("Speaker profile does not exist.");
+  }
   const language = resolveLanguage(context, episodeProfile.language);
   sendJson(res, 200, transcriptPromptState(context, speakerProfile, episodeProfile, language, guidance));
 }
@@ -1745,7 +2018,6 @@ async function saveTranscriptRequest(req, res, context, id) {
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(paths, episode);
   const parsed = parseTranscript(transcript, speakerProfile.speakers, episodeProfile.numSegments);
   validateTranscriptCues(context, parsed.segments, speakerProfile, resolveLanguage(context, episodeProfile.language));
-  await writeFile(join(episodeDir(paths, id), "transcript.md"), transcript.trim() + "\n", "utf8");
   const updated = {
     ...episode,
     status: "transcript_ready",
@@ -1754,7 +2026,19 @@ async function saveTranscriptRequest(req, res, context, id) {
     updatedAt: new Date().toISOString(),
     lastError: null,
   };
-  await writeJsonAtomic(join(episodeDir(paths, id), "episode.json"), updated);
+  const metadataPath = join(episodeDir(paths, id), "episode.json");
+  // ponytail: metadata first hides stale audio; a crash may leave the previous transcript visible until the user retries.
+  await writeJsonAtomic(metadataPath, updated);
+  try {
+    await writeTextAtomic(join(episodeDir(paths, id), "transcript.md"), transcript.trim() + "\n");
+  } catch (error) {
+    try {
+      await writeJsonAtomic(metadataPath, episode);
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], "Transcript save failed and episode metadata could not be restored.");
+    }
+    throw error;
+  }
   sendJson(res, 200, { ...updated, transcript: transcript.trim() + "\n" });
 }
 
@@ -1789,6 +2073,7 @@ async function enqueueJob(res, context, id, type, options = {}) {
     lastError: null,
     job,
   });
+  rememberJob(context, job);
   context.queue.push({
     id: job.id,
     episodeId: id,
@@ -1809,7 +2094,6 @@ async function enqueueTranscriptJob(req, res, context, id) {
 
 async function enqueueTtsJob(req, res, context, id) {
   const body = await readOptionalJsonBody(req);
-  await ensureFfmpeg(context);
   return enqueueJob(res, context, id, "tts", { languageOverride: String(body.languageOverride || "").trim() });
 }
 
@@ -1837,7 +2121,8 @@ async function drainQueue(context) {
       startedAt: new Date().toISOString(),
     }, { status: queued.type === "transcript" ? "generating" : "rendering", lastError: null });
     console.log(`[job:${queued.id}] started ${queued.type}`);
-    const result = queued.type === "transcript" ? await runTranscriptJob(context, queued) : await runTtsJob(context, queued);
+    const runtime = await modelRuntimeSnapshot(context);
+    const result = queued.type === "transcript" ? await runTranscriptJob(context, queued, runtime) : await runTtsJob(context, queued, runtime);
     const episode = await updateJob(context, queued, {
       status: "completed", phase: "complete",
       message: result?.warning || (queued.type === "transcript" ? "Transcript ready." : "MP3 ready."), error: null,
@@ -1881,26 +2166,28 @@ async function updateJob(context, queued, jobChanges, episodeChanges = {}) {
   return serializeMutation(context, async () => {
     const episode = await loadEpisode(context.paths, queued.episodeId, false);
     if (episode.job?.id !== queued.id) throw new Error("Episode job state changed unexpectedly.");
-    return updateEpisode(context.paths, episode, {
+    const updated = await updateEpisode(context.paths, episode, {
       ...episodeChanges,
       job: { ...episode.job, ...jobChanges, updatedAt: new Date().toISOString() },
     });
+    rememberJob(context, updated.job);
+    return updated;
   });
 }
 
-async function runTranscriptJob(context, queued) {
+async function runTranscriptJob(context, queued, runtime) {
   const episode = await loadEpisode(context.paths, queued.episodeId, false);
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
-  const language = resolveLanguage(context, episodeProfile.language);
+  const language = resolveLanguage(runtime, episodeProfile.language);
   const knowledge = episode.knowledgeBaseId ? await readFile(join(context.paths.knowledge, `${episode.knowledgeBaseId}.md`), "utf8") : "";
 
   await updateJob(context, queued, { phase: "outline", completed: 0, message: "Generating outline…" });
-  const outline = await generateOutline(context, knowledge, episode, episodeProfile, speakerProfile, language);
+  const outline = await generateOutline(runtime, knowledge, episode, episodeProfile, speakerProfile, language);
   await updateJob(context, queued, { phase: "transcript", completed: 1, message: "Writing transcript…" });
-  const transcriptJson = await generateTranscript(context, knowledge, outline, episode, episodeProfile, speakerProfile, language);
+  const transcriptJson = await generateTranscript(runtime, knowledge, outline, episode, episodeProfile, speakerProfile, language);
   const transcript = transcriptToMarkdown(transcriptJson);
   const parsed = parseTranscript(transcript, speakerProfile.speakers, episodeProfile.numSegments);
-  validateTranscriptCues(context, parsed.segments, speakerProfile, language);
+  validateTranscriptCues(runtime, parsed.segments, speakerProfile, language);
   const transcriptWords = transcriptWordCount(parsed.segments, language.id);
   const minimumWords = Math.round(episodeProfile.targetMinutes * TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE);
   const warning = transcriptWords < minimumWords
@@ -1908,17 +2195,18 @@ async function runTranscriptJob(context, queued) {
     : "";
 
   await updateJob(context, queued, { phase: "saving", completed: 2, message: "Saving transcript…" });
-  await writeFile(join(episodeDir(context.paths, episode.id), "transcript.md"), transcript, "utf8");
-  await updateJob(context, queued, { completed: 3 }, {
-    ...(episode.name.trim() === "New episode" ? { name: transcriptJson.title.trim() } : {}),
-    status: "transcript_ready", audioReady: false,
-    transcriptWords,
-    lastError: null,
-  });
+  await replaceTextThenCommit(join(episodeDir(context.paths, episode.id), "transcript.md"), transcript, () =>
+    updateJob(context, queued, { completed: 3 }, {
+      ...(episode.name.trim() === "New episode" ? { name: transcriptJson.title.trim() } : {}),
+      status: "transcript_ready", audioReady: false,
+      transcriptWords,
+      lastError: null,
+    }));
   return { warning };
 }
 
 async function previewVoice(req, res, context) {
+  const runtime = await modelRuntimeSnapshot(context);
   const body = await readJsonBody(req);
   let episodeProfile;
   let profile;
@@ -1930,24 +2218,24 @@ async function previewVoice(req, res, context) {
     episodeProfile = profiles.episodeProfiles.find((item) => item.id === body.episodeProfileId);
   }
   if (!profile) throw badRequest("Speaker profile does not exist.");
-  if (!episodeProfile || episodeProfile.speakerProfileId !== profile.id) throw badRequest("Episode Format does not match speaker profile.");
-  const language = resolveLanguage(context, String(body.languageOverride || episodeProfile.language));
+  if (!episodeProfile) throw badRequest("Episode Format does not exist.");
+  const language = resolveLanguage(runtime, String(body.languageOverride || episodeProfile.language));
   const speaker = profile.speakers[Number(body.speakerIndex)];
   if (!speaker) throw badRequest("Speaker does not exist.");
   const model = speaker.ttsModelOverride || profile.voiceModel;
-  const languageError = modelLanguageError(context, model, language);
+  const languageError = modelLanguageError(runtime, model, language);
   if (languageError) throw badRequest(`${speaker.name}: ${languageError}`);
   const text = String(body.text || "").trim();
   if (!text || text.length > 600) throw badRequest("Preview text must contain 1 to 600 characters.");
-  const audio = await synthesizeTurn(context, profile, speaker, text, String(body.cue || "warm and conversational"), language);
+  const audio = await synthesizeTurn(runtime, profile, speaker, text, String(body.cue || "warm and conversational"), language);
   res.writeHead(200, { "Content-Type": audio.contentType, "Content-Length": audio.bytes.length, "Cache-Control": "no-store" });
   res.end(audio.bytes);
 }
 
-async function runTtsJob(context, queued) {
+async function runTtsJob(context, queued, runtime) {
   const episode = await loadEpisode(context.paths, queued.episodeId, true);
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
-  const language = resolveLanguage(context, episode.job?.options?.languageOverride || episodeProfile.language);
+  const language = resolveLanguage(runtime, episode.job?.options?.languageOverride || episodeProfile.language);
   if (!episode.transcript) throw badRequest("Save or generate transcript before rendering.");
   const parsed = parseTranscript(episode.transcript, speakerProfile.speakers, episodeProfile.numSegments);
   const turns = parsed.segments.flatMap((segment, segmentIndex) => segment.turns.map((turn, turnIndex) => ({
@@ -1964,14 +2252,14 @@ async function runTtsJob(context, queued) {
     const { turn } = turns[index];
     const speaker = speakerProfile.speakers.find((item) => item.name === turn.speaker);
     const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
-    const spokenText = spokenTextForModel(context, model, turn.text, language);
-    const key = clipCacheKey(turnClipDescriptor(speakerProfile, speaker, { ...turn, text: spokenText }, language));
+    const spokenText = spokenTextForModel(runtime, model, turn.text, language);
+    const key = clipCacheKey(turnClipDescriptor(runtime, speakerProfile, speaker, { ...turn, text: spokenText }, language));
     usedKeys.add(key);
     const clipPath = join(clipsDir, `${key}.wav`);
     let cached = true;
     if (!(await exists(clipPath))) {
       cached = false;
-      const audio = await synthesizeTurn(context, speakerProfile, speaker, spokenText, turn.delivery, language);
+      const audio = await synthesizeTurn(runtime, speakerProfile, speaker, spokenText, turn.delivery, language);
       await writeAudioAsWav(audio, clipPath);
     }
     clipPaths.push(clipPath);
@@ -2000,10 +2288,11 @@ async function runTtsJob(context, queued) {
   return { warning: mp3Result?.warning || "" };
 }
 
-function turnClipDescriptor(speakerProfile, speaker, turn, language) {
+function turnClipDescriptor(context, speakerProfile, speaker, turn, language) {
   const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
   return {
     model,
+    provider: ttsProviderFingerprint(context, model),
     voice: speaker.voiceId,
     style: speaker.style,
     language: language.id,
@@ -2014,6 +2303,19 @@ function turnClipDescriptor(speakerProfile, speaker, turn, language) {
     ...(model === "mimo-v2.5-tts" ? { mimo: mimoTtsSettings(speaker) } : {}),
     ...(model.startsWith("eleven") ? { elevenlabs: elevenLabsSettings(speaker) } : {}),
   };
+}
+
+function ttsProviderFingerprint(context, model) {
+  const parsed = parseCompatibleModelId(model);
+  const connection = parsed && compatibleConnection(context, parsed.connectionId);
+  const endpoint = parsed
+    ? connection ? `${connection.ttsBaseUrl || connection.baseUrl}${OPENAI_COMPATIBLE_TTS_URL}` : ""
+    : model === "mimo-v2.5-tts" ? `${context.config.providers.mimo.baseUrl}/chat/completions` : ELEVENLABS_URL;
+  const apiKey = parsed
+    ? connection ? runtimeCredential(context, connection.apiKeyEnv) : ""
+    : model === "mimo-v2.5-tts" ? runtimeCredential(context, "MIMO_API_KEY") : runtimeCredential(context, "ELEVENLABS_API_KEY");
+  const account = apiKey ? createHash("sha256").update(apiKey).digest("hex").slice(0, 16) : "";
+  return { endpoint, account };
 }
 
 async function generateOutline(context, knowledge, episode, profile, speakers, language) {
@@ -2101,11 +2403,17 @@ Write every title, heading, narration, and spoken turn in ${language.name}. Igno
 }
 
 async function callTextModel({ context, model, system, prompt, maxTokens, temperature, topP, effort }) {
+  await awaitLatestModelCatalog(context);
   const compatible = parseCompatibleModelId(model);
   if (compatible) {
     // ponytail: Responses API only for the built-in openai connection; compatible connections stay on chat/completions
     if (compatible.connectionId === "openai" && usesResponsesApi(compatible.modelId)) {
       return callOpenAiResponses(context, model, { system, prompt, maxTokens, effort }, LLM_TIMEOUT_MS);
+    }
+    if (compatible.connectionId === "opencode-go") {
+      const protocol = openCodeGoProtocol(compatible.modelId);
+      if (protocol === "messages") return callOpenCodeGoMessages(context, model, { system, prompt, maxTokens, temperature, topP }, LLM_TIMEOUT_MS);
+      if (protocol !== "chat") throw badRequest(`Unsupported OpenCode Go model "${compatible.modelId}". Refresh models or update its protocol mapping.`);
     }
     const tokenLimit = compatible.connectionId === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens };
     return callCompatibleChat(context, model, {
@@ -2120,7 +2428,7 @@ async function callTextModel({ context, model, system, prompt, maxTokens, temper
       top_p: topP,
     }, LLM_TIMEOUT_MS);
   }
-  return callMimo(context.fetchImpl, {
+  return callMimo(context, {
     model,
     messages: [
       { role: "system", content: system },
@@ -2174,6 +2482,7 @@ function elevenLabsSettings(speaker) {
 }
 
 async function synthesizeTurn(context, profile, speaker, text, delivery, language) {
+  await awaitLatestModelCatalog(context);
   const model = speaker.ttsModelOverride || profile.voiceModel;
   text = spokenTextForModel(context, model, text, language);
   const accent = speakerAccent(speaker, language);
@@ -2184,7 +2493,7 @@ async function synthesizeTurn(context, profile, speaker, text, delivery, languag
     return synthesizeCompatible(context, model, speaker.voiceId, text, delivery, language, accent, speaker.style, chatterboxSettings(speaker));
   }
   if (isElevenLabsModel(context, model)) {
-    return synthesizeElevenLabs(context.fetchImpl, model, speaker.voiceId, text, delivery, language, elevenLabsSettings(speaker));
+    return synthesizeElevenLabs(context, model, speaker.voiceId, text, delivery, language, elevenLabsSettings(speaker));
   }
   const mimoSettings = mimoTtsSettings(speaker);
   const instruction = [
@@ -2207,10 +2516,11 @@ async function synthesizeTurn(context, profile, speaker, text, delivery, languag
   };
   if (mimoSettings.temperature != null) payload.temperature = mimoSettings.temperature;
   if (mimoSettings.topP != null) payload.top_p = mimoSettings.topP;
-  const data = await callMimo(context.fetchImpl, payload, TTS_TIMEOUT_MS);
+  const data = await callMimo(context, payload, TTS_TIMEOUT_MS);
   const audio = data?.choices?.[0]?.message?.audio?.data;
   if (!audio) throw new Error("MiMo TTS response did not include choices[0].message.audio.data.");
   const wav = Buffer.from(audio, "base64");
+  if (wav.length > MAX_AUDIO_RESPONSE_BYTES) throw new Error(`MiMo TTS response exceeds ${MAX_AUDIO_RESPONSE_BYTES} byte audio limit.`);
   assertWav(wav);
   return { bytes: wav, contentType: "audio/wav", extension: "wav" };
 }
@@ -2219,7 +2529,7 @@ async function synthesizeCompatible(context, compositeModelId, voiceId, text, de
   const parsed = parseCompatibleModelId(compositeModelId);
   const connection = parsed && compatibleConnection(context, parsed.connectionId);
   if (!parsed || !connection) throw badRequest(`Unsupported compatible model "${compositeModelId}".`);
-  const apiKey = process.env[connection.apiKeyEnv]?.trim();
+  const apiKey = runtimeCredential(context, connection.apiKeyEnv);
   if (connection.requiresApiKey && !apiKey) throw badRequest(`${connection.apiKeyEnv} is required in .env.`);
   const instructions = [
     style,
@@ -2254,91 +2564,67 @@ async function synthesizeCompatible(context, compositeModelId, voiceId, text, de
   );
 }
 
-async function synthesizeElevenLabs(fetchImpl, model, voiceId, text, delivery, language, settings) {
-  const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+async function synthesizeElevenLabs(context, model, voiceId, text, delivery, language, settings) {
+  const apiKey = runtimeCredential(context, "ELEVENLABS_API_KEY");
   if (!apiKey) throw badRequest("ELEVENLABS_API_KEY is required in .env.");
   const spokenText = model === "eleven_v3" && delivery ? `[${oneLine(delivery)}] ${text}` : text;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
-  try {
-    const body = {
-      text: spokenText,
-      model_id: model,
-      language_code: language.apiCode,
-      voice_settings: {
-        stability: settings.stability,
-        similarity_boost: settings.similarityBoost,
-        style: settings.style,
-        use_speaker_boost: settings.useSpeakerBoost,
-        speed: settings.speed,
-      },
-      apply_text_normalization: settings.textNormalization,
-    };
-    if (settings.seed != null) body.seed = settings.seed;
-    const response = await fetchImpl(`${ELEVENLABS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+  const body = {
+    text: spokenText,
+    model_id: model,
+    language_code: language.apiCode,
+    voice_settings: {
+      stability: settings.stability,
+      similarity_boost: settings.similarityBoost,
+      style: settings.style,
+      use_speaker_boost: settings.useSpeakerBoost,
+      speed: settings.speed,
+    },
+    apply_text_normalization: settings.textNormalization,
+  };
+  if (settings.seed != null) body.seed = settings.seed;
+  return fetchBytes(
+    context.fetchImpl,
+    `${ELEVENLABS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+    {
       method: "POST",
       headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
       body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`ElevenLabs TTS request failed: HTTP ${response.status} ${await response.text() || response.statusText}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length === 0) throw new Error("ElevenLabs TTS returned empty audio.");
-    return { bytes, contentType: "audio/mpeg", extension: "mp3" };
-  } catch (error) {
-    if (error?.name === "AbortError") throw new Error(`ElevenLabs TTS request timed out after ${TTS_TIMEOUT_MS / 1000} seconds.`);
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
+    },
+    "ElevenLabs TTS",
+    TTS_TIMEOUT_MS
+  );
 }
 
-async function listElevenLabsVoices(res, fetchImpl) {
-  const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+async function listElevenLabsVoices(res, context) {
+  const apiKey = runtimeCredential(context, "ELEVENLABS_API_KEY");
   if (!apiKey) throw badRequest("ELEVENLABS_API_KEY is required in .env.");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
-  try {
-    const response = await fetchImpl(ELEVENLABS_VOICES_URL, {
-      headers: { "xi-api-key": apiKey },
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = null;
-    }
-    if (!response.ok) throw new Error(`ElevenLabs voices request failed: HTTP ${response.status} ${data?.detail?.message || text || response.statusText}`);
-    const voices = (data?.voices || []).map((voice) => ({
-      id: voice.voice_id,
-      name: voice.name,
-      labels: voice.labels || {},
-      verifiedLanguages: (Array.isArray(voice.verified_languages) ? voice.verified_languages : []).map((language) => ({
-        language: language.language,
-        locale: language.locale,
-        accent: language.accent,
-      })),
-    }));
-    sendJson(res, 200, { voices, hasMore: Boolean(data?.has_more) });
-  } catch (error) {
-    if (error?.name === "AbortError") throw new Error(`ElevenLabs voices request timed out after ${TTS_TIMEOUT_MS / 1000} seconds.`);
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
+  const data = await fetchJsonWithBody(context.fetchImpl, ELEVENLABS_VOICES_URL, { headers: { "xi-api-key": apiKey } }, "ElevenLabs voices", TTS_TIMEOUT_MS);
+  const voices = (data?.voices || []).map((voice) => ({
+    id: voice.voice_id,
+    name: voice.name,
+    labels: voice.labels || {},
+    verifiedLanguages: (Array.isArray(voice.verified_languages) ? voice.verified_languages : []).map((language) => ({
+      language: language.language,
+      locale: language.locale,
+      accent: language.accent,
+    })),
+  }));
+  sendJson(res, 200, { voices, hasMore: Boolean(data?.has_more) });
 }
 
-async function listChatterboxVoices(res, context) {
+async function fetchChatterboxVoices(context, timeoutMs = MODEL_TIMEOUT_MS, useCache = false) {
+  const cache = context.chatterboxVoiceCache;
+  if (useCache && cache?.voices) return cache.voices;
+  const cacheRevision = cache?.revision;
   const connection = builtInChatterboxConnection(context.config);
   if (!connection.enabled || !connection.baseUrl) throw badRequest("Chatterbox is not configured.");
-  const apiKey = process.env.CHATTERBOX_API_KEY?.trim();
-  const data = await fetchJson(
+  const apiKey = runtimeCredential(context, "CHATTERBOX_API_KEY");
+  const data = await fetchJsonWithBody(
     context.fetchImpl,
     `${connection.baseUrl}/voices`,
-    apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    "Chatterbox voices"
+    { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} },
+    "Chatterbox voices",
+    timeoutMs
   );
   const items = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.voices) ? data.voices : [];
   const voices = items.filter((voice) => typeof voice?.id === "string" && voice.id.trim()).map((voice) => ({
@@ -2346,22 +2632,32 @@ async function listChatterboxVoices(res, context) {
     name: typeof voice.name === "string" && voice.name.trim() ? voice.name.trim() : voice.id.trim(),
     builtin: voice.builtin === true,
   }));
-  sendJson(res, 200, { voices });
+  if (cache?.revision === cacheRevision) cache.voices = voices;
+  return voices;
 }
 
-async function callMimo(fetchImpl, payload, timeoutMs) {
-  const apiKey = process.env.MIMO_API_KEY?.trim();
+async function listChatterboxVoices(res, context) {
+  sendJson(res, 200, { voices: await fetchChatterboxVoices(context) });
+}
+
+function runtimeCredential(context, name) {
+  return context.credentials ? context.credentials[name] || "" : process.env[name]?.trim() || "";
+}
+
+async function callMimo(context, payload, timeoutMs) {
+  const apiKey = runtimeCredential(context, "MIMO_API_KEY");
   if (!apiKey) throw badRequest("MIMO_API_KEY is required in .env.");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(`${mimoBaseUrl()}/chat/completions`, {
+    const response = await context.fetchImpl(`${context.config.providers.mimo.baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-key": apiKey },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-    const text = await response.text();
+    const maximum = payload.audio ? MAX_TTS_JSON_RESPONSE_BYTES : MAX_JSON_RESPONSE_BYTES;
+    const text = (await readResponseBuffer(response, maximum, "MiMo")).toString("utf8");
     let data;
     try {
       data = JSON.parse(text);
@@ -2386,8 +2682,10 @@ async function callCompatibleChat(context, compositeModelId, payload, timeoutMs)
   const parsed = parseCompatibleModelId(compositeModelId);
   const connection = parsed && compatibleConnection(context, parsed.connectionId);
   if (!parsed || !connection) throw badRequest(`Unsupported compatible model "${compositeModelId}".`);
-  const apiKey = process.env[connection.apiKeyEnv]?.trim();
-  if (connection.requiresApiKey && !apiKey) throw badRequest(`${connection.apiKeyEnv} is required in .env.`);
+  const apiKey = await connectionApiKey(context, connection);
+  if (connection.requiresApiKey && !apiKey) throw badRequest(connection.kind === "opencodeGo"
+    ? "OpenCode Go login is required. Run /connect in OpenCode or set OPENCODE_GO_API_KEY."
+    : `${connection.apiKeyEnv} is required in .env.`);
   return fetchJsonWithBody(
     context.fetchImpl,
     `${connection.llmBaseUrl || connection.baseUrl}${OPENAI_COMPATIBLE_CHAT_URL}`,
@@ -2401,11 +2699,48 @@ async function callCompatibleChat(context, compositeModelId, payload, timeoutMs)
   );
 }
 
+async function connectionApiKey(context, connection) {
+  if (context.credentials) return runtimeCredential(context, connection.apiKeyEnv);
+  if (connection.kind === "opencodeGo") return (await resolveOpenCodeGoCredential()).key;
+  return runtimeCredential(context, connection.apiKeyEnv);
+}
+
+async function callOpenCodeGoMessages(context, compositeModelId, { system, prompt, maxTokens, temperature, topP }, timeoutMs) {
+  const parsed = parseCompatibleModelId(compositeModelId);
+  const connection = parsed && compatibleConnection(context, parsed.connectionId);
+  if (!parsed || connection?.kind !== "opencodeGo") throw badRequest(`Unsupported OpenCode Go model "${compositeModelId}".`);
+  const apiKey = await connectionApiKey(context, connection);
+  if (!apiKey) throw badRequest("OpenCode Go login is required. Run /connect in OpenCode or set OPENCODE_GO_API_KEY.");
+  const data = await fetchJsonWithBody(
+    context.fetchImpl,
+    `${connection.baseUrl}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": OPENCODE_GO_AUTH_VERSION },
+      body: JSON.stringify({
+        model: parsed.modelId,
+        system,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: maxTokens,
+        temperature,
+        top_p: topP,
+      }),
+    },
+    `${connection.name} messages`,
+    timeoutMs
+  );
+  const text = Array.isArray(data?.content)
+    ? data.content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n")
+    : "";
+  if (!text) throw new Error(`${connection.name} messages did not include text content.`);
+  return { choices: [{ message: { content: text } }] };
+}
+
 async function callOpenAiResponses(context, compositeModelId, { system, prompt, maxTokens, effort }, timeoutMs) {
   const parsed = parseCompatibleModelId(compositeModelId);
   const connection = parsed && compatibleConnection(context, parsed.connectionId);
   if (!parsed || !connection) throw badRequest(`Unsupported compatible model "${compositeModelId}".`);
-  const apiKey = process.env[connection.apiKeyEnv]?.trim();
+  const apiKey = await connectionApiKey(context, connection);
   if (connection.requiresApiKey && !apiKey) throw badRequest(`${connection.apiKeyEnv} is required in .env.`);
   const body = {
     model: parsed.modelId,
@@ -2838,7 +3173,7 @@ async function resolveEpisodeProfiles(paths, episode) {
   const data = await readJson(paths.profiles);
   const episodeProfile = data.episodeProfiles.find((item) => item.id === episode.episodeProfileId);
   if (!episodeProfile) throw badRequest("Episode Format does not exist.");
-  const speakerProfile = data.speakerProfiles.find((item) => item.id === episodeProfile.speakerProfileId);
+  const speakerProfile = data.speakerProfiles.find((item) => item.id === (episode.speakerProfileId || episodeProfile.speakerProfileId));
   if (!speakerProfile) throw badRequest("Speaker profile does not exist.");
   return { episodeProfile, speakerProfile };
 }
@@ -2924,6 +3259,12 @@ async function readOptionalJsonBody(req) {
 }
 
 function assertLocalRequest(req, method) {
+  const remoteAddress = String(req.socket?.remoteAddress || "").toLowerCase();
+  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remoteAddress)) {
+    const error = new Error("Local requests only.");
+    error.statusCode = 403;
+    throw error;
+  }
   const hostHeader = String(req.headers.host || "").toLowerCase();
   const host = hostHeader.startsWith("[") ? hostHeader.slice(1, hostHeader.indexOf("]")) : hostHeader.split(":")[0];
   if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
@@ -2933,13 +3274,13 @@ function assertLocalRequest(req, method) {
   }
   const origin = req.headers.origin;
   if (method !== "GET" && method !== "HEAD" && origin) {
-    let originHost = "";
+    let originValue = "";
     try {
-      originHost = new URL(origin).hostname.toLowerCase();
+      originValue = new URL(origin).origin.toLowerCase();
     } catch {
-      originHost = "invalid";
+      originValue = "invalid";
     }
-    if (!["127.0.0.1", "localhost", "::1"].includes(originHost)) {
+    if (originValue !== `http://${hostHeader}`) {
       const error = new Error("Cross-origin writes are forbidden.");
       error.statusCode = 403;
       throw error;
@@ -2948,7 +3289,6 @@ function assertLocalRequest(req, method) {
 }
 
 async function saveConfigRequest(context, value) {
-  if (context.modelRefresh) await context.modelRefresh;
   const next = validateConfigPayload(value, context.config);
   const dependents = await loadModelDependents(context.paths);
   assertConnectionsCanBeRemoved(context.config, next.config, dependents);
@@ -2976,9 +3316,7 @@ async function saveConfigRequest(context, value) {
     else process.env[key] = envValue;
   }
   context.config = next.config;
-  applyRuntimeConfig(context.config);
-  await refreshModelCatalog(context);
-  return { config: redactConfig(context.config), modelCatalog: context.modelCatalog, warnings };
+  return { config: await redactConfig(context.config), warnings };
 }
 
 function validateConfigPayload(value, current) {
@@ -3011,6 +3349,12 @@ function validateConfigPayload(value, current) {
     activeModels: normalizeCapabilityMap(openaiInput.activeModels ?? currentOpenai.activeModels),
   };
   applyApiKeyPatch(envPatch, "OPENAI_API_KEY", openaiInput, "OpenAI");
+  const openCodeGoInput = providers.opencodeGo && typeof providers.opencodeGo === "object" ? providers.opencodeGo : {};
+  const currentOpenCodeGo = current.providers.opencodeGo;
+  const opencodeGo = {
+    enabled: Object.hasOwn(openCodeGoInput, "enabled") ? openCodeGoInput.enabled !== false : currentOpenCodeGo.enabled !== false,
+    activeModels: normalizeOpenCodeGoCapabilityMap(openCodeGoInput.activeModels ?? currentOpenCodeGo.activeModels),
+  };
   const chatterboxInput = providers.chatterbox && typeof providers.chatterbox === "object" ? providers.chatterbox : {};
   const currentChatterbox = current.providers.chatterbox;
   const chatterboxEnabled = Object.hasOwn(chatterboxInput, "enabled") ? chatterboxInput.enabled === true : currentChatterbox.enabled === true;
@@ -3052,7 +3396,7 @@ function validateConfigPayload(value, current) {
 
   return {
     config: {
-      providers: { mimo, elevenlabs, openai, chatterbox },
+      providers: { mimo, elevenlabs, openai, opencodeGo, chatterbox },
       compatibleConnections,
     },
     envPatch,
@@ -3145,9 +3489,11 @@ function modelIsActive(config, modelId, type) {
   const provider = parsed
     ? parsed.connectionId === "openai"
       ? config.providers.openai
+      : parsed.connectionId === "opencode-go"
+        ? config.providers.opencodeGo
       : parsed.connectionId === "chatterbox"
-        ? config.providers.chatterbox
-        : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)
+          ? config.providers.chatterbox
+          : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)
     : type === "text" || modelId === "mimo-v2.5-tts"
       ? config.providers.mimo
       : config.providers.elevenlabs;
@@ -3197,7 +3543,7 @@ function disablesCapabilities(current, next) {
   const disabled = (before, after) => before?.enabled !== false && after?.enabled === false
     || Object.entries(before?.activeModels || {}).some(([id, capability]) =>
       capability.text && !after?.activeModels?.[id]?.text || capability.tts && !after?.activeModels?.[id]?.tts);
-  if (["mimo", "elevenlabs", "openai", "chatterbox"].some((id) => disabled(current.providers[id], next.providers[id]))) return true;
+  if (["mimo", "elevenlabs", "openai", "opencodeGo", "chatterbox"].some((id) => disabled(current.providers[id], next.providers[id]))) return true;
   const nextById = new Map(next.compatibleConnections.map((connection) => [connection.id, connection]));
   return current.compatibleConnections.some((connection) => !nextById.has(connection.id) || disabled(connection, nextById.get(connection.id)));
 }
@@ -3213,6 +3559,22 @@ async function readJson(path) {
 
 async function writeJsonAtomic(path, value) {
   await writeTextAtomic(path, JSON.stringify(value, null, 2) + "\n");
+}
+
+async function replaceTextThenCommit(path, text, commit) {
+  const previous = await exists(path) ? await readFile(path, "utf8") : null;
+  await writeTextAtomic(path, text);
+  try {
+    return await commit();
+  } catch (error) {
+    try {
+      if (previous == null) await rm(path, { force: true });
+      else await writeTextAtomic(path, previous);
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], "Write failed and the previous text could not be restored.");
+    }
+    throw error;
+  }
 }
 
 async function writeTextAtomic(path, text) {
@@ -3352,6 +3714,7 @@ RULES:
 - If the user explicitly says defaults are fine, you may skip the speakerProfile/episodeFormat proposals and go straight to nextStep "generatePlan".
 - speakerProfile: use mode "create" when the user describes hosts for a new podcast, mode "update" to tweak this podcast's current hosts. Applying a hosts proposal automatically updates all of this podcast's episodes; stale audio re-renders. After the hosts proposal is applied, your next reply must propose the episodeFormat.
 - When the user's idea describes hosts (names, personalities, dynamic) that differ from the current hosts, never present the current profile's speakers as if they were the requested hosts. Propose the planPatch first and say you will propose the matching hosts profile next; after the plan is applied, your next reply must propose that speakerProfile (name the speakers per the user's description, with backstory, personality, and style).
+- For a Chatterbox speaker profile, use only voice IDs listed under AVAILABLE OPTIONS.chatterboxVoices. If the user has not explicitly chosen an exact Chatterbox voice ID, ask them to choose before proposing the speakerProfile; show the relevant discovered IDs and never guess from a speaker name.
 - Episode Format segment counts are derived server-side from targetMinutes. Never propose numSegments.
 - Never claim an edit, generation, save, navigation, or render happened. The user must approve every proposal and action.
 - Default to the focused item. Use bulk patches only when the user explicitly requests bulk changes.
@@ -3481,6 +3844,7 @@ async function getChatThread(req, res, context) {
 }
 
 async function sendPlannerChatMessage(req, res, context) {
+  const runtime = await modelRuntimeSnapshot(context);
   const body = await readJsonBody(req);
   const threadId = String(body.threadId || "").trim();
   const planId = String(body.planId || "").trim();
@@ -3494,12 +3858,12 @@ async function sendPlannerChatMessage(req, res, context) {
   assertSafeId(planId);
   if (threadId) assertSafeId(threadId);
   if (kbId) assertSafeId(kbId);
-  if (!availableModelIds(context).textModels.has(model)) throw badRequest(`Unsupported or inactive text model "${model}".`);
+  if (!availableModelIds(runtime).textModels.has(model)) throw badRequest(`Unsupported or inactive text model "${model}".`);
   const stored = await loadPlan(context.paths, planId);
   const planDraft = body.planDraft && typeof body.planDraft === "object" ? body.planDraft : {};
   const plan = normalizePlanInput({ ...stored, ...planDraft }, stored);
   const workspaceDraft = body.workspaceDraft && typeof body.workspaceDraft === "object" && !Array.isArray(body.workspaceDraft) ? body.workspaceDraft : null;
-  const { profiles } = await validatePlanReferences(context, plan);
+  const { profiles } = await validatePlanReferences(runtime, plan);
   const id = threadId || randomUUID();
   if (context.chatBusy.has(id)) throw conflict("A request for this chat is already in progress.");
   context.chatBusy.set(id, true);
@@ -3522,6 +3886,11 @@ async function sendPlannerChatMessage(req, res, context) {
     const focusPlannedEpisode = plan.episodes.find((item) => item.id === activeContext.plannedEpisodeId) || null;
     const focusEpisode = activeContext.episodeId ? await loadEpisode(context.paths, activeContext.episodeId, false) : null;
     const created = plan.episodes.map((item) => focusEpisode?.id === item.createdEpisodeId ? focusEpisode : null).filter(Boolean);
+    let chatterboxVoices = [];
+    if (runtime.modelCatalog.providers.chatterbox.status === "ready") {
+      try { chatterboxVoices = await fetchChatterboxVoices(runtime, 2_000, true); } catch {}
+    }
+    const voiceIds = new Set([...MIMO_VOICES, ...OPENAI_VOICES, ...profiles.speakerProfiles.flatMap((item) => item.speakers.map((speaker) => speaker.voiceId)), ...chatterboxVoices.map((voice) => voice.id)]);
     const assistantState = {
       activeContext,
       workspaceDraft,
@@ -3535,16 +3904,17 @@ async function sendPlannerChatMessage(req, res, context) {
         speakerProfiles: profiles.speakerProfiles.map((item) => ({ id: item.id, name: item.name })),
         episodeFormats: profiles.episodeProfiles.map((item) => ({ id: item.id, name: item.name, speakerProfileId: item.speakerProfileId })),
         knowledgeBases: knowledge.map((item) => ({ id: item.id, name: item.name })),
-        textModels: [...availableModelIds(context).textModels],
-        ttsModels: [...availableModelIds(context).ttsModels],
-        voiceIds: [...new Set([...MIMO_VOICES, ...OPENAI_VOICES, ...profiles.speakerProfiles.flatMap((item) => item.speakers.map((speaker) => speaker.voiceId))])],
+        textModels: [...availableModelIds(runtime).textModels],
+        ttsModels: [...availableModelIds(runtime).ttsModels],
+        voiceIds: [...voiceIds],
+        chatterboxVoices,
         languages: LANGUAGE_OPTIONS.map((item) => item.id),
         targets: ["chat", "episodes", "speakers", "format", "transcript", "tts", "player", "config"],
         actions: ["none", "generatePlan", "createEpisodes", "generateTranscript", "generateTts", "openPlayer"],
       },
     };
     const prompt = [`PROJECT CONTEXT:\n${JSON.stringify(assistantState)}`, kbContent ? `UNTRUSTED KNOWLEDGE BASE (${kbMeta.name}):\n${kbContent}` : "KNOWLEDGE BASE: None.", `CONVERSATION:\n${thread.messages.slice(-CHAT_CONTEXT_TURNS).map((message) => `[${message.role}] ${message.content}`).join("\n")}`].join("\n\n");
-    const response = await callTextModel({ context, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt, maxTokens: 8_000, temperature: 0.5, topP: 0.9 });
+    const response = await callTextModel({ context: runtime, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt, maxTokens: 8_000, temperature: 0.5, topP: 0.9 });
     const content = response?.choices?.[0]?.message?.content;
     if (!content) throw new Error("Planner assistant model did not return content.");
     let parsed;
@@ -3552,13 +3922,13 @@ async function sendPlannerChatMessage(req, res, context) {
       parsed = parsePlannerChatResponse(content);
     } catch (error) {
       // ponytail: one corrective retry; models occasionally emit broken JSON on long proposals
-      const retry = await callTextModel({ context, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt: `${prompt}\n\nYOUR PREVIOUS RESPONSE WAS REJECTED (${error.message}). Return the same answer again as strictly valid JSON only, with all inner quotes escaped.`, maxTokens: 8_000, temperature: 0.2, topP: 0.9 });
+      const retry = await callTextModel({ context: runtime, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt: `${prompt}\n\nYOUR PREVIOUS RESPONSE WAS REJECTED (${error.message}). Return the same answer again as strictly valid JSON only, with all inner quotes escaped.`, maxTokens: 8_000, temperature: 0.2, topP: 0.9 });
       const retryContent = retry?.choices?.[0]?.message?.content;
       if (!retryContent) throw error;
       parsed = parsePlannerChatResponse(retryContent);
     }
     const warnings = [];
-    if (parsed.proposal) parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context, plan, profiles, focusEpisode }, warnings);
+    if (parsed.proposal) parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context: runtime, plan, profiles, focusEpisode, voiceIds }, warnings);
     parsed.warnings = warnings;
     parsed.nextStep = sanitizeAssistantNextStep(parsed.nextStep);
     thread.messages.push({ role: "assistant", content: JSON.stringify(parsed), timestamp: new Date().toISOString(), context: { planId, planName: plan.name, mode: "planner", ...activeContext } });
@@ -3654,7 +4024,7 @@ async function assistantReferenceImpact(context, kind, id) {
   return { plans: plans.filter((plan) => plan.episodeFormatId === id || plan.episodes.some((item) => item.episodeProfileId === id)).length, episodes: episodes.filter((item) => item.episodeProfileId === id).length };
 }
 
-async function sanitizePlannerProposal(proposal, { context, plan, profiles, focusEpisode }, warnings = []) {
+async function sanitizePlannerProposal(proposal, { context, plan, profiles, focusEpisode, voiceIds }, warnings = []) {
   if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) throw badRequest("Podcast Assistant proposal must be an object.");
   const types = ["planPatch", "speakerProfile", "episodeFormat", "plannedEpisodePatches", "episodePatch"].filter((key) => proposal[key] != null);
   if (types.length !== 1) throw badRequest("Podcast Assistant must propose exactly one change type.");
@@ -3665,7 +4035,7 @@ async function sanitizePlannerProposal(proposal, { context, plan, profiles, focu
     const mode = raw?.mode === "create" ? "create" : "update";
     const target = profiles.speakerProfiles.find((item) => item.id === raw?.targetId) || profiles.speakerProfiles.find((item) => item.id === plan.speakerProfileId) || profiles.speakerProfiles[0];
     if (!target) throw badRequest("Speaker Profile target does not exist.");
-    const voices = new Set([...MIMO_VOICES, ...OPENAI_VOICES, ...profiles.speakerProfiles.flatMap((item) => item.speakers.map((speaker) => speaker.voiceId))]);
+    const voices = voiceIds || new Set([...MIMO_VOICES, ...OPENAI_VOICES, ...profiles.speakerProfiles.flatMap((item) => item.speakers.map((speaker) => speaker.voiceId))]);
     const value = sanitizeProposalSpeaker(raw?.value || {}, target, voices, availableModelIds(context).ttsModels, warnings);
     delete value.id;
     const impact = { plans: 0, episodes: plan.episodes.filter((item) => item.createdEpisodeId).length };
@@ -3832,7 +4202,11 @@ async function applyPlannerChatProposal(req, res, context) {
       rollbacks.push(() => savePlan(context.paths, plan));
     }
     result.profiles = nextProfiles;
-    result.warnings.push(...modelReferenceWarnings(nextProfiles, availableModelIds(context)));
+    const relevantEpisodeProfiles = new Set([result.plan.episodeFormatId, ...result.plan.episodes.map((item) => item.episodeProfileId)].filter(Boolean));
+    result.warnings.push(...modelReferenceWarnings({
+      speakerProfiles: nextProfiles.speakerProfiles.filter((item) => item.id === result.plan.speakerProfileId),
+      episodeProfiles: nextProfiles.episodeProfiles.filter((item) => relevantEpisodeProfiles.has(item.id)),
+    }, availableModelIds(context)));
     {
       // ponytail: episodes with a deliberate different profile override are left alone
       const isSpeaker = result.appliedType === "speakerProfile";

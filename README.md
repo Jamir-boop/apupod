@@ -34,7 +34,7 @@ npm run dev
 - `Transcript Generator`: open saved episodes, review provider/model cue rules, generate transcripts, and edit canonical text.
 - `TTS Generator`: preview speakers, optionally override TTS language, and render final MP3.
 - `Player`: play rendered episodes, change playback speed, manage an in-memory queue, and save browser-local playlists while navigating other views.
-- `Config`: manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes model catalog without restart.
+- `Config`: manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes the matching model catalog without restart or blocking unrelated storage writes.
 
 ## Providers
 
@@ -55,9 +55,16 @@ npm run dev
   - Separate LLM, TTS, and model URL overrides supported with one shared key
   - Script models and TTS models load from `/models` after Config save
   - TTS uses `/audio/speech`; `gpt-4o-mini-tts` supports expressive voice instructions
+- `OpenCode Go`
+  - Built-in LLM provider using the [OpenCode Go API](https://opencode.ai/docs/go/)
+  - Reuses the `opencode-go` API credential from the current user's OpenCode login
+  - `OPENCODE_GO_API_KEY` overrides the login credential when set
+  - Discovers models from `https://opencode.ai/zen/go/v1/models`; MiniMax and Qwen use `/messages`, while the remaining Go models use `/chat/completions`
+  - Models remain inactive until selected in Config and cannot be enabled as TTS models; newly discovered IDs stay disabled until their API protocol is mapped
 - `Chatterbox`
   - User-supplied OpenAI-compatible base URL
   - Model discovery via `/models`, voice discovery via `/voices`, and TTS via `/audio/speech`
+  - The service must be running before refresh, preview, or rendering; discovery lists metadata without loading model weights
   - API key is optional for local servers
   - Per-speaker exaggeration, CFG weight, and temperature controls are sent with TTS requests
 
@@ -94,9 +101,9 @@ Episodes store Speaker Profile and Episode Format snapshots. Later profile edits
 
 Reviewed transcript text remains authoritative when generation instructions change. Refreshing snapshots invalidates audio when language, speaker mapping, TTS model, voice, style, accent, or Chatterbox tuning changes. Stale MP3 files stay hidden until a successful render replaces them.
 
-On startup, obsolete outline/transcript JSON, concat manifests, temporary files, and unused clip-cache entries are removed. Corrupt episode metadata is listed as unavailable instead of silently disappearing; repair its `episode.json` before destructive profile or provider changes.
+On startup, obsolete outline/transcript JSON, concat manifests, temporary files, unused clip-cache entries, and any episode deletion already committed under a `.deleting` directory are removed. Corrupt episode metadata is listed as unavailable instead of silently disappearing; repair its `episode.json` before destructive profile or provider changes.
 
-Keys stay server-side. API responses return `hasApiKey`, never raw secret values.
+Keys stay server-side. The OpenCode Go login key is read at runtime and is never copied into this project. API responses return `hasApiKey` and a safe credential-source label, never raw secret values.
 
 The server binds to loopback, rejects cross-origin writes, prevents framing, and supports HTTP byte ranges for MP3 playback.
 
@@ -110,8 +117,9 @@ OpenAI and compatible TTS voices are AI-generated. Disclose that fact in publish
 
 Transcript generation and TTS rendering run through one local FIFO queue.
 
-- `GET /api/jobs` exposes queue state
-- Sidebar `Server Activity` shows latest jobs
+- `GET /api/jobs` exposes active and recent jobs, including transcripts followed by automatic TTS
+- Activity shows recent jobs and in-app notifications
+- Browser-local Transcript and TTS switches can send desktop success/failure alerts while the open app is unfocused
 - Active jobs are marked interrupted after restart
 
 ## Verify
