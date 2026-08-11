@@ -7,10 +7,11 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -954,7 +955,7 @@ async function cleanupStoredArtifacts(context) {
       const usedKeys = new Set();
       if (transcript.trim()) {
         if (!episodeProfile || !speakerProfile) throw new Error("Saved profile snapshot is unavailable.");
-        const languageId = episode.job?.type === "tts" && episode.job.options?.languageOverride || episodeProfile.language;
+        const languageId = episodeProfile.language;
         const language = LANGUAGE_OPTIONS.find((item) => item.id === languageId);
         if (!language) throw new Error(`Unsupported saved language "${languageId}".`);
         const turns = parseTranscript(transcript, speakerProfile.speakers, episodeProfile.numSegments).segments.flatMap((segment) =>
@@ -1748,7 +1749,7 @@ async function createPlanEpisodesRequest(req, res, context, id) {
 async function saveEpisodeRequest(req, res, paths) {
   const body = await readJsonBody(req);
   const result = await saveEpisodeFromBody(paths, body);
-  sendJson(res, result.statusCode, result.episode);
+  sendJson(res, result.statusCode, { ...result.episode, warning: result.warning });
 }
 
 async function saveEpisodeFromBody(paths, body) {
@@ -1793,7 +1794,7 @@ async function saveEpisodeFromBody(paths, body) {
   };
   await mkdir(episodeDir(paths, id), { recursive: true });
   await writeJsonAtomic(join(episodeDir(paths, id), "episode.json"), episode);
-  return { statusCode: current.id ? 200 : 201, episode };
+  return { statusCode: current.id ? 200 : 201, episode, warning: derived.warning };
 }
 
 async function getEpisodeResponse(res, paths, id) {
@@ -1822,16 +1823,16 @@ async function applyLatestProfilesRequest(res, paths, id) {
 
   const changed = JSON.stringify(episode.episodeProfile) !== JSON.stringify(episodeProfile)
     || JSON.stringify(episode.speakerProfile) !== JSON.stringify(speakerProfile);
-  if (!changed) return sendJson(res, 200, { changed: false, episode });
+  if (!changed) return sendJson(res, 200, { changed: false, episode, warning: "" });
 
-  const derived = await reconcileEpisodeContent(paths, episode, episodeProfile, speakerProfile, { strictTranscript: true });
+  const { warning, ...derived } = await reconcileEpisodeContent(paths, episode, episodeProfile, speakerProfile, { strictTranscript: true });
   await updateEpisode(paths, episode, {
     episodeProfile: structuredClone(episodeProfile),
     speakerProfile: structuredClone(speakerProfile),
     ...derived,
     lastError: null,
   });
-  return sendJson(res, 200, { changed: true, episode: await loadEpisode(paths, id, true) });
+  return sendJson(res, 200, { changed: true, episode: await loadEpisode(paths, id, true), warning });
 }
 
 async function reconcileEpisodeContent(paths, episode, episodeProfile, speakerProfile, { strictTranscript = false } = {}) {
@@ -1850,6 +1851,7 @@ async function reconcileEpisodeContent(paths, episode, episodeProfile, speakerPr
     status: parsed ? audioReady ? "ready" : "transcript_ready" : "draft",
     audioReady,
     transcriptWords: parsed ? transcriptWordCount(parsed.segments, episodeProfile.language) : undefined,
+    warning: parsed?.warning || "",
   };
 }
 
@@ -2039,15 +2041,14 @@ async function saveTranscriptRequest(req, res, context, id) {
     }
     throw error;
   }
-  sendJson(res, 200, { ...updated, transcript: transcript.trim() + "\n" });
+  sendJson(res, 200, { ...updated, transcript: transcript.trim() + "\n", warning: parsed.warning });
 }
 
 async function enqueueJob(res, context, id, type, options = {}) {
   const episode = await loadEpisode(context.paths, id, true);
   if (isActiveJob(episode.job)) throw conflict("Episode already has an active job.");
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
-  const requestedLanguageId = type === "tts" ? String(options.languageOverride || episodeProfile.language) : episodeProfile.language;
-  const language = resolveLanguage(context, requestedLanguageId);
+  const language = resolveLanguage(context, episodeProfile.language);
   let total = 3;
   if (type === "transcript") {
     if (episode.knowledgeBaseId && !(await exists(join(context.paths.knowledge, `${episode.knowledgeBaseId}.md`)))) throw badRequest("Knowledge base does not exist.");
@@ -2063,9 +2064,7 @@ async function enqueueJob(res, context, id, type, options = {}) {
     id: randomUUID(), episodeId: id, type, status: "queued", phase: "queued", completed: 0, total,
     message: `${type === "transcript" ? "Transcript" : "TTS"} job queued.`, error: null,
     queuedAt: now, startedAt: null, finishedAt: null, updatedAt: now,
-    options: type === "tts" && language.id !== episodeProfile.language
-      ? { languageOverride: language.id }
-      : type === "transcript" && options.autoTts ? { autoTts: true } : {},
+    options: type === "transcript" && options.autoTts ? { autoTts: true } : {},
   };
   await updateEpisode(context.paths, episode, {
     status: "queued",
@@ -2094,7 +2093,8 @@ async function enqueueTranscriptJob(req, res, context, id) {
 
 async function enqueueTtsJob(req, res, context, id) {
   const body = await readOptionalJsonBody(req);
-  return enqueueJob(res, context, id, "tts", { languageOverride: String(body.languageOverride || "").trim() });
+  if (String(body.languageOverride || "").trim()) throw badRequest("TTS language is defined by the Episode Format.");
+  return enqueueJob(res, context, id, "tts");
 }
 
 async function ensureFfmpeg(context) {
@@ -2190,9 +2190,10 @@ async function runTranscriptJob(context, queued, runtime) {
   validateTranscriptCues(runtime, parsed.segments, speakerProfile, language);
   const transcriptWords = transcriptWordCount(parsed.segments, language.id);
   const minimumWords = Math.round(episodeProfile.targetMinutes * TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE);
-  const warning = transcriptWords < minimumWords
+  const lengthWarning = transcriptWords < minimumWords
     ? `Transcript is too short: ${transcriptWords} words. Recommended minimum is ${minimumWords} words for ${episodeProfile.targetMinutes} minutes. Rendering may fail duration validation.`
     : "";
+  const warning = [parsed.warning, lengthWarning].filter(Boolean).join(" ");
 
   await updateJob(context, queued, { phase: "saving", completed: 2, message: "Saving transcript…" });
   await replaceTextThenCommit(join(episodeDir(context.paths, episode.id), "transcript.md"), transcript, () =>
@@ -2219,7 +2220,8 @@ async function previewVoice(req, res, context) {
   }
   if (!profile) throw badRequest("Speaker profile does not exist.");
   if (!episodeProfile) throw badRequest("Episode Format does not exist.");
-  const language = resolveLanguage(runtime, String(body.languageOverride || episodeProfile.language));
+  if (String(body.languageOverride || "").trim()) throw badRequest("TTS language is defined by the Episode Format.");
+  const language = resolveLanguage(runtime, episodeProfile.language);
   const speaker = profile.speakers[Number(body.speakerIndex)];
   if (!speaker) throw badRequest("Speaker does not exist.");
   const model = speaker.ttsModelOverride || profile.voiceModel;
@@ -2227,15 +2229,17 @@ async function previewVoice(req, res, context) {
   if (languageError) throw badRequest(`${speaker.name}: ${languageError}`);
   const text = String(body.text || "").trim();
   if (!text || text.length > 600) throw badRequest("Preview text must contain 1 to 600 characters.");
+  await ensureFfmpeg(context);
   const audio = await synthesizeTurn(runtime, profile, speaker, text, String(body.cue || "warm and conversational"), language);
-  res.writeHead(200, { "Content-Type": audio.contentType, "Content-Length": audio.bytes.length, "Cache-Control": "no-store" });
-  res.end(audio.bytes);
+  const bytes = await normalizePreviewAudio(audio, speaker.name, model);
+  res.writeHead(200, { "Content-Type": "audio/wav", "Content-Length": bytes.length, "Cache-Control": "no-store" });
+  res.end(bytes);
 }
 
 async function runTtsJob(context, queued, runtime) {
   const episode = await loadEpisode(context.paths, queued.episodeId, true);
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
-  const language = resolveLanguage(runtime, episode.job?.options?.languageOverride || episodeProfile.language);
+  const language = resolveLanguage(runtime, episodeProfile.language);
   if (!episode.transcript) throw badRequest("Save or generate transcript before rendering.");
   const parsed = parseTranscript(episode.transcript, speakerProfile.speakers, episodeProfile.numSegments);
   const turns = parsed.segments.flatMap((segment, segmentIndex) => segment.turns.map((turn, turnIndex) => ({
@@ -2542,7 +2546,7 @@ async function synthesizeCompatible(context, compositeModelId, voiceId, text, de
     model: parsed.modelId,
     voice: voiceId,
     input: text,
-    response_format: "mp3",
+    response_format: connection.kind === "chatterbox" ? "wav" : "mp3",
   };
   if (connection.kind === "chatterbox") {
     body.exaggeration = chatterbox.exaggeration;
@@ -2950,7 +2954,8 @@ export function validateOutline(value, numSegments) {
 
 export function validateTranscriptJson(value, numSegments, speakerNames) {
   if (!value || typeof value.title !== "string" || !value.title.trim()) throw new Error("Transcript title is required.");
-  if (!Array.isArray(value.segments) || value.segments.length !== numSegments) throw new Error(`Transcript must contain exactly ${numSegments} segments.`);
+  if (!Array.isArray(value.segments) || value.segments.length === 0) throw new Error("Transcript must contain at least 1 segment.");
+  if (value.segments.length > numSegments) throw new Error(`Transcript may contain at most ${numSegments} segments.`);
   const allowed = new Set(speakerNames);
   value.segments.forEach((segment, index) => {
     if (segment.number !== index + 1 || typeof segment.title !== "string" || !segment.title.trim()) throw new Error(`Transcript segment ${index + 1} is invalid.`);
@@ -2998,11 +3003,17 @@ export function parseTranscript(markdown, speakers, expectedSegments) {
     current.turns.push({ speaker: match[1], delivery: normalizeDelivery(match[2] || ""), text: match[3].trim() });
   }
 
-  if (segments.length !== expectedSegments) throw badRequest(`Transcript must contain exactly ${expectedSegments} segments; found ${segments.length}.`);
+  if (segments.length === 0) throw badRequest("Transcript must contain at least 1 segment.");
+  if (segments.length > expectedSegments) throw badRequest(`Transcript may contain at most ${expectedSegments} segments; found ${segments.length}.`);
   segments.forEach((segment, index) => {
     if (segment.turns.length === 0) throw badRequest(`Segment ${index + 1} contains no turns.`);
   });
-  return { segments };
+  return {
+    segments,
+    warning: segments.length < expectedSegments
+      ? `Transcript contains ${segments.length} of ${expectedSegments} configured segments. It was saved and remains renderable.`
+      : "",
+  };
 }
 
 export function clipCacheKey(value) {
@@ -3105,6 +3116,21 @@ export async function writeAudioAsWav(audio, outputPath) {
     throw error;
   } finally {
     await rm(source, { force: true });
+  }
+}
+
+async function normalizePreviewAudio(audio, speakerName, model) {
+  const outputPath = join(tmpdir(), `.pod-god-preview-${randomUUID()}.wav`);
+  try {
+    await writeAudioAsWav(audio, outputPath);
+    const { size } = await stat(outputPath);
+    if (size > MAX_AUDIO_RESPONSE_BYTES) throw new Error(`normalized audio exceeds ${MAX_AUDIO_RESPONSE_BYTES} byte limit`);
+    return await readFile(outputPath);
+  } catch (error) {
+    console.error(`[preview:${model}] audio normalization failed: ${error.message || error}`);
+    throw httpError(502, `${speakerName}: TTS model "${model}" returned unsupported or invalid audio (${audio.contentType || "unknown content type"}). Check the provider response format.`);
+  } finally {
+    await rm(outputPath, { force: true });
   }
 }
 
@@ -3665,7 +3691,7 @@ async function htmlContentSecurityPolicy(path) {
     .map((match) => `'sha256-${createHash("sha256").update(match[1]).digest("base64")}'`);
   const scripts = hashes("script");
   const styles = hashes("style");
-  return `default-src 'none'; base-uri 'none'; connect-src 'self'; img-src 'self' data:; media-src 'self'; script-src ${scripts.join(" ") || "'none'"}; style-src ${styles.join(" ") || "'none'"}; frame-ancestors 'none'; form-action 'self'`;
+  return `default-src 'none'; base-uri 'none'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; script-src ${scripts.join(" ") || "'none'"}; style-src ${styles.join(" ") || "'none'"}; frame-ancestors 'none'; form-action 'self'`;
 }
 
 function parseByteRange(value, size) {

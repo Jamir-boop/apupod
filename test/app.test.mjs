@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +67,16 @@ function silentWav(sampleRate = 24_000, channels = 1, durationSeconds = 0.01) {
   buffer.write("fmt ", 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(channels, 22);
   buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(sampleRate * blockAlign, 28); buffer.writeUInt16LE(blockAlign, 32); buffer.writeUInt16LE(16, 34);
   buffer.write("data", 36); buffer.writeUInt32LE(samples * blockAlign, 40);
+  return buffer;
+}
+
+function silentFloatWav(sampleRate = 24_000, durationSeconds = 0.01) {
+  const samples = Math.round(sampleRate * durationSeconds);
+  const buffer = Buffer.alloc(44 + samples * 4);
+  buffer.write("RIFF", 0); buffer.writeUInt32LE(buffer.length - 8, 4); buffer.write("WAVE", 8);
+  buffer.write("fmt ", 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(3, 20); buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(sampleRate * 4, 28); buffer.writeUInt16LE(4, 32); buffer.writeUInt16LE(32, 34);
+  buffer.write("data", 36); buffer.writeUInt32LE(samples * 4, 40);
   return buffer;
 }
 
@@ -180,15 +190,23 @@ test("structured transcript converts to validated Markdown", () => {
     })),
   };
   assert.equal(validateTranscriptJson(value, 5, ["Valeria", "Diego"]), true);
+  assert.equal(validateTranscriptJson({ ...value, segments: value.segments.slice(0, 3) }, 5, ["Valeria", "Diego"]), true);
+  assert.throws(() => validateTranscriptJson({ ...value, segments: [] }, 5, ["Valeria", "Diego"]), /at least 1 segment/);
+  assert.throws(() => validateTranscriptJson({ ...value, segments: [...value.segments, { ...value.segments[0], number: 6 }] }, 5, ["Valeria", "Diego"]), /at most 5 segments/);
   const markdown = transcriptToMarkdown(value);
   const parsed = parseTranscript(markdown, speakers, 5);
   assert.equal(parsed.segments.length, 5);
+  assert.equal(parsed.warning, "");
   assert.deepEqual(parsed.segments[0].turns[0], { speaker: "Valeria", delivery: "cálida natural", text: "Idea 1" });
 });
 
-test("transcript rejects unknown syntax and wrong segment count", () => {
+test("transcript warns for fewer segments and rejects invalid counts", () => {
   assert.throws(() => parseTranscript("## Segmento 1\nNarrator: hello", speakers, 1), /Invalid transcript line 2/);
-  assert.throws(() => parseTranscript("## Segmento 1\nValeria: hello", speakers, 5), /exactly 5 segments/);
+  const fewer = parseTranscript("## Segmento 1\nValeria: hello", speakers, 5);
+  assert.match(fewer.warning, /1 of 5 configured segments/);
+  assert.throws(() => parseTranscript("", speakers, 5), /at least 1 segment/);
+  const excessive = Array.from({ length: 6 }, (_, index) => `## Segmento ${index + 1}\nValeria: hello`).join("\n");
+  assert.throws(() => parseTranscript(excessive, speakers, 5), /at most 5 segments/);
 });
 
 test("outline validation enforces exact ordered segments", () => {
@@ -234,6 +252,14 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
     if (oldKey === undefined) delete process.env.ELEVENLABS_API_KEY;
     else process.env.ELEVENLABS_API_KEY = oldKey;
   });
+  const audioDir = await mkdtemp(join(tmpdir(), "podcast-eleven-preview-"));
+  t.after(() => rm(audioDir, { recursive: true, force: true }));
+  const mp3Path = join(audioDir, "preview.mp3");
+  await execFileAsync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+    "-t", "0.1", "-codec:a", "libmp3lame", mp3Path,
+  ], { windowsHide: true });
+  const previewMp3 = await readFile(mp3Path);
 
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
@@ -253,7 +279,7 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
         has_more: false,
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    return new Response(Buffer.from("fake-mp3"), { status: 200, headers: { "Content-Type": "audio/mpeg" } });
+    return new Response(previewMp3, { status: 200, headers: { "Content-Type": "audio/mpeg" } });
   };
 
   const { baseUrl } = await startTestServer(t, "podcast-builder-eleven-", { fetchImpl });
@@ -321,8 +347,12 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
     body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "Hola", cue: "warm" }),
   });
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("content-type"), "audio/mpeg");
-  assert.equal(Buffer.from(await response.arrayBuffer()).toString(), "fake-mp3");
+  assert.equal(response.headers.get("content-type"), "audio/wav");
+  const previewWav = Buffer.from(await response.arrayBuffer());
+  assert.equal(previewWav.readUInt16LE(20), 1);
+  assert.equal(previewWav.readUInt16LE(22), 1);
+  assert.equal(previewWav.readUInt32LE(24), 24_000);
+  assert.equal(previewWav.readUInt16LE(34), 16);
 
   const ttsCall = calls.find((call) => call.url.includes("/text-to-speech/"));
   const request = JSON.parse(ttsCall.options.body);
@@ -357,6 +387,7 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   assert.equal(response.headers.get("x-frame-options"), "DENY");
   const csp = response.headers.get("content-security-policy");
   assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /media-src 'self' blob:/);
   assert.ok(csp.includes(`script-src 'sha256-${createHash("sha256").update(inlineScript).digest("base64")}'`));
   assert.ok(csp.includes(`style-src 'sha256-${createHash("sha256").update(inlineStyle).digest("base64")}'`));
   assert.doesNotMatch(csp, /unsafe-inline/);
@@ -410,7 +441,7 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   });
   assert.equal(response.status, 200);
 
-  const transcript = Array.from({ length: 5 }, (_, index) =>
+  const transcript = Array.from({ length: 3 }, (_, index) =>
     `## Segmento ${index + 1} — Test\nValeria [cálida]: Idea ${index + 1}.\nDiego: Reacción ${index + 1}.`
   ).join("\n\n");
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, {
@@ -421,6 +452,7 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   const saved = await response.json();
   assert.equal(response.status, 200);
   assert.equal(saved.status, "transcript_ready");
+  assert.match(saved.warning, /3 of 5 configured segments/);
   assert.equal(saved.speakerProfile.speakers[0].name, "Valeria");
 
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Renamed podcast" }) });
@@ -429,6 +461,7 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   assert.equal(renamed.name, "Renamed podcast");
   assert.equal(renamed.status, "transcript_ready");
   assert.equal(renamed.transcript, saved.transcript);
+  assert.equal(Object.hasOwn(renamed, "warning"), false);
 
   state = await (await fetch(`${baseUrl}/api/state`)).json();
   assert.equal(state.episodes.length, 1);
@@ -564,8 +597,11 @@ test("saved episode explicitly applies latest profiles atomically", async (t) =>
   });
   assert.equal(response.status, 200);
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/profiles`, { method: "PUT" });
-  assert.equal(response.status, 400);
-  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).episodeProfile.numSegments, 5);
+  assert.equal(response.status, 200);
+  const expanded = await response.json();
+  assert.equal(expanded.episode.episodeProfile.numSegments, 6);
+  assert.match(expanded.warning, /5 of 6 configured segments/);
+  assert.equal(Object.hasOwn(JSON.parse(await readFile(episodeFile, "utf8")), "warning"), false);
 
   const busy = JSON.parse(await readFile(episodeFile, "utf8"));
   busy.job = { status: "running" };
@@ -656,19 +692,37 @@ test("MiMo TTS accepts base64 audio responses larger than the ordinary JSON limi
   const { baseUrl } = await startTestServer(t, "podcast-mimo-large-response-", { fetchImpl });
   await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  const response = await fetch(`${baseUrl}/api/preview`, {
+  state.profiles.episodeProfiles[0].language = "en-US";
+  await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
+  let response = await fetch(`${baseUrl}/api/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       speakerProfileId: state.profiles.speakerProfiles[0].id,
       episodeProfileId: state.profiles.episodeProfiles[0].id,
       speakerIndex: 0,
-      languageOverride: "en-US",
+      languageOverride: "es-419",
+      text: "Large response test.",
+    }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /TTS language is defined by the Episode Format/);
+  response = await fetch(`${baseUrl}/api/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      speakerProfileId: state.profiles.speakerProfiles[0].id,
+      episodeProfileId: state.profiles.episodeProfiles[0].id,
+      speakerIndex: 0,
       text: "Large response test.",
     }),
   });
   assert.equal(response.status, 200, response.status === 200 ? "" : await response.text());
-  assert.equal(Number(response.headers.get("content-length")), wav.length);
+  const preview = Buffer.from(await response.arrayBuffer());
+  assert.equal(Number(response.headers.get("content-length")), preview.length);
+  assert.ok(preview.length > 6 * 1024 * 1024);
+  assert.equal(preview.readUInt16LE(20), 1);
+  assert.equal(preview.readUInt16LE(34), 16);
 });
 
 test("concurrent config saves receive matching nonblocking catalog snapshots", { concurrency: false }, async (t) => {
@@ -870,9 +924,9 @@ test("short generated transcripts save with warning and can be retried", { concu
 
   let chatCalls = 0;
   const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Part ${index + 1}`, points: ["Point"] })) };
-  const transcript = (long) => ({
+  const transcript = (long, segments = 5) => ({
     title: "Episode",
-    segments: Array.from({ length: 5 }, (_, index) => ({
+    segments: Array.from({ length: segments }, (_, index) => ({
       number: index + 1,
       title: `Part ${index + 1}`,
       turns: [
@@ -885,7 +939,7 @@ test("short generated transcripts save with warning and can be retried", { concu
     if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
     if (String(url).endsWith("/chat/completions")) {
       chatCalls += 1;
-      return Response.json({ choices: [{ message: { content: JSON.stringify(chatCalls % 2 ? outline : transcript(chatCalls >= 4)) } }] });
+      return Response.json({ choices: [{ message: { content: JSON.stringify(chatCalls % 2 ? outline : transcript(chatCalls >= 4, chatCalls >= 4 ? 5 : 3)) } }] });
     }
     throw new Error(`Unexpected URL ${url}`);
   };
@@ -902,7 +956,8 @@ test("short generated transcripts save with warning and can be retried", { concu
   });
   const shortJob = result.jobs.find((job) => job.episodeId === episode.id);
   assert.equal(shortJob.status, "completed");
-  assert.match(shortJob.message, /Transcript is too short: 20 words/);
+  assert.match(shortJob.message, /3 of 5 configured segments/);
+  assert.match(shortJob.message, /Transcript is too short: 12 words/);
   const savedShort = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
   assert.equal(savedShort.status, "transcript_ready");
   assert.ok(savedShort.transcriptWords > 0);
@@ -978,6 +1033,12 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   });
   assert.equal(response.status, 200);
 
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ languageOverride: "es-419" }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /TTS language is defined by the Episode Format/);
+
   response = await fetch(`${baseUrl}/api/episodes`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: episode.id, name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
@@ -997,6 +1058,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
   }, 30_000);
   const job = finished.jobs.find((item) => item.episodeId === episode.id);
   assert.equal(job.completed, 4);
+  assert.deepEqual(job.options, {});
   assert.equal(ttsCalls, 4);
   assert.match(ttsRequests[0].messages[0].content, /Required spoken language: English \(United States\) \(en-US\)/);
   assert.match(ttsRequests[0].messages[0].content, /Required accent: British/);
@@ -1548,7 +1610,7 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", { conc
       return Response.json({ choices: [{ message: { content: JSON.stringify(chatCount === 1 ? outline : transcript) } }] });
     }
     if (String(url).endsWith("/audio/speech")) {
-      return new Response(Buffer.from("compat-mp3"), { status: 200, headers: { "Content-Type": "audio/mpeg" } });
+      return new Response(silentWav(24_000, 1, 0.1), { status: 200, headers: { "Content-Type": "audio/wav" } });
     }
     throw new Error(`Unexpected URL ${url}`);
   };
@@ -1628,8 +1690,12 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", { conc
     body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "Hello there", cue: "warm" }),
   });
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("content-type"), "audio/mpeg");
-  assert.equal(Buffer.from(await response.arrayBuffer()).toString(), "compat-mp3");
+  assert.equal(response.headers.get("content-type"), "audio/wav");
+  const preview = Buffer.from(await response.arrayBuffer());
+  assert.equal(preview.readUInt16LE(20), 1);
+  assert.equal(preview.readUInt16LE(22), 1);
+  assert.equal(preview.readUInt32LE(24), 24_000);
+  assert.equal(preview.readUInt16LE(34), 16);
 
   const chatRequest = compatCalls.find((call) => call.url.endsWith("/chat/completions"));
   assert.equal(chatRequest.url, "https://llm.example/v1/chat/completions");
@@ -1731,6 +1797,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   });
   const calls = [];
   let chatterboxOnline = true;
+  let invalidAudio = false;
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url: String(url), options });
     if (!chatterboxOnline) throw new Error("fetch failed");
@@ -1747,7 +1814,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
       ];
       return Response.json(calls.filter((call) => call.url.endsWith("/voices")).length === 1 ? { object: "list", data: voices } : voices);
     }
-    if (String(url).endsWith("/audio/speech")) return new Response(Buffer.from("chatterbox-audio"), { headers: { "Content-Type": "audio/mpeg" } });
+    if (String(url).endsWith("/audio/speech")) return new Response(invalidAudio ? Buffer.from("not audio") : silentFloatWav(24_000, 0.1), { headers: { "Content-Type": "audio/wav" } });
     throw new Error(`Unexpected URL ${url}`);
   };
   const { rootDir, baseUrl } = await startTestServer(t, "podcast-chatterbox-", { fetchImpl });
@@ -1790,14 +1857,19 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   assert.equal(transcriptPrompt.capabilities[0].cueMode, "delivery");
   response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "[laugh] Hola", cue: "warm" }) });
   assert.equal(response.status, 200);
-  assert.equal(Buffer.from(await response.arrayBuffer()).toString(), "chatterbox-audio");
+  const preview = Buffer.from(await response.arrayBuffer());
+  assert.equal(response.headers.get("content-type"), "audio/wav");
+  assert.equal(preview.readUInt16LE(20), 1);
+  assert.equal(preview.readUInt16LE(22), 1);
+  assert.equal(preview.readUInt32LE(24), 24_000);
+  assert.equal(preview.readUInt16LE(34), 16);
   const ttsCall = calls.find((call) => call.url.endsWith("/audio/speech"));
   assert.equal(ttsCall.options.headers.Authorization, undefined);
   assert.deepEqual(JSON.parse(ttsCall.options.body), {
     model: "chatterbox-turbo",
     voice: "female",
     input: "Hola",
-    response_format: "mp3",
+    response_format: "wav",
     instructions: JSON.parse(ttsCall.options.body).instructions,
     exaggeration: 0.8,
     cfg_weight: 0.25,
@@ -1845,6 +1917,13 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   await writeFile(legacyPath, JSON.stringify(legacyEpisode, null, 2));
   response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeId: overrideEpisode.id }) });
   assert.deepEqual((await response.json()).capabilities.map((item) => item.speaker), ["Charlie"]);
+
+  invalidAudio = true;
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeId: overrideEpisode.id, speakerIndex: 0, text: "Hello", cue: "warm" }) });
+  assert.equal(response.status, 502);
+  assert.match((await response.json()).error, /Charlie: TTS model .* returned unsupported or invalid audio \(audio\/wav\)/);
+  assert.ok(!(await readdir(join(rootDir, "data"))).some((name) => name.startsWith(".preview-")));
+  invalidAudio = false;
 
   chatterboxOnline = false;
   response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.config) });
@@ -2496,9 +2575,15 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.doesNotMatch(html, /\son[a-z]+=/);
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(join(process.cwd(), "package-lock.json"), "utf8"));
-  assert.equal(manifest.version, "0.17.0");
-  assert.equal(lock.version, "0.17.0");
-  assert.equal(lock.packages[""].version, "0.17.0");
+  assert.equal(manifest.version, "0.18.1");
+  assert.equal(lock.version, "0.18.1");
+  assert.equal(lock.packages[""].version, "0.18.1");
+  assert.match(html, /<label class="full"[^>]*>Saved episode<select id="ttsEpisodeSelect"/);
+  assert.match(html, /notify\(value\.warning \|\| \(value\.changed/);
+  assert.match(html, /Preview audio metadata did not load within 10 seconds/);
+  assert.match(html, /Preview audio has no playable duration/);
+  assert.match(html, /error\?\.name !== "NotAllowedError"/);
+  assert.doesNotMatch(html, /previewAudio"\)\.play\(\)\.catch\(\(\) => \{\}\)/);
   assert.match(html, /providerCard\("opencodeGo", "OpenCode Go", \["text"\]/);
   assert.match(html, /https:\/\/opencode\.ai\/docs\/go\//);
   assert.match(html, /providers\.opencodeGo\?\.textModels/);
@@ -2653,7 +2738,7 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /data-rename-episode=/);
   assert.match(html, /method: "PATCH"/);
   assert.match(html, /Episode Format/);
-  assert.match(html, /id="ttsLanguageOverride"/);
+  assert.doesNotMatch(html, /ttsLanguageOverride|TTS language override|languageOverride/);
   assert.match(html, /id="applyLatestProfiles">.*Apply latest profiles/);
   assert.match(html, /function episodeIsBusy\(\)/);
   assert.match(html, /renderAudio"\)\.disabled = episodeBusy \|\| errors\.length > 0/);

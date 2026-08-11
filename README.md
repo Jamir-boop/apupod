@@ -77,13 +77,14 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 - Episode Format language is source of truth for transcript generation.
 - Editable prompts no longer need language wording.
 - Server injects hidden language rule during outline and transcript generation.
-- TTS can override language per render/preview request without changing transcript text.
+- TTS previews and renders always use the saved Episode Format language.
 - MiMo preset TTS remains limited to English and Chinese.
 
 ## Duration Rules
 
 - Generated transcripts require at least 125 spoken words per target minute.
 - Short imported or edited transcripts remain renderable after a warning and confirmation.
+- Transcripts with fewer segments than configured remain renderable after a warning; excess segments are rejected.
 - Rendering inserts cue-aware pauses and publishes short MP3s with a warning when they are below 90% of target duration.
 - Rendering uses the saved transcript directly and preserves only cue syntax supported by each selected TTS model.
 - Failed rerenders preserve the last successful MP3 when it was still valid before the job.

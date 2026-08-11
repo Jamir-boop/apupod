@@ -589,8 +589,7 @@
         <div class="view-body">
         <section class="panel">
           <div class="grid">
-            <label data-help="Chooses the saved transcript and frozen profile snapshot to render.">Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
-            <label data-help="Overrides pronunciation language for this render without changing the Episode Format.">TTS language override<select id="ttsLanguageOverride"><option value="">Use episode profile language</option></select></label>
+            <label class="full" data-help="Chooses the saved transcript and frozen profile snapshot to render.">Saved episode<select id="ttsEpisodeSelect"><option value="">Select saved episode</option></select></label>
           </div>
           <div id="ttsSummary" class="speaker-summary"><p class="muted">Select a saved episode with a transcript.</p></div>
           <div id="previewButtons" class="actions"></div>
@@ -1002,7 +1001,7 @@
     function ttsCompatibilityErrors() {
       if (!state || !currentEpisode) return ["Select a saved episode."];
       const { episodeProfile, speakerProfile } = currentEpisodeProfiles();
-      const language = selectedTtsLanguage();
+      const language = episodeTtsLanguage();
       if (!speakerProfile) return ["Speaker profile is unavailable."];
       return speakerProfile.speakers.map((speaker) => {
         const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
@@ -1051,7 +1050,7 @@
         id: currentEpisode?.id || "", name: $("episodeName").value, episodeProfileId: $("buildEpisodeProfile").value, speakerProfileId: $("episodeHosts").value, knowledgeBaseId: $("buildKnowledge").value,
         additionalInstructions: $("additionalInstructions").value, transcriptPromptGuidance: $("transcriptPromptGuidance").value,
       };
-      if (view === "tts") return { episodeId: currentEpisode?.id || "", languageOverride: $("ttsLanguageOverride").value };
+      if (view === "tts") return { episodeId: currentEpisode?.id || "" };
       return null;
     }
 
@@ -1267,7 +1266,7 @@
     function notifyJobResult(job) {
       const failed = ["failed", "interrupted"].includes(job.status);
       const message = job.error || job.message || (job.type === "transcript" ? "Transcript ready." : "MP3 render complete.");
-      const warning = !failed && /too short|could not start/i.test(message);
+      const warning = !failed && /configured segments|too short|could not start/i.test(message);
       notify(message, failed ? "error" : warning ? "warning" : "ok");
       if (!notificationSettings[job.type] || document.visibilityState === "visible" && document.hasFocus()) return;
       if (!("Notification" in window) || Notification.permission !== "granted") return;
@@ -1376,14 +1375,10 @@
         : '<p class="muted">No knowledge base loaded.</p>';
     }
 
-    function ttsLanguageOptions(selected) {
-      return option("", "Use episode profile language", !selected) + languageOptions(selected);
-    }
-
-    function selectedTtsLanguage() {
+    function episodeTtsLanguage() {
       if (!state || !currentEpisode) return null;
       const { episodeProfile } = currentEpisodeProfiles();
-      return languageById($("ttsLanguageOverride").value || episodeProfile?.language);
+      return languageById(episodeProfile?.language);
     }
 
     function currentEpisodeProfiles() {
@@ -1928,7 +1923,8 @@
 
     async function saveEpisodeSettings() {
       if (!currentEpisode) throw new Error("Select a saved episode first.");
-      if (await saveEpisode() !== false) notify("Episode settings saved.", "ok");
+      const saved = await saveEpisode();
+      if (saved !== false && !saved.warning) notify("Episode settings saved.", "ok");
     }
 
     function addSpeakerProfile(copy) {
@@ -2241,7 +2237,6 @@
       transcriptPromptDirty = false;
       $("savedEpisodeSelect").value = "";
       $("ttsEpisodeSelect").value = "";
-      $("ttsLanguageOverride").value = "";
       $("episodeName").value = "";
       $("additionalInstructions").value = "";
       $("transcriptPromptGuidance").value = "";
@@ -2271,7 +2266,6 @@
       transcriptPromptDirty = false;
       $("savedEpisodeSelect").value = id;
       $("ttsEpisodeSelect").value = id;
-      $("ttsLanguageOverride").value = "";
       $("buildEpisodeProfile").value = currentEpisode.episodeProfileId;
       $("buildKnowledge").value = currentEpisode.knowledgeBaseId;
       $("episodeName").value = currentEpisode.name;
@@ -2302,7 +2296,6 @@
         additionalInstructions: $("additionalInstructions").value,
         transcriptPromptGuidance: $("transcriptPromptGuidance").value,
         transcript: $("transcriptText").value,
-        languageOverride: $("ttsLanguageOverride").value,
         episodeDraftDirty,
         transcriptDirty,
         transcriptPromptDirty,
@@ -2317,7 +2310,6 @@
       $("additionalInstructions").value = draft.additionalInstructions;
       $("transcriptPromptGuidance").value = draft.transcriptPromptGuidance || "";
       $("transcriptText").value = draft.transcript;
-      $("ttsLanguageOverride").value = draft.languageOverride;
       episodeDraftDirty = draft.episodeDraftDirty;
       transcriptDirty = draft.transcriptDirty;
       transcriptPromptDirty = draft.transcriptPromptDirty;
@@ -2340,19 +2332,23 @@
           transcriptPromptGuidance: $("transcriptPromptGuidance").value,
         }),
       });
+      const warning = value.warning || "";
       currentEpisode = { ...currentEpisode, ...value };
       episodeDraftDirty = false;
       transcriptPromptDirty = false;
       await refreshState(value.id);
-      return currentEpisode;
+      if (warning) notify(warning, "warning");
+      return { ...currentEpisode, warning };
     }
 
     async function saveTranscript() {
       if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
-      currentEpisode = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcriptText").value }) });
+      const saved = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcriptText").value }) });
+      const segmentWarning = saved.warning || "";
+      currentEpisode = saved;
       transcriptDirty = false;
       await refreshState(currentEpisode.id);
-      const warning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
+      const warning = [segmentWarning, transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile)].filter(Boolean).join(" ");
       notify(warning || "Transcript saved and validated.", warning ? "warning" : "ok");
       return currentEpisode;
     }
@@ -2387,7 +2383,7 @@
       const response = await fetch("/api/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ episodeId: currentEpisode?.id, episodeProfileId: episodeProfile.id, speakerProfileId: speakerProfile.id, speakerIndex: index, text: previewText(speaker.name), cue: "warm and conversational", languageOverride: $("ttsLanguageOverride").value }),
+        body: JSON.stringify({ episodeId: currentEpisode?.id, episodeProfileId: episodeProfile.id, speakerProfileId: speakerProfile.id, speakerIndex: index, text: previewText(speaker.name), cue: "warm and conversational" }),
       });
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -2395,16 +2391,48 @@
       }
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       previewUrl = URL.createObjectURL(await response.blob());
-      $("previewAudio").src = previewUrl;
-      $("previewAudio").hidden = false;
+      const audio = $("previewAudio");
+      audio.hidden = true;
+      try {
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => finish(new Error("Preview audio metadata did not load within 10 seconds.")), 10_000);
+          const finish = (error) => {
+            clearTimeout(timeout);
+            audio.removeEventListener("loadedmetadata", loaded);
+            audio.removeEventListener("error", failed);
+            if (error) reject(error);
+            else resolve();
+          };
+          const loaded = () => Number.isFinite(audio.duration) && audio.duration > 0
+            ? finish()
+            : finish(new Error("Preview audio has no playable duration."));
+          const failed = () => finish(new Error(`The browser could not decode preview audio${audio.error?.message ? `: ${audio.error.message}` : "."}`));
+          audio.addEventListener("loadedmetadata", loaded);
+          audio.addEventListener("error", failed);
+          audio.src = previewUrl;
+          audio.load();
+        });
+      } catch (error) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        URL.revokeObjectURL(previewUrl);
+        previewUrl = "";
+        throw error;
+      }
+      audio.hidden = false;
       $("playerAudio").pause();
-      await $("previewAudio").play().catch(() => {});
-      notify(`${speaker.name} preview ready.`, "ok");
+      try {
+        await audio.play();
+        notify(`${speaker.name} preview ready.`, "ok");
+      } catch (error) {
+        if (error?.name !== "NotAllowedError") throw new Error(`The browser could not play preview audio: ${error?.message || error}`);
+        notify(`${speaker.name} preview ready. Press play to listen.`, "warning");
+      }
     }
 
     function renderTtsView() {
       if (!state || !currentEpisode) {
-        $("ttsLanguageOverride").innerHTML = option("", "Use episode profile language", true);
         $("ttsSummary").innerHTML = '<p class="muted">Select a saved episode with a transcript.</p>';
         $("previewButtons").innerHTML = "";
         $("episodePlayerActions").innerHTML = "";
@@ -2416,11 +2444,10 @@
       $("applyLatestProfiles").disabled = episodeProfilesAreCurrent();
       if (!speakerProfile) return;
       for (const speaker of speakerProfile.speakers) ensureProviderVoices(speaker.ttsModelOverride || speakerProfile.voiceModel);
-      $("ttsLanguageOverride").innerHTML = ttsLanguageOptions($("ttsLanguageOverride").value);
-      const language = selectedTtsLanguage();
+      const language = episodeTtsLanguage();
       const errors = ttsCompatibilityErrors();
       const lengthWarning = transcriptLengthMessage(currentEpisode.transcriptWords, episodeProfile);
-      $("ttsSummary").innerHTML = `<div><strong>${escapeHtml(currentEpisode.name)}</strong><br><span class="muted">${escapeHtml(speakerProfile.name)} · Episode language: ${escapeHtml(languageById(episodeProfile.language)?.name || episodeProfile.language)} · TTS language: ${escapeHtml(language?.name || episodeProfile.language)} · ${currentEpisode.transcriptWords || 0} words · ${escapeHtml(currentEpisode.status)}</span></div>` + speakerProfile.speakers.map((speaker) => {
+      $("ttsSummary").innerHTML = `<div><strong>${escapeHtml(currentEpisode.name)}</strong><br><span class="muted">${escapeHtml(speakerProfile.name)} · Language: ${escapeHtml(language?.name || episodeProfile.language)} · ${currentEpisode.transcriptWords || 0} words · ${escapeHtml(currentEpisode.status)}</span></div>` + speakerProfile.speakers.map((speaker) => {
         const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
         const voice = elevenVoices.find((item) => item.id === speaker.voiceId);
         const requestedAccent = speaker.accent || language?.defaultAccent || "language default";
@@ -2774,20 +2801,19 @@
       const value = await api(`/api/episodes/${id}/profiles`, { method: "PUT" });
       currentEpisode = value.episode;
       await refreshState(id);
-      notify(value.changed ? "Latest profiles applied. Re-render MP3 to update audio." : "Episode already uses latest profiles.", "ok");
+      notify(value.warning || (value.changed ? "Latest profiles applied. Re-render MP3 to update audio." : "Episode already uses latest profiles."), value.warning ? "warning" : "ok");
     }
 
     async function renderAudio() {
       if (!currentEpisode) throw new Error("Select a saved episode first.");
-      const languageOverride = $("ttsLanguageOverride").value;
       if ((episodeDraftDirty || transcriptPromptDirty) && await saveEpisode() === false) return;
       if (transcriptDirty) await saveTranscript();
       const lengthWarning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
-      await queueTts(currentEpisode.id, languageOverride, lengthWarning);
+      await queueTts(currentEpisode.id, lengthWarning);
     }
 
-    async function queueTts(episodeId, languageOverride = "", lengthWarning = "") {
-      const { job } = await api(`/api/episodes/${episodeId}/render`, { method: "POST", body: JSON.stringify({ languageOverride }) });
+    async function queueTts(episodeId, lengthWarning = "") {
+      const { job } = await api(`/api/episodes/${episodeId}/render`, { method: "POST" });
       trackJob(job);
       notify(lengthWarning ? `${lengthWarning} TTS job queued anyway.` : "TTS job queued.", lengthWarning ? "warning" : "");
       return job;
@@ -2914,7 +2940,6 @@
     $("knowledgeSummary").addEventListener("click", guard((event) => { const button = event.target.closest("[data-delete-knowledge]"); if (button) return deleteKnowledgeBase(button.dataset.deleteKnowledge); }));
     $("savedEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
     $("ttsEpisodeSelect").addEventListener("change", guard(changeEpisodeSelection));
-    $("ttsLanguageOverride").addEventListener("change", renderTtsView);
     $("transcriptScriptTab").addEventListener("click", () => { activeTranscriptSection = "script"; rememberViewSelection("transcriptSection", "script"); renderTranscriptSections(); });
     $("transcriptPromptTab").addEventListener("click", guard(async () => { activeTranscriptSection = "prompt"; rememberViewSelection("transcriptSection", "prompt"); await resolveTranscriptPrompt(); renderTranscriptSections(); }));
     $("view-transcript").querySelector('[role="tablist"]').addEventListener("keydown", (event) => {
@@ -2926,8 +2951,8 @@
     });
     $("transcriptPromptGuidance").addEventListener("input", () => { transcriptPromptDirty = true; episodeDraftDirty = true; renderTranscriptPrompt(); updateSaveButtons(); });
     $("resetTranscriptPrompt").addEventListener("click", () => { $("transcriptPromptGuidance").value = ""; transcriptPromptDirty = true; episodeDraftDirty = true; updateSaveButtons(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); });
-    $("saveTranscriptPrompt").addEventListener("click", guard(async () => { if (await saveEpisode() !== false) notify("Transcript guidance saved.", "ok"); }));
-    $("saveEpisode").addEventListener("click", guard(async () => { if (await saveEpisode() !== false) notify("Episode draft saved.", "ok"); }));
+    $("saveTranscriptPrompt").addEventListener("click", guard(async () => { const saved = await saveEpisode(); if (saved !== false && !saved.warning) notify("Transcript guidance saved.", "ok"); }));
+    $("saveEpisode").addEventListener("click", guard(async () => { const saved = await saveEpisode(); if (saved !== false && !saved.warning) notify("Episode draft saved.", "ok"); }));
     $("generateTranscript").addEventListener("click", guard(generateTranscript));
     $("saveTranscript").addEventListener("click", guard(saveTranscript));
     $("previewButtons").addEventListener("click", guard((event) => {
