@@ -1,0 +1,72 @@
+{
+  "title": "Choose pod-god's visual world — second hand",
+  "question": "Keep Producer's Score, take a challenger, or ask for one final fresh roll.",
+  "options": [
+    {
+      "id": "producers-score",
+      "label": "Producer's Score",
+      "kicker": "THE ROLL",
+      "lineage": "conductor scores, rehearsal marks, and production cue notation",
+      "thesis": "The conversation is the lead stave; every production stage joins it as a synchronized track.",
+      "palette": ["#000000", "#FFB900", "#35C46A", "#EF5B5B", "#A7A7A7"],
+      "materials": ["dark score paper", "fine staff rules", "cue markers", "annotation slips"],
+      "viewport": "A broad conversation stave leads the center while quieter tracks expose hosts, format, episodes, scripts, and audio around one moving cue.",
+      "risk": "Musical notation can feel precious unless its tracks map directly to production artifacts and controls.",
+      "sketch": ".impeccable/sketches/reroll-1-producers-score.webp"
+    },
+    {
+      "id": "challenger-wayfinding",
+      "label": "Studio Wayfinding",
+      "lineage": "international airport sign systems",
+      "thesis": "The app becomes a chain of unmistakable production decisions, each sign showing only the next useful move.",
+      "case": "Best next-step clarity, but the journey metaphor identifies transit more strongly than podcast creation.",
+      "palette": ["#000000", "#FFB900", "#FFFFFF", "#35C46A", "#EF5B5B"],
+      "materials": ["amber sign bands", "black pictogram plates", "edge-locked arrows"],
+      "viewport": "Chat leads under one monumental amber destination band; completed stages recede and the next production decision stays fixed.",
+      "risk": "Full-field amber can overwhelm long conversations and make creative work feel procedural.",
+      "sketch": ".impeccable/sketches/reroll-1-wayfinding.webp",
+      "hero": "https://impeccable.style/worlds/cards/wayfinding-cartography-signage-terminal-yellow-wayfinding-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/wayfinding-cartography-signage-terminal-yellow-wayfinding.webp"
+    },
+    {
+      "id": "challenger-onebit",
+      "label": "One-Bit Production Desktop",
+      "lineage": "early one-bit graphical desktops",
+      "thesis": "Chat is the desk, and specialist production tools open as crisp task windows only when summoned.",
+      "case": "Excellent progressive disclosure and pixel character, but overlapping windows can recreate the current cognitive load.",
+      "palette": ["#000000", "#FFFFFF", "#FFB900", "#35C46A", "#EF5B5B"],
+      "materials": ["ordered dithers", "one-pixel chrome", "marching selections", "32-pixel icons"],
+      "viewport": "A dominant chat window sits on a sparse desktop while one contextual production window opens beside it and the rest stay as icons.",
+      "risk": "Retro desktop conventions can become a costume and complicate responsive behavior.",
+      "sketch": ".impeccable/sketches/reroll-1-onebit.webp",
+      "hero": "https://impeccable.style/worlds/cards/medium-native-one-bit-desktop-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/medium-native-one-bit-desktop.webp"
+    },
+    {
+      "id": "challenger-cyclorama",
+      "label": "Production Cue Horizon",
+      "lineage": "stage-light cue plots and cyclorama transitions",
+      "thesis": "The studio moves from blackout to finished show through named cue bands whose light reveals each production surface.",
+      "case": "A strong production arc and completion moment, but atmosphere is weaker than a score for dense editing clarity.",
+      "palette": ["#000000", "#FFB900", "#A7A7A7", "#35C46A", "#EF5B5B"],
+      "materials": ["matte blackout", "horizontal light bands", "cue plot labels"],
+      "viewport": "Chat occupies the active illuminated band while setup, scripts, and audio appear as darker named cues before and after it.",
+      "risk": "Replacing the source's dawn colors with the pinned palette can flatten the light-based identity.",
+      "sketch": ".impeccable/sketches/reroll-1-cyclorama.webp",
+      "hero": "https://impeccable.style/worlds/cards/stagecraft-theater-lighting-cyclorama-dawn-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/stagecraft-theater-lighting-cyclorama-dawn.webp"
+    }
+  ],
+  "reroll": true,
+  "canon": true,
+  "canonCard": {
+    "label": "The category standard",
+    "thesis": "A familiar AI workspace with chat beside a conventional production dashboard, executed at full craft.",
+    "palette": ["#000000", "#FFB900", "#35C46A", "#EF5B5B", "#FFFFFF"],
+    "materials": ["clean panels", "standard controls", "subtle dividers"],
+    "viewport": "A chat column leads, with a step navigator and contextual production form beside it.",
+    "risk": "Immediately usable, but visually interchangeable with other AI workflow products.",
+    "sketch": ".impeccable/sketches/reroll-1-canon.webp"
+  },
+  "steer": true
+}

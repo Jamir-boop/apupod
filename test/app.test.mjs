@@ -2575,9 +2575,9 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.doesNotMatch(html, /\son[a-z]+=/);
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(join(process.cwd(), "package-lock.json"), "utf8"));
-  assert.equal(manifest.version, "0.18.1");
-  assert.equal(lock.version, "0.18.1");
-  assert.equal(lock.packages[""].version, "0.18.1");
+  assert.equal(manifest.version, "0.19.0");
+  assert.equal(lock.version, "0.19.0");
+  assert.equal(lock.packages[""].version, "0.19.0");
   assert.match(html, /<label class="full"[^>]*>Saved episode<select id="ttsEpisodeSelect"/);
   assert.match(html, /notify\(value\.warning \|\| \(value\.changed/);
   assert.match(html, /Preview audio metadata did not load within 10 seconds/);
@@ -2653,7 +2653,11 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /id="assistantTitle"/);
   assert.doesNotMatch(html, /plan-control|assistantPlanSelect/);
   assert.match(html, /classList\.toggle\("nav-only", navOnly\)/);
-  assert.match(html, /const autoNavOnly = \["transcript", "tts", "player", "config"\]\.includes\(view\)/);
+  assert.match(html, /const autoNavOnly = false/);
+  assert.match(html, /id="workspaceHeader" class="workspace-header"/);
+  assert.match(html, /id="workspaceProgress" class="workspace-progress"/);
+  assert.match(html, /class="chat-lead"/);
+  assert.match(html, /main\.assistant-active\.chat-focus/);
   assert.match(html, /const navOnly = autoNavOnly \|\| chatFolded;/);
   assert.match(html, /#podcastAssistant\.nav-only \.assistant-chat \{[^}]*position: absolute/);
   assert.match(html, /id="chatFoldToggle"/);
@@ -2674,7 +2678,8 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /id="view-speakers" class="view" hidden/);
   assert.match(html, /id="view-episodes" class="view" hidden/);
   assert.doesNotMatch(html, /id="view-planner"|id="view-formats"/);
-  assert.doesNotMatch(html, /data-view="speakers"|data-view="formats"|data-view="planner"|data-view="episodes"/);
+  assert.doesNotMatch(html, /data-view="speakers"|data-view="formats"|data-view="planner"/);
+  assert.match(html, /class="assistant-util" data-view="episodes">.*Production/);
   assert.match(html, /"Describe idea", hasEpisodes, "chat"/);
   assert.match(html, /"Hosts", hasEpisodes, "speakers"/);
   assert.doesNotMatch(html, /data-planner-panel/);
@@ -2774,7 +2779,9 @@ test("browser model fields and loading surfaces are present", async () => {
   assert.match(html, /data-view="player"/);
   assert.match(html, /id="view-player"/);
   assert.match(html, /id="playerAudio" preload="metadata" hidden/);
-  assert.match(html, /id="playerBottom" class="player-bottom"[^>]* hidden/);
+  assert.match(html, /<body class="player-active">/);
+  assert.match(html, /id="playerBottom" class="player-bottom"[^>]*>/);
+  assert.doesNotMatch(html, /id="playerBottom" class="player-bottom"[^>]* hidden/);
   assert.match(html, /id="bottomPlayerSeek" class="player-bottom-seek"/);
   assert.match(html, /id="bottomPlayerElapsed"/);
   assert.match(html, /id="bottomPlayerDuration"/);

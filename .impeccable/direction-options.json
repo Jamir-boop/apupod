@@ -1,0 +1,72 @@
+{
+  "title": "Choose pod-god's visual world",
+  "question": "Keep Session Tape Log, take a challenger, or ask for a fresh roll.",
+  "options": [
+    {
+      "id": "session-tape-log",
+      "label": "Session Tape Log",
+      "kicker": "THE ROLL",
+      "lineage": "field recorder cases, tape logs, and cue sheets",
+      "thesis": "The assistant is the producer's running session log; every approved artifact becomes a labeled take.",
+      "palette": ["#000000", "#FFB900", "#35C46A", "#EF5B5B", "#A7A7A7"],
+      "materials": ["matte recorder casing", "amber tape labels", "waveform traces", "cue slips"],
+      "viewport": "A wide conversation ledger leads while a compact production rail shows the next stage, active take, and one primary action.",
+      "risk": "Literal tape styling could become nostalgic unless every label carries real workflow state.",
+      "sketch": ".impeccable/sketches/session-tape-log.webp"
+    },
+    {
+      "id": "challenger-teletext",
+      "label": "Broadcast Teletext",
+      "lineage": "three-digit broadcast teletext magazines",
+      "thesis": "The workflow is a live broadcast index whose numbered pages expose one production state at a time.",
+      "case": "Strong broadcast recognition, but page-number navigation is less natural than a conversation-led flow.",
+      "palette": ["#000000", "#FFB900", "#35C46A", "#EF5B5B", "#FFFFFF"],
+      "materials": ["block-mosaic pixels", "flat broadcast color", "fixed character cells"],
+      "viewport": "Chat occupies the live page while a three-digit index jumps to scripts, voices, renders, and playback.",
+      "risk": "The rigid character grid can reduce scanning comfort and make long scripts feel cramped.",
+      "sketch": ".impeccable/sketches/challenger-teletext.webp",
+      "hero": "https://impeccable.style/worlds/cards/broadcast-programming-teletext-service-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/broadcast-programming-teletext-service.webp"
+    },
+    {
+      "id": "challenger-emigre",
+      "label": "Bitmap Specimen",
+      "lineage": "Emigre bitmap type specimens",
+      "thesis": "Production artifacts become a digital specimen where scale, density, and pixel texture reveal importance.",
+      "case": "Sharpens the existing pixel identity, but reads more software studio than podcast studio.",
+      "palette": ["#000000", "#FFB900", "#FFFFFF", "#35C46A", "#EF5B5B"],
+      "materials": ["coarse bitmap display", "halftone fields", "fine rule grid"],
+      "viewport": "A poster-scale prompt anchors the page with chat and production modules arranged as dense specimen blocks.",
+      "risk": "Display typography can overpower the actual conversation and editing tasks.",
+      "sketch": ".impeccable/sketches/challenger-emigre.webp",
+      "hero": "https://impeccable.style/worlds/cards/emigre-bitmap-specimen-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/emigre-bitmap-specimen.webp"
+    },
+    {
+      "id": "challenger-catalog",
+      "label": "Production Route Catalog",
+      "lineage": "numbered convention catalogs and hand-marked route maps",
+      "thesis": "Episodes are catalog entries and the production plan is a route the creator marks through them.",
+      "case": "Maps progress beautifully, but its browse-first grid competes with chat as the product's center.",
+      "palette": ["#000000", "#FFB900", "#A7A7A7", "#35C46A", "#EF5B5B"],
+      "materials": ["black newsprint", "numbered cells", "hand-circled states", "folded route map"],
+      "viewport": "A conversation column marks a path through an episode grid, with the current production stop enlarged beside it.",
+      "risk": "The catalog metaphor can make sequential creation feel like asset browsing.",
+      "sketch": ".impeccable/sketches/challenger-catalog.webp",
+      "hero": "https://impeccable.style/worlds/cards/pop-culture-shelf-doujin-event-catalog-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/pop-culture-shelf-doujin-event-catalog.webp"
+    }
+  ],
+  "reroll": true,
+  "canon": true,
+  "canonCard": {
+    "label": "The category standard",
+    "thesis": "A familiar AI workspace with chat beside a conventional production dashboard, executed at full craft.",
+    "palette": ["#000000", "#FFB900", "#35C46A", "#EF5B5B", "#FFFFFF"],
+    "materials": ["clean panels", "standard controls", "subtle dividers"],
+    "viewport": "A chat column leads, with a step navigator and contextual production form beside it.",
+    "risk": "Immediately usable, but visually interchangeable with other AI workflow products.",
+    "sketch": ".impeccable/sketches/canon.webp"
+  },
+  "steer": true
+}

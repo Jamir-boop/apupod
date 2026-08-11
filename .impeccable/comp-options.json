@@ -1,0 +1,31 @@
+{
+  "title": "Choose pod-god's workspace composition",
+  "question": "Choose the closest north star. In the note, tell me what should carry forward, what feels false, or what you want combined or revised.",
+  "options": [
+    {
+      "id": "three-zone-console",
+      "label": "A — Three-Zone Console",
+      "thesis": "A stable production navigator, dominant chat, and always-visible contextual workbench keep the whole show legible at once.",
+      "viewport": "Left workflow rail, central conversation, right episode workbench, persistent bottom transport.",
+      "risk": "Most complete at a glance, but three columns can feel dense on smaller desktops.",
+      "hero": ".impeccable/mocks/comp-a-three-zone-console.webp"
+    },
+    {
+      "id": "stacked-studio-deck",
+      "label": "B — Stacked Studio Deck",
+      "thesis": "Conversation stays wide while the active production surface becomes a tactile deck below it.",
+      "viewport": "Wide chat and episode status above, horizontal production stages and transport below.",
+      "risk": "The lower deck reduces transcript height and creates a heavier desktop-first composition.",
+      "hero": ".impeccable/mocks/comp-b-stacked-studio-deck.webp"
+    },
+    {
+      "id": "focus-canvas-drawer",
+      "label": "C — Focus Canvas + Tool Drawer",
+      "thesis": "Chat owns the workspace; one contextual production tool appears only when requested.",
+      "viewport": "Slim icon rail, stage progress above, dominant chat center, full-height contextual drawer, compact transport below.",
+      "risk": "Best focus, but deeper production controls need unmistakable discovery cues.",
+      "hero": ".impeccable/mocks/comp-c-focus-canvas-drawer.webp"
+    }
+  ],
+  "steer": true
+}

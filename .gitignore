@@ -2,3 +2,7 @@
 data/
 node_modules/
 dist/
+.claude/settings.local.json
+.impeccable/build-*.png
+.impeccable/review-*.png
+.impeccable/questions/
