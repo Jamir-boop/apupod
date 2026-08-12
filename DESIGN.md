@@ -10,8 +10,13 @@ colors:
   quiet-gray: "#9A9A9A"
   disabled-gray: "#565656"
   signal-amber: "#FFB900"
+  signal-amber-hover: "#CC9500"
+  signal-amber-subtle: "#15120A"
+  signal-amber-subtle-border: "#4D3900"
   complete-green: "#35C46A"
   failure-red: "#EF5B5B"
+  failure-red-border: "#8F3434"
+  failure-red-surface: "#220B0B"
   quiet-seam: "#242424"
   strong-seam: "#414141"
 typography:
@@ -198,7 +203,7 @@ Navigation uses simple line icons plus short labels. Default items are quiet gra
 
 ### Progress and Status
 
-Progress is a connected sequence, not a decorative chart. Completed steps and connectors are green, the current step is amber, pending steps are disabled gray, and job state uses compact uppercase mono labels. Values always come from real application state.
+Progress reads like a tape counter, not a decorative chart: the current stage and position lead in compact mono type, while the connected stage track supports orientation. Completed steps and connectors are green, the current step is amber, pending steps are disabled gray, and job state uses compact uppercase mono labels. On narrow screens the current counter remains visible and discloses the complete track on demand. Values always come from real application state.
 
 ### Contextual Disclosure
 

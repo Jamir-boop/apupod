@@ -18,14 +18,14 @@ related_targets: []
 
 - Approved comp: `.impeccable/mocks/comp-c-focus-canvas-drawer.webp`.
 - Thesis: conversation is the studio; production tools appear beside it instead of replacing it.
-- Composition: a 112px icon-and-label mode rail and dominant chat canvas occupy the flexible workspace; one 420–560px contextual production drawer occupies the right; a 64px progress header spans both; the 72px transport persists below the active workspace.
+- Composition: a 112px icon-and-label mode rail and dominant chat canvas occupy the flexible workspace; one 420–560px contextual production drawer occupies the right; a 64px tape-counter progress header spans both; the 72px transport persists below the active workspace.
 - Memorable moment: the assistant proposes the next production artifact in the conversation while the relevant editor opens beside it, keeping creation and control in one frame.
 - Chat focus may fold the production drawer and reclaim the full canvas. Activity remains a temporary right overlay rather than a third persistent column.
 - Illustrative copy, metrics, project state, waveform data, and generated form values from the comp are not product data.
 
 ## Route strategy
 
-- The header binds project identity, real production progress, and current job status into one scan line.
+- The header binds project identity, a TP-7-inspired current-stage counter, the connected production track, and job status into one scan line.
 - The rail provides Chat, Production, Player, Activity, and Settings modes. Workflow substeps live in the progress header instead of duplicating rail navigation.
 - Chat owns the primary canvas, including history, the authored lead, assistant proposals, the next-step callout, controls, upload, and composer.
 - Exactly one selected production view acts as the contextual drawer. Its header, local tabs, close action, and independently scrolling body stay visible and operable.
@@ -36,7 +36,7 @@ related_targets: []
 
 | Commitment | Medium | Shipped behavior |
 | --- | --- | --- |
-| Project title, stage progress, and job state | Semantic HTML + application state | Real project and `assistantProgress` data populate the shared header. |
+| Project title, tape-counter stage progress, and job state | Semantic HTML + application state | Real project and `assistantProgress` data populate the shared header; the selected view and current production stage remain distinct states. |
 | Chat, Production, Player, Activity, Settings | Semantic navigation + existing SVG symbols | A vertical 112px rail becomes a horizontal strip, then a fixed five-mode bottom strip. |
 | Dominant chat canvas and composer | Existing semantic HTML/CSS | History, model, effort, knowledge base, upload, assistant actions, and proposal review remain intact. |
 | Contextual production drawer | Existing views + CSS grid | One current view occupies the 420–560px right region and can be closed or folded away. |
@@ -49,7 +49,7 @@ related_targets: []
 - Above 1200px: shared 64px header, 112px rail, flexible chat canvas, 34vw drawer clamped to 420–560px, and transport aligned between rail and drawer.
 - 1025–1200px: the drawer fixes at 420px; the chat canvas keeps the remaining width.
 - 821–1024px: regions stack; the mode rail becomes a compact horizontal workflow strip; chat opens as a full-screen layer; the selected production view owns the remaining height.
-- 820px and below: project identity and horizontally scrollable progress stack in a 106px header; the five modes become a fixed bottom strip; chat and production each use the full content width; transport remains above or alongside the bottom navigation without covering primary actions.
+- 820px and below: project identity and the current tape counter share a 58px header; the complete six-stage track opens below it on demand without changing layout height; the five modes become a fixed bottom strip; chat and production each use the full content width; transport remains above or alongside the bottom navigation without covering primary actions.
 - Reduced-motion preferences collapse animations and smooth scrolling to effectively instant state changes.
 
 ## Finish disposition
