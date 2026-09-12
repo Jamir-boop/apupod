@@ -10,8 +10,8 @@ Small local web app for building reviewed podcast transcripts and rendered audio
 
 ## Start
 
-```powershell
-Copy-Item .env.example .env
+```bash
+cp .env.example .env
 npm start
 ```
 
@@ -21,20 +21,23 @@ Open `http://127.0.0.1:4173`.
 
 Run with automatic environment loading:
 
-```powershell
+```bash
 npm run dev
 ```
 
-`server.mjs` is the runtime entrypoint. `app.mjs` and `defaults.mjs` expose server and default-data APIs.
+`server.mjs` is the runtime entrypoint. The implementation lives in `src/app.mjs` and `src/defaults.mjs`; the root `app.mjs` and `defaults.mjs` are one-line re-export shims kept for existing imports.
 
 ## Views
 
-- `Speaker Profiles`: 1 to 4 speakers, default TTS model, per-speaker overrides, and speaker assistant.
-- `Podcast Assistant` and `Episodes`: describe a podcast in chat, upload optional Markdown, review proposed hosts and formats, then create and run episode drafts.
-- `Transcript Generator`: open saved episodes, review provider/model cue rules, generate transcripts, and edit canonical text.
-- `TTS Generator`: preview speakers, optionally override TTS language, and render final MP3.
-- `Player`: play rendered episodes, change playback speed, manage an in-memory queue, and save browser-local playlists while navigating other views.
-- `Config`: manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes the matching model catalog without restart or blocking unrelated storage writes.
+The `Podcast Assistant` is a pane beside every view, not a view itself: describe a podcast in chat, upload optional Markdown, and review proposed hosts and formats before applying them.
+
+- `Episodes` (`view-episodes`): create and run episode drafts, track job progress, open or delete saved episodes.
+- `Hosts` (`view-speakers`): 1 to 4 speakers, default TTS model, and per-speaker voice, style, accent and tuning overrides.
+- `Format` (`view-format`): name, description, language, target minutes, and the outline and transcript models with their reasoning effort.
+- `Script` (`view-transcript`): open saved episodes, review provider/model cue rules, generate transcripts, and edit canonical text.
+- `TTS Generator` (`view-tts`): preview speakers, optionally override TTS language, and render final MP3.
+- `Player` (`view-player`): play rendered episodes, change playback speed, manage an in-memory queue, and save browser-local playlists while navigating other views.
+- `Model Connections` (`view-config`): manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes the matching model catalog without restart or blocking unrelated storage writes.
 
 ## Providers
 
@@ -95,7 +98,9 @@ Saved API keys can be staged for removal with `Clear saved key`, then deleted by
 - `data/plans/index.json`: content plan summaries
 - `data/plans/*.json`: editable content plans and creation links
 - `data/config.json`: non-secret provider and compatible connection metadata
-- `.env`: API keys and base URL values
+- `data/knowledge/index.json` and `data/knowledge/*.md`: uploaded Markdown knowledge bases
+- `data/chat/*.json`: Podcast Assistant chat threads, capped at 200 messages each
+- `.env`: API keys and base URL values, written `0600`
 - `data/episodes/*`: saved episodes, transcripts, audio, clip cache
 
 Episodes store Speaker Profile and Episode Format snapshots. Later profile edits do not alter existing transcripts or renders; use **Apply latest profiles** (or save the episode draft) to intentionally refresh its snapshots.
@@ -125,6 +130,6 @@ Transcript generation and TTS rendering run through one local FIFO queue.
 
 ## Verify
 
-```powershell
+```bash
 npm test
 ```
