@@ -45,6 +45,9 @@ const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 const MODEL_TIMEOUT_MS = 15_000;
 const LLM_TIMEOUT_MS = 240_000;
 const TTS_TIMEOUT_MS = 120_000;
+const FFMPEG_TIMEOUT_MS = 900_000;
+const PROCESS_KILL_SIGNAL = "SIGKILL";
+const ENV_FILE_MODE = 0o600;
 const PLAN_MAX_THEME_CHARS = 20_000;
 const PLAN_MAX_TEXT_CHARS = 50_000;
 const PLAN_MAX_EPISODES = 100;
@@ -228,8 +231,21 @@ function makePaths(rootDir) {
   };
 }
 
+async function quarantineCorruptJson(path) {
+  if (!(await exists(path))) return;
+  try {
+    await readJson(path);
+  } catch (error) {
+    if (!error.invalidJson) throw error;
+    const moved = `${path}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    await rename(path, moved);
+    console.warn(`[data] ${path} could not be read (${error.message || error}); moved to ${moved} and re-seeded defaults.`);
+  }
+}
+
 async function ensureData(paths) {
   await Promise.all([mkdir(paths.knowledge, { recursive: true }), mkdir(paths.plans, { recursive: true }), mkdir(paths.episodes, { recursive: true }), mkdir(paths.chat, { recursive: true })]);
+  await Promise.all([quarantineCorruptJson(paths.profiles), quarantineCorruptJson(paths.config)]);
   if (!(await exists(paths.profiles))) {
     await writeJsonAtomic(paths.profiles, DEFAULT_DATA);
   }
@@ -1118,6 +1134,7 @@ async function routeRequest(req, res, context) {
       const current = await readJson(context.paths.profiles);
       mergeSavedProfileSelections(models, current);
       validateProfileData(value, models);
+      assertProfileRevisionsCurrent(value, current);
       await assertProfilesCompatibleWithEpisodes(context.paths, value, current);
       applyProfileRevisions(value, current);
       await writeJsonAtomic(context.paths.profiles, value);
@@ -1327,14 +1344,12 @@ async function deleteEpisodeRequest(res, context, id) {
     if (rollbackErrors.length) throw new AggregateError([error, ...rollbackErrors], "Episode deletion failed and could not be fully rolled back.");
     throw error;
   }
-  let cleanupPending = false;
   try {
     await rm(staged, { recursive: true, force: true });
   } catch (error) {
-    cleanupPending = true;
     console.warn(`[episode:${id}] deletion committed; deferred cleanup failed: ${error.message || error}`);
   }
-  sendJson(res, 200, { id, deleted: true, ...(cleanupPending ? { cleanupPending: true } : {}) });
+  sendJson(res, 200, { id, deleted: true });
 }
 
 async function deleteSpeakerProfileRequest(res, context, id) {
@@ -1344,7 +1359,6 @@ async function deleteSpeakerProfileRequest(res, context, id) {
   if (!target) throw notFound("Host profile not found.");
   if (profiles.speakerProfiles.length === 1) throw badRequest("At least one host profile must remain.");
   const fallback = profiles.speakerProfiles.find((item) => item.id !== id);
-  const repointedFormats = profiles.episodeProfiles.filter((item) => item.speakerProfileId === id).length;
   const nextProfiles = {
     ...profiles,
     speakerProfiles: profiles.speakerProfiles.filter((item) => item.id !== id),
@@ -1371,7 +1385,7 @@ async function deleteSpeakerProfileRequest(res, context, id) {
     for (const write of applied.reverse()) await writeJsonAtomic(write.path, write.before).catch(() => {});
     throw error;
   }
-  sendJson(res, 200, { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length, repointedFormats });
+  sendJson(res, 200, { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length });
 }
 
 function planPath(paths, id) {
@@ -1724,14 +1738,10 @@ async function createPlanEpisodesRequest(req, res, context, id) {
     return { episode, episodeProfileId };
   });
   const episodes = [];
-  const skipped = [];
   const createdIds = [];
   try {
     for (const target of targets) {
-      if (target.skip) {
-        skipped.push(target.episode.id);
-        continue;
-      }
+      if (target.skip) continue;
       const result = await saveEpisodeFromBody(context.paths, { name: target.episode.title, episodeProfileId: target.episodeProfileId, speakerProfileId: plan.speakerProfileId, knowledgeBaseId: plan.knowledgeBaseId, additionalInstructions: buildPlannedAdditionalInstructions(plan, target.episode), transcriptPromptGuidance: target.episode.transcriptPromptGuidance });
       target.episode.createdEpisodeId = result.episode.id;
       createdIds.push(result.episode.id);
@@ -1743,7 +1753,7 @@ async function createPlanEpisodesRequest(req, res, context, id) {
     await Promise.all(createdIds.map((episodeId) => rm(episodeDir(context.paths, episodeId), { recursive: true, force: true })));
     throw error;
   }
-  sendJson(res, 200, { plan, episodes, skipped });
+  sendJson(res, 200, { plan, episodes });
 }
 
 async function saveEpisodeRequest(req, res, paths) {
@@ -2068,7 +2078,6 @@ async function enqueueJob(res, context, id, type, options = {}) {
   };
   await updateEpisode(context.paths, episode, {
     status: "queued",
-    audioReady: type === "transcript" ? false : episode.audioReady,
     lastError: null,
     job,
   });
@@ -2077,8 +2086,7 @@ async function enqueueJob(res, context, id, type, options = {}) {
     id: job.id,
     episodeId: id,
     type,
-    previousStatus: episode.status,
-    previousAudioReady: type === "tts" && episode.audioReady && await exists(join(episodeDir(context.paths, id), "episode.mp3")),
+    previousAudioReady: type === "tts" && episode.audioReady === true && await exists(join(episodeDir(context.paths, id), "episode.mp3")),
     autoTts: type === "transcript" && options.autoTts === true,
   });
   if (res) sendJson(res, 202, { job });
@@ -2167,7 +2175,7 @@ async function updateJob(context, queued, jobChanges, episodeChanges = {}) {
     const episode = await loadEpisode(context.paths, queued.episodeId, false);
     if (episode.job?.id !== queued.id) throw new Error("Episode job state changed unexpectedly.");
     const updated = await updateEpisode(context.paths, episode, {
-      ...episodeChanges,
+      ...(typeof episodeChanges === "function" ? episodeChanges(episode) : episodeChanges),
       job: { ...episode.job, ...jobChanges, updatedAt: new Date().toISOString() },
     });
     rememberJob(context, updated.job);
@@ -2197,12 +2205,12 @@ async function runTranscriptJob(context, queued, runtime) {
 
   await updateJob(context, queued, { phase: "saving", completed: 2, message: "Saving transcript…" });
   await replaceTextThenCommit(join(episodeDir(context.paths, episode.id), "transcript.md"), transcript, () =>
-    updateJob(context, queued, { completed: 3 }, {
-      ...(episode.name.trim() === "New episode" ? { name: transcriptJson.title.trim() } : {}),
+    updateJob(context, queued, { completed: 3 }, (current) => ({
+      ...(current.name.trim() === "New episode" ? { name: transcriptJson.title.trim() } : {}),
       status: "transcript_ready", audioReady: false,
       transcriptWords,
       lastError: null,
-    }));
+    })));
   return { warning };
 }
 
@@ -2866,6 +2874,17 @@ export function validateProfileData(value, models = {
   return true;
 }
 
+function assertProfileRevisionsCurrent(nextProfiles, currentProfiles) {
+  for (const key of ["speakerProfiles", "episodeProfiles"]) {
+    const currentById = new Map((currentProfiles[key] || []).map((profile) => [profile.id, profile]));
+    for (const profile of nextProfiles[key] || []) {
+      const current = currentById.get(profile.id);
+      if (!current || profileRevision(profile) === profileRevision(current)) continue;
+      throw conflict(`"${current.name || current.id}" was changed somewhere else after this page loaded. Reload the page, then apply the change again.`);
+    }
+  }
+}
+
 function applyProfileRevisions(nextProfiles, currentProfiles) {
   for (const key of ["speakerProfiles", "episodeProfiles"]) {
     const currentById = new Map((currentProfiles[key] || []).map((profile) => [profile.id, profile]));
@@ -3177,16 +3196,22 @@ async function assembleMp3(clipPaths, directory, minimumSeconds, targetMinutes) 
   }
 }
 
-async function runProcess(command, args) {
+export async function runProcess(command, args, timeoutMs = FFMPEG_TIMEOUT_MS) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    // Not spawn({ timeout }): a spawn that fails with ENOENT never emits "exit", so Node keeps its
+    // own timer armed for the whole timeout and pins the event loop.
+    const timer = setTimeout(() => { timedOut = true; child.kill(PROCESS_KILL_SIGNAL); }, timeoutMs).unref();
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
       if (code === 0) resolvePromise(stdout);
+      else if (timedOut) reject(new Error(`${command} timed out after ${timeoutMs} ms and was stopped with ${signal || PROCESS_KILL_SIGNAL}: ${stderr.trim()}`));
       else reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
     });
   });
@@ -3333,7 +3358,7 @@ async function saveConfigRequest(context, value) {
   } catch (error) {
     if (previousEnvFile !== undefined) {
       if (previousEnvFile == null) await rm(context.paths.env, { force: true });
-      else await writeTextAtomic(context.paths.env, previousEnvFile);
+      else await writeTextAtomic(context.paths.env, previousEnvFile, ENV_FILE_MODE);
     }
     throw error;
   }
@@ -3481,7 +3506,7 @@ async function updateEnvFile(path, patch) {
   for (const [key, envValue] of Object.entries(patch)) {
     if (!seen.has(key) && envValue != null) updated.push(`${key}=${encodeEnvValue(envValue)}`);
   }
-  await writeTextAtomic(path, `${updated.filter((line, index, all) => line != null && !(line === "" && index === all.length - 1)).join("\n")}\n`);
+  await writeTextAtomic(path, `${updated.filter((line, index, all) => line != null && !(line === "" && index === all.length - 1)).join("\n")}\n`, ENV_FILE_MODE);
 }
 
 function assertConnectionsCanBeRemoved(current, next, dependents) {
@@ -3580,7 +3605,12 @@ function encodeEnvValue(value) {
 }
 
 async function readJson(path) {
-  return JSON.parse(await readFile(path, "utf8"));
+  const text = await readFile(path, "utf8");
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw Object.assign(new Error(`${path} is not valid JSON: ${error.message || error}`), { invalidJson: true });
+  }
 }
 
 async function writeJsonAtomic(path, value) {
@@ -3603,11 +3633,11 @@ async function replaceTextThenCommit(path, text, commit) {
   }
 }
 
-async function writeTextAtomic(path, text) {
+async function writeTextAtomic(path, text, mode) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, text, "utf8");
+    await writeFile(temporary, text, mode == null ? "utf8" : { encoding: "utf8", mode });
     for (let attempt = 0; ; attempt += 1) {
       try {
         await rename(temporary, path);
@@ -3783,10 +3813,6 @@ function chatTitleFromMessages(messages) {
   return title || "New chat";
 }
 
-function normalizeChatMode() {
-  return "planner";
-}
-
 function normalizeChatThread(raw, fallbackId) {
   const messages = Array.isArray(raw?.messages) ? raw.messages.filter((message) => message && typeof message === "object") : [];
   const createdAt = typeof raw?.createdAt === "string" && raw.createdAt ? raw.createdAt : new Date().toISOString();
@@ -3796,7 +3822,6 @@ function normalizeChatThread(raw, fallbackId) {
     kind: ["profile", "transcript", "planner"].includes(raw?.kind) ? raw.kind : "planner",
     title: typeof raw?.title === "string" && raw.title.trim() ? raw.title.trim() : chatTitleFromMessages(messages),
     kbId: typeof raw?.kbId === "string" ? raw.kbId : "",
-    lastMode: normalizeChatMode(raw?.lastMode),
     lastSpeakerProfileId: typeof raw?.lastSpeakerProfileId === "string" ? raw.lastSpeakerProfileId : typeof raw?.speakerProfileId === "string" ? raw.speakerProfileId : "",
     lastEpisodeProfileId: typeof raw?.lastEpisodeProfileId === "string" ? raw.lastEpisodeProfileId : typeof raw?.episodeProfileId === "string" ? raw.episodeProfileId : "",
     lastEpisodeId: typeof raw?.lastEpisodeId === "string" ? raw.lastEpisodeId : "",
@@ -3814,7 +3839,6 @@ function chatSummary(thread) {
     kind: thread.kind || "planner",
     title: thread.title,
     kbId: thread.kbId || "",
-    lastMode: thread.lastMode || "planner",
     lastSpeakerProfileId: thread.lastSpeakerProfileId || "",
     lastEpisodeProfileId: thread.lastEpisodeProfileId || "",
     lastEpisodeId: thread.lastEpisodeId || "",
@@ -3898,7 +3922,7 @@ async function sendPlannerChatMessage(req, res, context) {
     if (threadId && !thread) throw notFound("Chat thread not found.");
     if (thread && (thread.kind !== "planner" || thread.lastPlanId !== planId)) throw conflict("Chat thread belongs to another content plan.");
     const now = new Date().toISOString();
-    if (!thread) thread = { threadId: id, kind: "planner", title: text.replace(/\s+/g, " ").slice(0, 64) || "New chat", kbId, lastMode: "planner", lastPlanId: planId, lastModel: model, messages: [], createdAt: now, updatedAt: now };
+    if (!thread) thread = { threadId: id, kind: "planner", title: text.replace(/\s+/g, " ").slice(0, 64) || "New chat", kbId, lastPlanId: planId, lastModel: model, messages: [], createdAt: now, updatedAt: now };
     thread.kind = "planner";
     thread.kbId = kbId;
     thread.lastPlanId = planId;
@@ -3912,11 +3936,7 @@ async function sendPlannerChatMessage(req, res, context) {
     const focusPlannedEpisode = plan.episodes.find((item) => item.id === activeContext.plannedEpisodeId) || null;
     const focusEpisode = activeContext.episodeId ? await loadEpisode(context.paths, activeContext.episodeId, false) : null;
     const created = plan.episodes.map((item) => focusEpisode?.id === item.createdEpisodeId ? focusEpisode : null).filter(Boolean);
-    let chatterboxVoices = [];
-    if (runtime.modelCatalog.providers.chatterbox.status === "ready") {
-      try { chatterboxVoices = await fetchChatterboxVoices(runtime, 2_000, true); } catch {}
-    }
-    const voiceIds = new Set([...MIMO_VOICES, ...OPENAI_VOICES, ...profiles.speakerProfiles.flatMap((item) => item.speakers.map((speaker) => speaker.voiceId)), ...chatterboxVoices.map((voice) => voice.id)]);
+    const { voiceIds, chatterboxVoices } = await plannerVoiceOptions(runtime, profiles);
     const assistantState = {
       activeContext,
       workspaceDraft,
@@ -4050,6 +4070,15 @@ async function assistantReferenceImpact(context, kind, id) {
   return { plans: plans.filter((plan) => plan.episodeFormatId === id || plan.episodes.some((item) => item.episodeProfileId === id)).length, episodes: episodes.filter((item) => item.episodeProfileId === id).length };
 }
 
+async function plannerVoiceOptions(context, profiles) {
+  let chatterboxVoices = [];
+  if (context.modelCatalog.providers.chatterbox.status === "ready") {
+    try { chatterboxVoices = await fetchChatterboxVoices(context, 2_000, true); } catch {}
+  }
+  const voiceIds = new Set([...MIMO_VOICES, ...OPENAI_VOICES, ...profiles.speakerProfiles.flatMap((item) => item.speakers.map((speaker) => speaker.voiceId)), ...chatterboxVoices.map((voice) => voice.id)]);
+  return { voiceIds, chatterboxVoices };
+}
+
 async function sanitizePlannerProposal(proposal, { context, plan, profiles, focusEpisode, voiceIds }, warnings = []) {
   if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) throw badRequest("Podcast Assistant proposal must be an object.");
   const types = ["planPatch", "speakerProfile", "episodeFormat", "plannedEpisodePatches", "episodePatch"].filter((key) => proposal[key] != null);
@@ -4151,7 +4180,7 @@ async function applyPlannerChatProposal(req, res, context) {
   const plan = await loadPlan(context.paths, thread.lastPlanId);
   const currentProfiles = await readJson(context.paths.profiles);
   const warnings = [...parsed.warnings];
-  parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context, plan, profiles: currentProfiles, focusEpisode: null }, warnings);
+  parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context, plan, profiles: currentProfiles, focusEpisode: null, voiceIds: (await plannerVoiceOptions(context, currentProfiles)).voiceIds }, warnings);
   const result = { appliedType: "", appliedId: "", plan, profiles: null, episode: null, warnings, nextStep: parsed.nextStep };
   const rollbacks = [];
 

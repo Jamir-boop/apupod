@@ -84,7 +84,6 @@
     main.assistant-active.nav-only { grid-template-columns: 112px minmax(0, 1fr); }
     main.assistant-active > .view:not([hidden]) { grid-column: 2; min-width: 0; }
     .view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-    .view[hidden] { display: none; }
     .view > .view-header { flex: 0 0 auto; padding-bottom: 10px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
     .view > .subnav { flex: 0 0 auto; }
     .view-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
@@ -94,7 +93,6 @@
     #view-transcript .view-body > .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
     #transcript-script-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
     #transcript-script-panel > *:not(.transcript) { flex: 0 0 auto; }
-    #transcript-script-panel[hidden], #transcript-prompt-panel[hidden] { display: none; }
     .panel { padding: 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
     .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -168,17 +166,13 @@
     .dialog-body { display: grid; gap: 10px; padding: 14px; }
     .model-list { display: grid; gap: 6px; max-height: 45vh; overflow-y: auto; }
     .model-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 130px; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--line); }
-    .model-row[hidden] { display: none; }
     audio { width: min(100%, 700px); margin-top: 12px; }
     progress { width: min(100%, 700px); height: 14px; accent-color: var(--accent); }
     .rightbar { position: static; display: flex; flex-direction: column; min-width: 0; width: 320px; height: 100%; padding: 18px 14px; background: var(--surface-1); border-left: 1px solid var(--line); overflow: hidden; }
-    .rightbar[hidden] { display: none; }
     .rightbar-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
     .rightbar-header h2 { margin: 0; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
     .rightbar-header button { padding: 5px 9px; font-size: 12px; }
-    .rightbar-toggle[hidden] { display: none; }
     .rightbar-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: #FFFFFF; background: var(--danger); font-size: 11px; text-align: center; }
-    .rightbar-badge[hidden] { display: none; }
     .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); }
     body.player-active .toasts { bottom: 72px; }
     .toast { display: flex; align-items: flex-start; justify-content: flex-start; gap: 8px; padding: 10px 12px; overflow-wrap: anywhere; text-align: left; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, .55); font-size: 13px; font-weight: 400; animation: toastIn .22s cubic-bezier(.16, 1, .3, 1) both; }
@@ -213,7 +207,6 @@
     .job-detail strong { display: block; color: var(--text); overflow-wrap: anywhere; }
     .job-item[data-status="running"], .job-item[data-status="queued"] { border-color: var(--accent); }
     .loading-line { display: flex; align-items: center; gap: 9px; margin-top: 12px; color: var(--accent); }
-    .loading-line[hidden] { display: none; }
     .spinner { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid var(--disabled); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .episode-list { display: grid; gap: 10px; }
@@ -262,7 +255,6 @@
     #view-player .player-controls .icon-btn { width: 44px; height: 44px; }
     #view-player .player-controls [data-player-action="toggle"] { width: 52px; height: 52px; }
     .player-bottom { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto 76px; gap: 7px; align-items: center; min-height: 56px; padding: 8px 12px 5px; border-top: 1px solid var(--line-strong); background: var(--surface-2); box-shadow: 0 -10px 30px rgba(0, 0, 0, .55); }
-    .player-bottom[hidden] { display: none; }
     .player-bottom-meta { display: flex; min-width: 0; align-items: center; gap: 8px; }
     .player-bottom-title { min-width: 0; flex: 1; padding: 5px 8px; text-align: left; border-color: transparent; background: transparent; font-size: 13px; }
     .player-bottom-title:hover:not(:disabled) { color: var(--text); border-color: transparent; background: transparent; }
@@ -289,7 +281,6 @@
     .chat-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .chat-history-toggle .icon:last-child { margin-left: auto; }
     .chat-history-panel { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--surface-2); }
-    .chat-history-panel[hidden] { display: none; }
     .chat-history-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
     .chat-history-list { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
     .chat-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px; border: 1px solid var(--line); background: var(--surface-1); }
@@ -300,7 +291,6 @@
     .chat-history-open:hover:not(:disabled) .chat-history-meta { color: inherit; }
     .chat-controls-panel { display: grid; gap: 8px; padding: 0 12px 8px; max-height: 200px; overflow: hidden; border-bottom: 1px solid var(--line); transition: opacity .18s ease, transform .18s ease, border-bottom-color .18s ease; }
     .chat-controls-panel.closed { max-height: 0; opacity: 0; transform: translateY(-12px); padding: 0 12px; border-bottom-color: transparent; pointer-events: none; }
-    .chat-controls-panel[hidden] { display: none; }
     .chat-controls-panel label { font-size: 12px; }
     .chat-controls-panel select { font-size: 12px; padding: 6px 8px; }
     .chat-controls-panel button { font-size: 12px; padding: 6px 12px; }
@@ -326,31 +316,19 @@
     .chat-proposal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
     .chat-proposal-header strong { color: var(--accent); }
     .chat-proposal-diff { font-size: 11px; color: var(--muted); max-height: 120px; overflow-y: auto; }
-    .chat-proposal.expanded .chat-proposal-diff { max-height: none; }
-    .chat-proposal-toggle { padding: 3px 7px; font-size: 11px; }
     .chat-proposal-diff div { padding: 2px 0; border-bottom: 1px solid var(--line); }
     .chat-input-row { padding: 8px 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
     .chat-input-row textarea { min-height: 60px; font-size: 13px; resize: vertical; }
     .chat-input-actions { display: flex; gap: 8px; align-items: center; }
     .chat-input-actions button { font-size: 12px; padding: 6px 12px; }
-    .chat-disabled-notice { padding: 20px 16px; text-align: center; color: var(--muted); font-size: 13px; }
     .chat-busy { display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: var(--accent); font-size: 12px; border-top: 1px solid var(--line); }
-    .chat-busy[hidden] { display: none; }
-    .chat-pane[hidden] { display: none; }
     label[data-help]::after { content: attr(data-help); color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.35; }
-    .assistant-context { margin: 8px 12px 0; padding: 7px 9px; color: var(--accent); border: 1px solid var(--line); background: var(--surface-1); font-size: 12px; }
     .chat-project-state { max-width: 620px; margin-top: 12px; padding-left: 10px; color: var(--muted); border-left: 2px solid var(--line-strong); font-size: 12px; }
     .assistant-workflow { border-bottom: 1px solid var(--line); }
     .assistant-util { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: calc(100% - 24px); margin: 6px 12px; padding: 5px 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
     .assistant-chat-toggle { display: none; }
     #assistantChatClose { display: none; }
-    .assistant-steps { display: grid; gap: 4px; margin: 0; padding: 8px 12px; border-block: 1px solid var(--line); list-style: none; }
-    .assistant-steps button { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; padding: 5px 8px; overflow: hidden; text-align: left; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
-    .assistant-steps .step-mark { flex: 0 0 16px; }
-    .assistant-steps li[data-state="done"] button { color: var(--success); }
-    .assistant-steps li[data-state="current"] button { color: var(--accent); background: var(--surface-1); border-color: var(--line-strong); }
-    .assistant-steps li[data-state="pending"] button { color: var(--disabled); }
-    .assistant-util.active, .assistant-steps li button.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
+    .assistant-util.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
     .assistant-workflow button:hover:not(:disabled) { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
     .assistant-next { display: grid; gap: 6px; margin: 8px 12px; padding: 10px; border: 1px solid var(--accent); background: var(--surface-1); }
     .assistant-next-title { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -358,7 +336,6 @@
     @keyframes ctaPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 185, 0, 0); } 50% { box-shadow: 0 0 0 6px rgba(255, 185, 0, .45); } }
     .cta-pulse { animation: ctaPulse .9s ease-in-out 3; }
     #podcastAssistant { position: relative; }
-    #podcastAssistant.nav-only #assistantContext { display: none; }
     #podcastAssistant.nav-only .assistant-chat { display: none; }
     .chat-fold-toggle { position: absolute; top: 0; bottom: 0; left: calc(280px - 8px); width: 16px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; z-index: 5; border-radius: 0; }
     .chat-fold-toggle:hover { color: var(--accent); background: var(--surface-1); }
@@ -372,11 +349,9 @@
       main.assistant-active > .view:not([hidden]) { flex: 1; min-height: 0; }
       .chat-pane { flex: 0 0 auto; height: auto; grid-template-columns: 1fr; overflow: visible; }
       .assistant-sidebar { overflow: visible; border-right: 0; }
-      .chat-pane-header, #assistantContext, .assistant-next { display: none; }
+      .chat-pane-header, .assistant-next { display: none; }
       .assistant-workflow { display: flex; align-items: center; gap: 6px; overflow-x: auto; border-bottom: 0; padding: 6px 8px; }
-      .assistant-steps { display: flex; gap: 6px; padding: 0; border: 0; }
-      .assistant-steps li { flex: 0 0 auto; }
-      .assistant-steps button, .assistant-util { width: auto; margin: 0; white-space: nowrap; }
+      .assistant-util { width: auto; margin: 0; white-space: nowrap; }
       #podcastAssistant:not(.nav-only) .assistant-chat-toggle { display: inline-flex; }
       .assistant-chat { display: none; }
       #podcastAssistant.chat-open .assistant-chat { display: flex; position: fixed; inset: 0; z-index: 70; background: var(--surface-2); opacity: 1; transform: none; }
@@ -441,8 +416,7 @@
     .workspace-brand { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 10px 18px; border-right: 1px solid var(--line); }
     .workspace-brand > span { display: grid; min-width: 0; }
     .workspace-brand small,
-    .workspace-status small,
-    .eyebrow { color: var(--muted); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .workspace-status small { color: var(--muted); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
     .workspace-brand strong { overflow: hidden; font-size: clamp(18px, 1.5vw, 22px); letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
     .workspace-status { display: grid; align-content: center; justify-items: start; padding: 10px 16px; border-left: 1px solid var(--line); }
     .workspace-status strong { color: var(--success); font: 700 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; }
@@ -497,12 +471,9 @@
       letter-spacing: .02em;
     }
     .assistant-util .icon { width: 21px; height: 21px; }
-    .assistant-util.active,
-    .assistant-steps li button.active { color: var(--accent); background: var(--accent-subtle); border-color: var(--accent-subtle-border); }
+    .assistant-util.active { color: var(--accent); background: var(--accent-subtle); border-color: var(--accent-subtle-border); }
     .assistant-workflow button:hover:not(:disabled) { color: var(--text); background: #151515; border-color: var(--line-strong); }
-    .assistant-steps { display: none; }
-    .assistant-next,
-    .assistant-context { display: none; }
+    .assistant-next { display: none; }
     .assistant-chat .assistant-next {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
@@ -656,8 +627,7 @@
       .workspace-progress { padding-inline: 6px; }
       #podcastAssistant { display: block; flex: 0 0 auto; height: auto; overflow: visible; }
       .assistant-sidebar { overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
-      .assistant-sidebar .chat-pane-header,
-      .assistant-context { display: none; }
+      .assistant-sidebar .chat-pane-header { display: none; }
       .assistant-workflow { display: flex; flex-direction: row; align-items: center; gap: 4px; overflow-x: auto; padding: 7px 10px; }
       .assistant-util,
       .assistant-chat-toggle { flex: 0 0 auto; flex-direction: row; width: auto; min-height: 40px; padding: 7px 10px; font-size: 11px; }
@@ -743,7 +713,6 @@
 <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></symbol>
 <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
 <symbol id="i-circle-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/></symbol>
-<symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
 <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
 <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
 <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
@@ -810,13 +779,11 @@
           <nav class="assistant-workflow" aria-label="Workflow">
             <button type="button" id="assistantChatToggle" class="assistant-util assistant-chat-toggle"><svg class="icon" aria-hidden="true"><use href="#i-message-square"/></svg>Chat</button>
             <button type="button" class="assistant-util" data-view="episodes"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg>Production</button>
-            <ol id="assistantProgress" class="assistant-steps" aria-label="Podcast workflow progress"></ol>
             <button type="button" class="assistant-util" data-view="player"><svg class="icon" aria-hidden="true"><use href="#i-audio-lines"/></svg>Player</button>
-            <button id="rightbarToggle" class="assistant-util rightbar-toggle" type="button" title="Notifications and jobs" aria-label="Open activity"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg>Activity<span id="rightbarBadge" class="rightbar-badge" hidden>0</span></button>
+            <button id="rightbarToggle" class="assistant-util" type="button" title="Notifications and jobs" aria-label="Open activity"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg>Activity<span id="rightbarBadge" class="rightbar-badge" hidden>0</span></button>
             <button type="button" class="assistant-util" data-view="config"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
             <button type="button" id="retryState" class="assistant-util" hidden><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Retry workspace</button>
           </nav>
-          <div id="assistantContext" class="assistant-context">Helping with: Plan Setup</div>
         <button id="chatFoldToggle" type="button" class="chat-fold-toggle" title="Focus production" aria-label="Focus production" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
       </div>
         <div class="assistant-chat">
@@ -1486,8 +1453,7 @@
 
     function renderPodcastAssistant() {
       const view = activeViewName();
-      const autoNavOnly = false;
-      const navOnly = autoNavOnly || chatFolded;
+      const navOnly = chatFolded;
       $("podcastAssistant").hidden = false;
       $("podcastAssistant").classList.toggle("nav-only", navOnly);
       if (navOnly) setAssistantChatOpen(false, false);
@@ -1497,7 +1463,7 @@
       $("appMain").classList.toggle("nav-only", navOnly);
       document.body.classList.toggle("production-focus", navOnly);
       if (navOnly) setChatFocus(false);
-      $("chatFoldToggle").hidden = autoNavOnly;
+      $("chatFoldToggle").hidden = false;
       $("chatFoldToggle").setAttribute("aria-pressed", String(chatFolded));
       $("chatFoldToggle").title = chatFolded ? "Show chat" : "Focus production";
       $("chatFoldToggle").setAttribute("aria-label", chatFolded ? "Show chat" : "Focus production");
@@ -1510,14 +1476,6 @@
         if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
       });
       $("assistantChatToggle").classList.toggle("active", $("appMain").classList.contains("chat-focus"));
-      const focus = view === "episodes" ? "Episodes"
-        : view === "speakers" ? "Hosts"
-        : view === "format" ? "Format"
-        : view === "transcript" ? (activeTranscriptSection === "prompt" ? "Prompt & Cues" : "Script")
-        : view === "tts" ? "TTS Generation"
-        : view === "player" ? "Player"
-        : "Model Connections";
-      $("assistantContext").textContent = `Helping with: ${focus}`;
       const rows = planEpisodeRows();
       const created = rows.map((row) => row.episode).filter(Boolean);
       const transcriptCount = created.filter((episode) => episode.transcriptWords > 0).length;
@@ -1533,11 +1491,6 @@
       ];
       const currentIndex = steps.findIndex((step) => !step.done);
       const stepState = (step, index) => step.done ? "done" : index === currentIndex ? "current" : "pending";
-      $("assistantProgress").innerHTML = steps.map((step, index) => {
-        const state = stepState(step, index);
-        const mark = step.done ? "circle-check" : index === currentIndex ? "circle-dot" : "circle";
-        return `<li data-state="${state}"><button type="button"${step.target === view ? ' class="active"' : ""} aria-pressed="${step.target === view}"${index === currentIndex ? ' aria-current="step"' : ""} data-assistant-target="${step.target}">${icon(mark, "step-mark")}${escapeHtml(step.label)}</button></li>`;
-      }).join("");
       $("workspaceProgress").innerHTML = steps.map((step, index) => `<li data-state="${stepState(step, index)}"><button type="button"${step.target === view ? ' class="active"' : ""} aria-pressed="${step.target === view}"${index === currentIndex ? ' aria-current="step"' : ""} data-assistant-target="${step.target}"><span class="tape-dot" aria-hidden="true"></span><span class="tape-label">${escapeHtml(step.short)}</span></button></li>`).join("");
       const stageIndex = currentIndex === -1 ? steps.length - 1 : currentIndex;
       const stageName = currentIndex === -1 ? "Podcast ready" : steps[stageIndex].label;
@@ -1568,7 +1521,7 @@
       ];
       const nextStep = currentIndex === -1 ? { text: "All episodes produced. Listen in the Player.", target: "player", highlight: "", go: "Open Player" } : nextSteps[currentIndex];
       $("assistantNextText").textContent = nextStep.text;
-      $("assistantNextGo").textContent = nextStep.go;
+      $("assistantNextGo").innerHTML = icon("arrow-right") + escapeHtml(nextStep.go);
       $("assistantNextGo").dataset.nextTarget = nextStep.target;
       $("assistantNextGo").dataset.nextHighlight = nextStep.highlight;
     }
@@ -3316,6 +3269,14 @@
       };
     }
 
+    async function lockWhile(button, action) {
+      if (button.dataset.busy) return;
+      button.dataset.busy = "1";
+      button.disabled = true;
+      try { await action(); }
+      finally { delete button.dataset.busy; button.disabled = false; renderJobIndicators(); }
+    }
+
     function configKeyTarget(spec) {
       const [kind, id] = spec.split(":", 2);
       return kind === "provider" ? configState.providers[id] : configState.compatibleConnections.find((connection) => connection.id === id);
@@ -3394,7 +3355,7 @@
     $("buildEpisodeProfile").addEventListener("change", () => renderEpisodeSettingsFields());
     $("episodeList").addEventListener("click", (event) => {
       const start = event.target.closest("[data-start-episode]");
-      if (start) return guard(() => startEpisode(start.dataset.startEpisode))();
+      if (start) return guard(() => lockWhile(start, () => startEpisode(start.dataset.startEpisode)))();
       const open = event.target.closest("[data-open-episode]");
       if (open) return guard(async () => { if (await selectEpisode(open.dataset.openEpisode)) location.hash = "transcript"; })();
       const play = event.target.closest("[data-play-episode]");
@@ -3426,7 +3387,7 @@
     $("resetTranscriptPrompt").addEventListener("click", () => { $("transcriptPromptGuidance").value = ""; transcriptPromptDirty = true; episodeDraftDirty = true; updateSaveButtons(); resolveTranscriptPrompt().catch((error) => notify(error.message || String(error), "error")); });
     $("saveTranscriptPrompt").addEventListener("click", guard(async () => { const saved = await saveEpisode(); if (saved !== false && !saved.warning) notify("Transcript guidance saved.", "ok"); }));
     $("saveEpisode").addEventListener("click", guard(async () => { const saved = await saveEpisode(); if (saved !== false && !saved.warning) notify("Episode draft saved.", "ok"); }));
-    $("generateTranscript").addEventListener("click", guard(generateTranscript));
+    $("generateTranscript").addEventListener("click", guard(() => lockWhile($("generateTranscript"), generateTranscript)));
     $("saveTranscript").addEventListener("click", guard(saveTranscript));
     $("previewButtons").addEventListener("click", guard((event) => {
       const button = event.target.closest("button[data-preview-index]");
@@ -3434,7 +3395,7 @@
     }));
     $("applyLatestProfiles").addEventListener("click", guard(applyLatestProfiles));
     $("refreshTtsModels").addEventListener("click", guard(refreshModels));
-    $("renderAudio").addEventListener("click", guard(renderAudio));
+    $("renderAudio").addEventListener("click", guard(() => lockWhile($("renderAudio"), renderAudio)));
     $("episodePlayerActions").addEventListener("click", guard(async (event) => {
       const button = event.target.closest("[data-episode-player]");
       if (!button || !currentEpisode) return;
@@ -3772,8 +3733,8 @@
       if (step.action === "createEpisodes") return createEpisodeDrafts(ids.length ? ids : (activePlan?.episodes || []).filter((item) => !item.createdEpisodeId).map((item) => item.id));
       const episodeId = ids[0] || currentEpisode?.id || activePlan?.episodes.find((item) => item.createdEpisodeId)?.createdEpisodeId || "";
       if (["generateTranscript", "generateTts", "openPlayer"].includes(step.action) && episodeId && currentEpisode?.id !== episodeId && !await selectEpisode(episodeId)) return;
-      if (step.action === "generateTranscript") return generateTranscript();
-      if (step.action === "generateTts") return renderAudio();
+      if (step.action === "generateTranscript") return lockWhile($("generateTranscript"), generateTranscript);
+      if (step.action === "generateTts") return lockWhile($("renderAudio"), renderAudio);
       if (step.action === "openPlayer" && episodeId) { selectPlayerEpisode(episodeId); location.hash = "player"; }
     }
 
@@ -3846,7 +3807,6 @@
       plannerChatThreadId = open.dataset.chatOpen;
       await loadPlannerChatThread();
     }));
-    $("assistantProgress").addEventListener("click", (event) => { const button = event.target.closest("[data-assistant-target]"); if (button) openAssistantTarget(button.dataset.assistantTarget); });
     $("workspaceTapeToggle").addEventListener("click", () => setWorkspaceTapeOpen($("workspaceTapeToggle").getAttribute("aria-expanded") !== "true"));
     $("workspaceProgress").addEventListener("click", (event) => {
       const button = event.target.closest("[data-assistant-target]");

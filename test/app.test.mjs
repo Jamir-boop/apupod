@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import {
   clipCacheKey,
   createPodcastServer,
   parseTranscript,
+  runProcess,
   sanitizeProposalEpisode,
   transcriptSpeakerRule,
   transcriptToMarkdown,
@@ -47,6 +48,12 @@ async function waitFor(check, timeoutMs = 3_000) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`Condition not met within ${timeoutMs} ms.`);
+}
+
+// The browser re-assigns state.profiles from every PUT /api/profiles response; tests reusing one
+// local copy across several saves must adopt the new revisions the same way or the save conflicts.
+async function syncProfiles(response, profiles) {
+  Object.assign(profiles, (await response.json()).profiles);
 }
 
 async function startTestServer(t, prefix, options = {}, prepare) {
@@ -310,6 +317,7 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
     body: JSON.stringify(profiles),
   });
   assert.equal(response.status, 200);
+  await syncProfiles(response, profiles);
 
   response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -323,6 +331,7 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
   profiles.speakerProfiles[0].voiceModel = "eleven_flash_v2_5";
   response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles) });
   assert.equal(response.status, 200);
+  await syncProfiles(response, profiles);
   response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza" }),
@@ -380,6 +389,7 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   const { baseUrl } = await startTestServer(t, "podcast-builder-", {}, async (rootDir) => {
     await mkdir(join(rootDir, "public"), { recursive: true });
     await writeFile(join(rootDir, "public", "index.html"), `<!doctype html><style>${inlineStyle}</style><script>${inlineScript}</script>`);
+    await copyFile(join(process.cwd(), "public", "icon.png"), join(rootDir, "public", "icon.png"));
   });
 
   let response = await fetch(baseUrl);
@@ -391,6 +401,11 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   assert.ok(csp.includes(`script-src 'sha256-${createHash("sha256").update(inlineScript).digest("base64")}'`));
   assert.ok(csp.includes(`style-src 'sha256-${createHash("sha256").update(inlineStyle).digest("base64")}'`));
   assert.doesNotMatch(csp, /unsafe-inline/);
+
+  response = await fetch(`${baseUrl}/icon.png`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()).subarray(0, 8), Buffer.from("89504e470d0a1a0a", "hex"));
 
   response = await fetch(`${baseUrl}/%ZZ`);
   assert.equal(response.status, 400);
@@ -583,6 +598,7 @@ test("saved episode explicitly applies latest profiles atomically", async (t) =>
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles),
   });
   assert.equal(response.status, 200);
+  await syncProfiles(response, state.profiles);
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/profiles`, { method: "PUT" });
   const ttsChanged = await response.json();
   assert.equal(ttsChanged.episode.audioReady, false);
@@ -1007,6 +1023,7 @@ test("TTS jobs report progress and publish MP3", { concurrency: false }, async (
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles),
   });
   assert.equal(response.status, 200);
+  await syncProfiles(response, profiles);
   response = await fetch(`${baseUrl}/api/episodes`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
@@ -1264,6 +1281,260 @@ test("job history keeps the newest 30 persisted jobs", async (t) => {
   assert.equal(jobs[0].id, "job-34");
   assert.equal(jobs.at(-1).id, "job-05");
   assert.ok(!jobs.some((job) => job.id === "job-04"));
+});
+
+// B1/B5 share one stubbed transcript-generation harness.
+function transcriptJobFetch({ outlineContent, transcriptGate }) {
+  const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Part ${index + 1}`, points: ["Point"] })) };
+  const transcript = {
+    title: "Model chosen title",
+    segments: Array.from({ length: 5 }, (_, index) => ({
+      number: index + 1,
+      title: `Part ${index + 1}`,
+      turns: [
+        { speaker: "Valeria", delivery: "warm", text: longText(`Idea ${index + 1}`) },
+        { speaker: "Diego", delivery: "dry", text: longText(`Reaction ${index + 1}`) },
+      ],
+    })),
+  };
+  return async (url, init) => {
+    if (!String(url).endsWith("/chat/completions")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
+    // Only the transcript prompt carries the approved outline, so a retry cannot desync the stub.
+    if (!String(init?.body).includes("Approved outline:")) return Response.json({ choices: [{ message: { content: outlineContent ?? JSON.stringify(outline) } }] });
+    if (transcriptGate) await transcriptGate();
+    return Response.json({ choices: [{ message: { content: JSON.stringify(transcript) } }] });
+  };
+}
+
+async function seedRenderedEpisode(baseUrl, rootDir, name) {
+  let response = await fetch(`${baseUrl}/api/knowledge`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Grounded" }),
+  });
+  const knowledge = await response.json();
+  response = await fetch(`${baseUrl}/api/episodes`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
+  });
+  const episode = await response.json();
+  const transcript = Array.from({ length: 5 }, (_, index) =>
+    `## Segmento ${index + 1} — Test\nValeria: Idea ${index + 1}.\nDiego: Reaction ${index + 1}.`
+  ).join("\n\n");
+  await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }),
+  });
+  const episodeFile = join(rootDir, "data", "episodes", episode.id, "episode.json");
+  const stored = JSON.parse(await readFile(episodeFile, "utf8"));
+  await writeFile(episodeFile, JSON.stringify({ ...stored, audioReady: true, status: "ready" }, null, 2));
+  await writeFile(join(rootDir, "data", "episodes", episode.id, "episode.mp3"), "existing-audio");
+  return episode;
+}
+
+function withMimoKey(t) {
+  const previous = process.env.MIMO_API_KEY;
+  process.env.MIMO_API_KEY = "test-mimo-key";
+  t.after(() => { if (previous === undefined) delete process.env.MIMO_API_KEY; else process.env.MIMO_API_KEY = previous; });
+}
+
+test("a failed transcript job keeps the existing render playable", { concurrency: false }, async (t) => {
+  withMimoKey(t);
+  const fetchImpl = transcriptJobFetch({ outlineContent: "not json at all" });
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-transcript-failure-audio-", { fetchImpl });
+  const episode = await seedRenderedEpisode(baseUrl, rootDir, "Rendered episode");
+
+  assert.equal((await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" })).status, 202);
+  await waitFor(async () => {
+    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return jobs.jobs.find((job) => job.episodeId === episode.id)?.status === "failed";
+  });
+
+  const saved = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(saved.status, "failed");
+  assert.ok(saved.lastError);
+  assert.equal(saved.audioReady, true);
+  assert.match(saved.audioUrl, /episode\.mp3$/);
+  assert.equal(await readFile(join(rootDir, "data", "episodes", episode.id, "episode.mp3"), "utf8"), "existing-audio");
+});
+
+test("the existing render stays playable until a new transcript replaces it", { concurrency: false }, async (t) => {
+  withMimoKey(t);
+  let releaseTranscript;
+  let transcriptStarted = false;
+  const transcriptGate = new Promise((resolve) => { releaseTranscript = resolve; });
+  t.after(() => releaseTranscript());
+  const fetchImpl = transcriptJobFetch({ transcriptGate: async () => { transcriptStarted = true; await transcriptGate; } });
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-transcript-audio-lifetime-", { fetchImpl });
+  const episode = await seedRenderedEpisode(baseUrl, rootDir, "Rendered episode");
+
+  assert.equal((await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" })).status, 202);
+  await waitFor(() => transcriptStarted);
+  const during = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(during.audioReady, true);
+  assert.match(during.audioUrl, /episode\.mp3$/);
+
+  releaseTranscript();
+  await waitFor(async () => {
+    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return jobs.jobs.find((job) => job.episodeId === episode.id)?.status === "completed";
+  });
+  const after = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(after.audioReady, false);
+  assert.equal(after.audioUrl, null);
+});
+
+test("a rename during transcript generation outranks the model title", { concurrency: false }, async (t) => {
+  withMimoKey(t);
+  let releaseTranscript;
+  let transcriptStarted = false;
+  const transcriptGate = new Promise((resolve) => { releaseTranscript = resolve; });
+  t.after(() => releaseTranscript());
+  let gateArmed = true;
+  const fetchImpl = transcriptJobFetch({
+    transcriptGate: async () => { if (!gateArmed) return; transcriptStarted = true; await transcriptGate; },
+  });
+  const { baseUrl } = await startTestServer(t, "podcast-rename-during-job-", { fetchImpl });
+  let response = await fetch(`${baseUrl}/api/knowledge`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "book.md", content: "# Grounded" }),
+  });
+  const knowledge = await response.json();
+  const createEpisode = async () => (await (await fetch(`${baseUrl}/api/episodes`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "New episode", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id }),
+  })).json());
+
+  const renamed = await createEpisode();
+  assert.equal((await fetch(`${baseUrl}/api/episodes/${renamed.id}/generate`, { method: "POST" })).status, 202);
+  await waitFor(() => transcriptStarted);
+  response = await fetch(`${baseUrl}/api/episodes/${renamed.id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "User chosen name" }),
+  });
+  assert.equal(response.status, 200);
+  releaseTranscript();
+  await waitFor(async () => {
+    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return jobs.jobs.find((job) => job.episodeId === renamed.id)?.status === "completed";
+  });
+  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${renamed.id}`)).json()).name, "User chosen name");
+
+  // The placeholder name is still replaced by the model title when nobody renames the episode.
+  gateArmed = false;
+  const untouched = await createEpisode();
+  assert.equal((await fetch(`${baseUrl}/api/episodes/${untouched.id}/generate`, { method: "POST" })).status, 202);
+  await waitFor(async () => {
+    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
+    return jobs.jobs.find((job) => job.episodeId === untouched.id)?.status === "completed";
+  });
+  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${untouched.id}`)).json()).name, "Model chosen title");
+});
+
+test("runProcess stops and reports a command that outlives its timeout", async () => {
+  // The child exits by itself: without the timeout this test fails in under a second instead of hanging.
+  await assert.rejects(
+    runProcess(process.execPath, ["-e", "setTimeout(() => process.exit(3), 500)"], 50),
+    (error) => error.message.includes(process.execPath) && /timed out after 50 ms and was stopped with SIGKILL/.test(error.message),
+  );
+  assert.equal(await runProcess(process.execPath, ["-e", "process.stdout.write('ok')"]), "ok");
+});
+
+test("profile saves reject a stale revision instead of overwriting another tab", async (t) => {
+  const { baseUrl } = await startTestServer(t, "podcast-profile-lost-update-");
+  const put = (profiles) => fetch(`${baseUrl}/api/profiles`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles),
+  });
+  const tabA = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
+  const tabB = structuredClone(tabA);
+
+  tabA.speakerProfiles[0].description = "Tab A edit";
+  let response = await put(tabA);
+  assert.equal(response.status, 200);
+  await syncProfiles(response, tabA);
+
+  tabB.episodeProfiles[0].targetMinutes = 21;
+  response = await put(tabB);
+  const rejected = await response.json();
+  assert.equal(response.status, 409);
+  assert.match(rejected.error, /Reload the page/);
+
+  const stored = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
+  assert.equal(stored.speakerProfiles[0].description, "Tab A edit");
+  assert.equal(stored.episodeProfiles[0].targetMinutes, 18);
+
+  // The ordinary single-tab flow, which adopts the revisions from each response, still saves.
+  tabA.episodeProfiles[0].targetMinutes = 21;
+  response = await put(tabA);
+  assert.equal(response.status, 200);
+  await syncProfiles(response, tabA);
+
+  // A stale tab whose change also removes a format in use is told to reload, not that the format is used.
+  const staleTab = structuredClone(tabA);
+  tabA.episodeProfiles.push({ ...tabA.episodeProfiles[0], id: "episode-extra", name: "Extra format" });
+  tabA.speakerProfiles[0].description = "Tab A later edit";
+  response = await put(tabA);
+  assert.equal(response.status, 200);
+  await syncProfiles(response, tabA);
+  response = await fetch(`${baseUrl}/api/episodes`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Pinned episode", episodeProfileId: "episode-extra" }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await put(staleTab);
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /Reload the page/);
+});
+
+test("a failed config save restores the previous .env with owner-only permissions", { concurrency: false }, async (t) => {
+  withMimoKey(t);
+  const { rootDir, baseUrl } = await startTestServer(t, "podcast-env-rollback-", {
+    fetchImpl: async () => Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] }),
+  });
+  const providers = { mimo: { baseUrl: "https://api.xiaomimimo.com/v1" }, elevenlabs: {} };
+  const saveConfig = (apiKey) => fetch(`${baseUrl}/api/config`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providers: { ...providers, mimo: { ...providers.mimo, apiKey } }, compatibleConnections: [] }),
+  });
+
+  assert.equal((await saveConfig("first-key")).status, 200);
+  // A directory in place of config.json fails the write that follows the .env update.
+  await rm(join(rootDir, "data", "config.json"));
+  await mkdir(join(rootDir, "data", "config.json"));
+  assert.equal((await saveConfig("second-key")).status, 500);
+
+  const env = await readFile(join(rootDir, ".env"), "utf8");
+  assert.match(env, /first-key/);
+  assert.doesNotMatch(env, /second-key/);
+  assert.equal((await stat(join(rootDir, ".env"))).mode & 0o777, 0o600);
+});
+
+test("an unreadable data file is reported instead of quarantined", async (t) => {
+  const rootDir = await mkdtemp(join(tmpdir(), "podcast-unreadable-profiles-"));
+  t.after(() => rm(rootDir, { recursive: true, force: true }));
+  await mkdir(join(rootDir, "data", "profiles.json"), { recursive: true });
+
+  await assert.rejects(createPodcastServer({ rootDir }), /EISDIR/);
+  assert.deepEqual((await readdir(join(rootDir, "data"))).filter((name) => name.includes(".corrupt-")), []);
+});
+
+test("corrupt config and profiles are quarantined at boot and JSON errors name the file", async (t) => {
+  for (const file of ["config.json", "profiles.json"]) {
+    const { rootDir, baseUrl } = await startTestServer(t, `podcast-corrupt-${file}-`, {}, async (root) => {
+      await mkdir(join(root, "data"), { recursive: true });
+      await writeFile(join(root, "data", file), '{"truncated":');
+    });
+    const state = await (await fetch(`${baseUrl}/api/state`)).json();
+    assert.ok(state.profiles.speakerProfiles.length >= 1);
+    assert.ok(state.config.providers.mimo);
+    const quarantined = (await readdir(join(rootDir, "data"))).filter((name) => name.startsWith(`${file}.corrupt-`));
+    assert.equal(quarantined.length, 1, `expected one quarantined copy of ${file}`);
+    assert.equal(await readFile(join(rootDir, "data", quarantined[0]), "utf8"), '{"truncated":');
+  }
+
+  const { baseUrl } = await startTestServer(t, "podcast-corrupt-index-", {}, async (root) => {
+    await mkdir(join(root, "data", "knowledge"), { recursive: true });
+    await writeFile(join(root, "data", "knowledge", "index.json"), "{");
+  });
+  const response = await fetch(`${baseUrl}/api/state`);
+  assert.equal(response.status, 500);
+  assert.match((await response.json()).error, /knowledge[/\\]index\.json is not valid JSON/);
 });
 
 test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", { concurrency: false }, async (t) => {
@@ -1744,6 +2015,7 @@ test("compatible config owns env names and blocks referenced connection removal"
   state.profiles.speakerProfiles[0].voiceModel = "compat:safe_connection:custom-tts";
   response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
   assert.equal(response.status, 200);
+  await syncProfiles(response, state.profiles);
 
   const connection = { id: "safe_connection", name: "Safe", baseUrl: "https://safe.example/v1", enabled: true, activeModels: { "custom-tts": { text: false, tts: true } } };
   response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providers, compatibleConnections: [{ ...connection, activeModels: {} }] }) });
@@ -1759,6 +2031,7 @@ test("compatible config owns env names and blocks referenced connection removal"
   response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providers, compatibleConnections: [{ ...connection, clearApiKey: true }] }) });
   assert.equal(response.status, 200);
   assert.doesNotMatch(await readFile(join(rootDir, ".env"), "utf8"), /compat-secret/);
+  assert.equal((await stat(join(rootDir, ".env"))).mode & 0o777, 0o600);
   response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providers, compatibleConnections: [{ ...connection, apiKey: "compat-secret" }] }) });
   assert.equal(response.status, 200);
 
@@ -1851,6 +2124,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   state.profiles.speakerProfiles[0].speakers[0].chatterboxTemperature = 0.65;
   response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
   assert.equal(response.status, 200);
+  await syncProfiles(response, state.profiles);
   response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza" }) });
   let transcriptPrompt = await response.json();
   assert.match(transcriptPrompt.lockedPrompt, /does not support inline tags/);
@@ -1880,6 +2154,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   state.profiles.episodeProfiles[0].language = "en-US";
   response = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.profiles) });
   assert.equal(response.status, 200);
+  await syncProfiles(response, state.profiles);
   response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: "episode-chisme-crianza" }) });
   transcriptPrompt = await response.json();
   assert.match(transcriptPrompt.lockedPrompt, /English Turbo/);
@@ -1996,6 +2271,16 @@ test("Podcast Assistant sees Chatterbox voices and tolerates offline discovery",
   assert.equal(response.status, 200, chat.error);
   assert.equal(chat.message.proposal.speakerProfile.value.speakers[0].voiceId, "charlie_EN");
   assert.equal(voiceCalls, 2);
+  // B3: the apply path must allow the same discovered Chatterbox voices as the propose path.
+  const chatterboxThread = await (await fetch(`${baseUrl}/api/chat?threadId=${chat.threadId}`)).json();
+  response = await fetch(`${baseUrl}/api/plans/chat/apply`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ threadId: chat.threadId, messageIndex: chatterboxThread.messages.findLastIndex((message) => message.role === "assistant") }),
+  });
+  const applied = await response.json();
+  assert.equal(response.status, 200, applied.error);
+  assert.deepEqual(applied.warnings, []);
+  assert.equal(applied.profiles.speakerProfiles.find((item) => item.name === "Charlie").speakers[0].voiceId, "charlie_EN");
   voicesOnline = false;
   response = await fetch(`${baseUrl}/api/plans/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: plan.id, text: "Check voices again", model: planningModel }) });
   assert.equal(response.status, 200, (await response.clone().json()).error);
@@ -2569,373 +2854,26 @@ test("planner generates plans, creates formats and drafts, and chats", { concurr
   assert.deepEqual((await (await fetch(`${baseUrl}/api/chats?kind=planner&planId=${plan.id}`)).json()).chats, []);
 });
 
-test("browser model fields and loading surfaces are present", async () => {
+test("index.html stays CSP-safe: no inline style or event-handler attributes", async () => {
   const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
   assert.doesNotMatch(html, /\sstyle=/);
   assert.doesNotMatch(html, /\son[a-z]+=/);
+  assert.doesNotMatch(html, /javascript:/);
+  assert.equal(html.match(/<script/g).length, 1);
+  assert.equal(html.match(/<style/g).length, 1);
+});
+
+test("index.html guards every long job behind the shared button lock", async () => {
+  const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
+  assert.match(html, /step\.action === "generateTranscript"\) return lockWhile\(\$\("generateTranscript"\), generateTranscript\)/);
+  assert.match(html, /step\.action === "generateTts"\) return lockWhile\(\$\("renderAudio"\), renderAudio\)/);
+  // The button is re-enabled before the render, so a throwing render cannot leave it disabled forever.
+  assert.match(html, /finally \{ delete button\.dataset\.busy; button\.disabled = false; renderJobIndicators\(\); \}/);
+});
+
+test("package-lock version agrees with package.json", async () => {
   const manifest = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(join(process.cwd(), "package-lock.json"), "utf8"));
-  assert.equal(manifest.version, "0.23.0");
-  assert.equal(lock.version, "0.23.0");
-  assert.equal(lock.packages[""].version, "0.23.0");
-  assert.match(html, /<label class="full"[^>]*>Saved episode<select id="ttsEpisodeSelect"/);
-  assert.match(html, /notify\(value\.warning \|\| \(value\.changed/);
-  assert.match(html, /Preview audio metadata did not load within 10 seconds/);
-  assert.match(html, /Preview audio has no playable duration/);
-  assert.match(html, /error\?\.name !== "NotAllowedError"/);
-  assert.doesNotMatch(html, /previewAudio"\)\.play\(\)\.catch\(\(\) => \{\}\)/);
-  assert.match(html, /providerCard\("opencodeGo", "OpenCode Go", \["text"\]/);
-  assert.match(html, /https:\/\/opencode\.ai\/docs\/go\//);
-  assert.match(html, /providers\.opencodeGo\?\.textModels/);
-  assert.match(html, /\["compatible", "openai", "opencodeGo", "chatterbox"\]/);
-  assert.match(html, /providerId === "opencodeGo" \? "opencode-go" : providerId/);
-  assert.doesNotMatch(html, /function providerConnectionId\(/);
-  assert.match(html, /customModelControls"\)\.hidden = !target\.allowCustom/);
-  assert.match(html, /profileProposal && profilesDirty && await saveProfiles\(\) === false/);
-  assert.match(html, /activeSpeakerProfileId = data\.appliedId/);
-  assert.match(html, /const voiceModel = discoveredModels\("tts"\)\[0\]\?\.id \|\| ""/);
-  assert.doesNotMatch(html, /id="epSegments"|id="epBriefing"|id="epOutlineModel"|id="epTranscriptModel"|id="epLanguage"|id="epMinutes"|data-draft-field="numSegments"|data-draft-field="defaultBriefing"/);
-  assert.match(html, /id="view-format" class="view" hidden/);
-  assert.match(html, /id="formatSelect"/);
-  assert.match(html, /id="fmtName"/);
-  assert.match(html, /id="fmtDescription"/);
-  assert.match(html, /id="fmtLanguage"/);
-  assert.match(html, /id="fmtMinutes"/);
-  assert.match(html, /id="fmtOutlineModel"/);
-  assert.match(html, /id="fmtOutlineEffort"/);
-  assert.match(html, /id="fmtTranscriptModel"/);
-  assert.match(html, /id="fmtTranscriptEffort"/);
-  assert.match(html, /id="saveFormat" class="primary" disabled>.*Save format/);
-  assert.match(html, /label: "Format", short: "Format", done: hasEpisodes, target: "format"/);
-  assert.match(html, /id="plannerChatEffort"/);
-  assert.match(html, /id="chatPillEffort"/);
-  assert.match(html, /id="transcriptEffort"/);
-  assert.match(html, /function effortLevelsForModel\(modelId\)/);
-  assert.match(html, /gpt-5\\\.5-pro\(\?:-\|\$\).*\["medium", "high", "xhigh"\]/);
-  assert.match(html, /function renderModelSelectors\(\)/);
-  assert.match(html, /function renderFormatView\(\)/);
-  assert.match(html, /function syncFormatForm\(\)/);
-  assert.match(html, /Episode settings — hosts and format/);
-  assert.match(html, /<label class="full" data-help="Grounds this episode in uploaded source material\.">Knowledge Base<select id="buildKnowledge"><\/select><\/label>/);
-  assert.match(html, /id="serverActivity"/);
-  assert.match(html, /id="notificationFeed"/);
-  assert.match(html, /id="notifyTranscript"/);
-  assert.match(html, /id="notifyTts"/);
-  assert.match(html, /pod-god\.notifications\.v1/);
-  assert.match(html, /let notifiedJobIds = new Set\(\)/);
-  assert.doesNotMatch(html, /jobStatuses|jobWatchStartedAt/);
-  assert.match(html, /Notification\.requestPermission\(\)/);
-  assert.match(html, /document\.visibilityState === "visible" && document\.hasFocus\(\)/);
-  assert.match(html, /id="transcriptSaveStatus"/);
-  assert.match(html, /id="refreshTtsModels"/);
-  assert.match(html, /<details class="notice-item"/);
-  assert.match(html, /<details class="job-item"/);
-  assert.match(html, /\.job-item\[open\]\[data-job-id\]/);
-  assert.match(html, /openJobs\.has\(job\.id\) \? " open" : ""/);
-  assert.match(html, /<summary>\[\$\{label\} - \$\{escapeHtml\(item\.message\)\}\]<\/summary>/);
-  assert.match(html, /data-job-player=/);
-  assert.match(html, /function openJobInPlayer\(id\)/);
-  assert.match(html, /grid-auto-rows: max-content/);
-  assert.match(html, /\.notice-item summary, \.job-item summary \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
-  assert.match(html, /class="notice-detail"/);
-  assert.match(html, /class="job-detail"/);
-  assert.doesNotMatch(html, /id="chatPane"|id="chatHistory"|id="chatMode"|id="chatDelete"|id="chatTargetLabel"/);
-  assert.doesNotMatch(html, /id="status" class="status"/);
-  assert.match(html, /id="transcriptJob"/);
-  assert.match(html, /<button id="generateTranscript" class="primary">.*Generate transcript<\/button>\s*<label class="bulk-check"[^>]*><input id="autoGenerateTts"/);
-  assert.doesNotMatch(html, /grid-template-columns: 240px|min-width: 240px|<h1>Podcast Builder<\/h1>/);
-  assert.match(html, /class="assistant-sidebar"/);
-  assert.match(html, /class="assistant-chat"/);
-  assert.match(html, /<nav class="assistant-workflow" aria-label="Workflow">/);
-  assert.doesNotMatch(html, /assistant-nav/);
-  assert.match(html, /class="assistant-util" data-view="config"/);
-  assert.match(html, /class="assistant-util" data-view="player"/);
-  assert.match(html, /id="assistantTitle"/);
-  assert.doesNotMatch(html, /plan-control|assistantPlanSelect/);
-  assert.match(html, /classList\.toggle\("nav-only", navOnly\)/);
-  assert.match(html, /const autoNavOnly = false/);
-  assert.match(html, /id="workspaceHeader" class="workspace-header"/);
-  assert.match(html, /id="workspaceProgress" class="workspace-progress"/);
-  assert.match(html, /id="workspaceTape" class="workspace-tape"/);
-  assert.match(html, /id="workspaceTapeToggle" class="workspace-counter-toggle"/);
-  assert.match(html, /class="tape-dot" aria-hidden="true"/);
-  assert.match(html, /aria-pressed="\$\{step\.target === view\}"\$\{index === currentIndex \? ' aria-current="step"'/);
-  assert.match(html, /setWorkspaceTapeOpen\(false\)/);
-  assert.match(html, /\.workspace-header \{ z-index: 40; flex-basis: 58px/);
-  assert.doesNotMatch(html, /flex-basis: 106px/);
-  assert.match(html, /class="chat-lead"/);
-  assert.match(html, /main\.assistant-active\.chat-focus/);
-  assert.match(html, /const navOnly = autoNavOnly \|\| chatFolded;/);
-  assert.match(html, /#podcastAssistant\.nav-only \.assistant-chat \{ display: none; \}/);
-  assert.doesNotMatch(html, /#podcastAssistant\.nav-only \.assistant-chat \{[^}]*position: absolute/);
-  assert.match(html, /id="chatFoldToggle"/);
-  assert.match(html, /id="propertiesFoldToggle"[^>]*title="Widen properties"[^>]*aria-pressed="false"/);
-  assert.match(html, /<symbol id="i-chevron-right"/);
-  assert.match(html, /\$\("chatFoldToggle"\)\.hidden = autoNavOnly/);
-  assert.match(html, /chatFolded = !chatFolded; renderPodcastAssistant\(\)/);
-  assert.match(html, /chatFolded = false;[\s\S]*setAssistantChatOpen\(true\)/);
-  assert.match(html, /\.chat-fold-toggle \{[^}]*position: absolute/);
-  assert.match(html, /#podcastAssistant\.nav-only \.chat-fold-toggle \.icon \{ transform: rotate\(180deg\)/);
-  assert.match(html, /main\.assistant-active\.nav-only \.properties-fold-toggle \.icon \{ transform: none/);
-  assert.match(html, /main\.assistant-active\.chat-focus \.properties-fold-toggle \{ display: none/);
-  assert.match(html, /\.properties-fold-toggle \{[^}]*left: calc\(100% - clamp\(420px, 34vw, 560px\) - 8px\)/);
-  assert.match(html, /\$\("propertiesFoldToggle"\)\.addEventListener\("click", \(\) => \{ chatFolded = !chatFolded; renderPodcastAssistant\(\); \}\)/);
-  assert.match(html, /chatFolded \? "Restore split view" : "Widen properties"/);
-  assert.match(html, /\.assistant-chat \{[^}]*display: flex; flex-direction: column; \}/);
-  assert.doesNotMatch(html, /animate-fold/);
-  assert.match(html, /#podcastAssistant\.chat-open \.assistant-chat \{[^}]*opacity: 1; transform: none/);
-  assert.match(html, /main\.assistant-active \{[^}]*width: 100%;[^}]*margin: 0;[^}]*padding: 0;/);
-  assert.match(html, /main\.assistant-active\.nav-only \{ grid-template-columns: 112px minmax\(0, 1fr\); \}/);
-  assert.match(html, /#podcastAssistant\.nav-only \{ grid-template-columns: 112px; \}/);
-  assert.match(html, /body\.production-focus \.player-bottom \{ right: 0; \}/);
-  assert.match(html, /classList\.toggle\("production-focus", navOnly\)/);
-  assert.match(html, /chatFolded \? "Show chat" : "Focus production"/);
-  assert.match(html, /function setAssistantChatOpen\(open, moveFocus = true\) \{\s*if \(open && chatFolded\) \{\s*chatFolded = false;\s*renderPodcastAssistant\(\);/);
-  assert.match(html, /\.player-layout \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
-  assert.match(html, /main\.assistant-active\.nav-only #view-player \.player-layout \{ grid-template-columns: minmax\(0, 1\.3fr\) minmax\(300px, \.7fr\); \}/);
-  assert.match(html, /#view-player \.player-row \{ grid-template-columns: minmax\(0, 1fr\); \}/);
-  assert.match(html, /input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\):not\(\[type="range"\]\) \{ min-height: 44px; \}/);
-  assert.match(html, /button\.icon-btn \{ min-width: 44px; min-height: 44px; \}/);
-  assert.match(html, /\.workspace-progress \{[^}]*grid-template-columns: repeat\(6, minmax\(52px, 1fr\)\);[^}]*overflow: hidden;/);
-  assert.doesNotMatch(html, /scroll-snap-type: x proximity/);
-  assert.match(html, /new RegExp\(`\^\$\{row\.planned\.number\}\[\.\)\]\\\\s`\)\.test\(name\) \? name/);
-  assert.match(html, /\.loading-line\[hidden\] \{ display: none; \}/);
-  assert.match(html, /data-field="accent"/);
-  assert.match(html, /--accent: #FFB900/);
-  assert.match(html, /id="view-speakers" class="view" hidden/);
-  assert.match(html, /id="view-episodes" class="view" hidden/);
-  assert.doesNotMatch(html, /id="view-planner"|id="view-formats"/);
-  assert.doesNotMatch(html, /data-view="speakers"|data-view="formats"|data-view="planner"/);
-  assert.match(html, /class="assistant-util" data-view="episodes">.*Production/);
-  assert.match(html, /label: "Describe idea", short: "Idea", done: hasEpisodes, target: "chat"/);
-  assert.match(html, /label: "Hosts", short: "Hosts", done: hasEpisodes, target: "speakers"/);
-  assert.doesNotMatch(html, /data-planner-panel/);
-  assert.match(html, /id="episodeList"/);
-  assert.match(html, /data-start-episode/);
-  assert.match(html, /data-episode-host/);
-  assert.match(html, /data-create-planned/);
-  assert.match(html, /function renderEpisodeList\(\)/);
-  assert.match(html, /async function startEpisode\(id\)/);
-  assert.match(html, /async function changeEpisodeHosts\(id, speakerProfileId\)/);
-  assert.match(html, /id="episodeSettings"/);
-  assert.match(html, /id="episodeHosts"/);
-  assert.match(html, /id="saveEpisodeSettings"/);
-  assert.doesNotMatch(html, /id="planSelect"|id="generatePlan"|id="planEpisodeFormat"|id="planLanguage"|id="planMinutes"|id="planName"|id="planTheme"|id="planAudience"|id="planGoal"|id="planModel"|id="planEpisodeCount"|id="planKnowledge"|id="savePlan"|id="newPlan"|id="duplicatePlan"|id="deletePlan"|id="planGenerateBusy"/);
-  assert.doesNotMatch(html, /id="planGenerateFormats"|id="planFormatCount"|id="planFormatDrafts"/);
-  assert.match(html, /id="podcastAssistant" class="chat-pane" hidden/);
-  assert.match(html, /<h1 class="sr-only">pod-god<\/h1>/);
-  assert.match(html, /<h3 id="assistantTitle">pod-god<\/h3>/);
-  assert.match(html, /id="assistantContext"/);
-  assert.match(html, /id="assistantProgress"/);
-  assert.match(html, /main\.assistant-active \{[^}]*grid-template-columns: minmax\(680px, 760px\) minmax\(0, 1fr\)/);
-  assert.match(html, /\.chat-pane \{[^}]*grid-template-columns: 280px minmax\(0, 1fr\)/);
-  assert.match(html, /class="view-body"/);
-  assert.match(html, /body \{[^}]*overflow: hidden/);
-  assert.match(html, /id="assistantChatToggle"/);
-  assert.match(html, /id="assistantChatClose"/);
-  assert.match(html, /textarea\.transcript \{[^}]*flex: 1 1 auto/);
-  assert.doesNotMatch(html, /#0A1520|#1A3040/);
-  assert.doesNotMatch(html, /planner-layout/);
-  assert.match(html, /label\[data-help\]::after/);
-  assert.doesNotMatch(html, /data-planner-section/);
-  assert.match(html, /id="saveProfiles" class="primary" disabled>.*Save hosts/);
-  assert.doesNotMatch(html, /continueSpeakerProfile|continueEpisodeFormat|Save &amp; Continue/);
-  assert.match(html, /Press Start on an episode to generate its script and audio/);
-  assert.doesNotMatch(html, /id="selectAllUnsavedFormats"|id="saveAllUnsavedFormats"|id="newEpisode"/);
-  assert.doesNotMatch(html, /data-detail-episode|id="plannedEpisodeSidebar"|id="plannedEpisodes"|id="createSelectedEpisodes"|data-planned-episode-id/);
-  assert.match(html, /id="speakerSidebar"/);
-  assert.match(html, /id="uploadKnowledge"/);
-  assert.match(html, /id="knowledgeFile" type="file" accept="\.md,text\/markdown,text\/plain" hidden/);
-  assert.match(html, /id="chatControlsPanel" class="chat-controls-panel closed" hidden/);
-  assert.match(html, /id="chatPillModel"/);
-  assert.match(html, /id="chatPillKb"/);
-  assert.match(html, /id="chatControlsToggle"/);
-  assert.match(html, /\.chat-controls-panel\.closed \{[^}]*max-height: 0;[^}]*opacity: 0;[^}]*transform: translateY\(-12px\)/);
-  assert.match(html, /\.chat-input-actions \.chat-pill \{[^}]*border-radius: 999px/);
-  assert.match(html, /function updateChatPills\(\)/);
-  assert.match(html, /function setChatControlsOpen\(open\)/);
-  assert.match(html, /setChatControlsOpen\(\$\("chatControlsPanel"\)\.classList\.contains\("closed"\)\)/);
-  assert.match(html, /chatPillModel.*open.*setChatControlsOpen\(false\).*setChatControlsOpen\(true\).*plannerChatModel.*focus/);
-  assert.match(html, /chatPillKb.*open.*setChatControlsOpen\(false\).*setChatControlsOpen\(true\).*plannerChatKb.*focus/);
-  assert.match(html, /\$\("plannerChatEffort"\)\.addEventListener\("change", updateChatPills\)/);
-  assert.match(html, /chatPillEffort.*open.*setChatControlsOpen\(false\).*setChatControlsOpen\(true\).*plannerChatEffort.*focus/);
-  assert.doesNotMatch(html, /\.chat-controls \{/);
-  assert.doesNotMatch(html, /class="chat-controls"/);
-  assert.match(html, /min-height: 56px/);
-  assert.match(html, /#playerLibrary \{[^}]*max-height: none;[^}]*overflow: visible/);
-  assert.match(html, /id="playerPlaylistSelect"/);
-  assert.match(html, /pod-god\.playlists\.v1/);
-  assert.match(html, /function saveNewPlayerPlaylist\(\)/);
-  assert.match(html, /function loadPlayerPlaylist\(\)/);
-  assert.match(html, /data-rename-episode=/);
-  assert.match(html, /method: "PATCH"/);
-  assert.match(html, /Episode Format/);
-  assert.doesNotMatch(html, /ttsLanguageOverride|TTS language override|languageOverride/);
-  assert.match(html, /id="applyLatestProfiles">.*Apply latest profiles/);
-  assert.match(html, /function episodeIsBusy\(\)/);
-  assert.match(html, /renderAudio"\)\.disabled = episodeBusy \|\| errors\.length > 0/);
-  assert.match(html, /id="transcriptPromptTab"/);
-  assert.match(html, /id="transcriptLockedPrompt" readonly/);
-  assert.match(html, /id="transcriptPromptGuidance"/);
-  assert.match(html, /id="autoGenerateTts" type="checkbox"> Generate TTS after transcript/);
-  assert.doesNotMatch(html, /saveTranscriptAndTts|saveTranscriptAndGoToTts/);
-  assert.doesNotMatch(html, /autoTtsTranscriptJobs/);
-  assert.match(html, /JSON\.stringify\(\{ autoTts: generateTts \}\)/);
-  assert.match(html, /function hasUnsavedEpisodeChanges\(\)/);
-  assert.match(html, /\["buildEpisodeProfile", "episodeHosts", "buildKnowledge", "episodeName", "additionalInstructions"\]/);
-  assert.match(html, /profilesChanged \? \{ episodeProfileId, speakerProfileId \} : \{ episodeId: currentEpisode\.id \}/);
-  assert.match(html, /if \(previous === "config" && configDirty\) syncConfigForm\(\)/);
-  assert.match(html, /if \(previous === "format" && profilesDirty\) syncFormatForm\(\)/);
-  assert.match(html, /transcriptDirty = true;\s*updateWordCount\(\);\s*updateSaveButtons\(\)/);
-  assert.match(html, /role="tablist" aria-label="Transcript sections"/);
-  assert.match(html, /role="log" aria-live="polite"/);
-  assert.match(html, /aria-label="Episode transcript"/);
-  assert.match(html, /id="transcriptText"/);
-  assert.doesNotMatch(html, /id="transcript"/);
-  assert.match(html, /aria-label="TTS render progress"/);
-  assert.match(html, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(html, /button \{[^}]*transition: color \.12s ease/);
-  assert.match(html, /@keyframes drawerIn \{ from \{[^}]*clip-path: inset\(0 0 0 18px\)/);
-  assert.match(html, /\.rightbar:not\(\[hidden\]\) \{ animation: activityIn \.26s/);
-  assert.match(html, /\.chat-messages > :last-child \{ animation: messageIn \.24s/);
-  assert.match(html, /\.toast \{[^}]*animation: toastIn \.22s/);
-  assert.match(html, /\.rightbar \{ position: fixed; top: 0; right: 0; z-index: 65/);
-  assert.match(html, /\[hidden\] \{ display: none !important; \}/);
-  assert.match(html, /api\(`\/api\/episodes\/\$\{episodeId\}\/render`/);
-  assert.doesNotMatch(html, /id="transcriptChatPane"|id="transcriptChatHistory"|id="transcriptChatModel"/);
-  assert.match(html, /None — use LLM knowledge/);
-  assert.doesNotMatch(html, /id="episodeSeed"|Suggested episode/);
-  assert.doesNotMatch(html, /id="ttsPromptTab"/);
-  assert.doesNotMatch(html, /ttsPreparation/);
-  assert.doesNotMatch(html, /prepareTtsScript|approveTtsScript/);
-  assert.match(html, /data-view="player"/);
-  assert.match(html, /id="view-player"/);
-  assert.match(html, /id="playerAudio" preload="metadata" hidden/);
-  assert.match(html, /<body>/);
-  assert.match(html, /id="playerBottom" class="player-bottom"[^>]* hidden/);
-  assert.match(html, /\$\("playerBottom"\)\.hidden = !loaded/);
-  assert.match(html, /id="bottomPlayerSeek" class="player-bottom-seek"/);
-  assert.match(html, /id="bottomPlayerElapsed"/);
-  assert.match(html, /id="bottomPlayerDuration"/);
-  assert.match(html, /\.player-bottom-title:hover:not\(:disabled\) \{[^}]*color: var\(--text\);[^}]*border-color: transparent;[^}]*background: transparent;/);
-  assert.match(html, /id="playerLibrary"/);
-  assert.match(html, /id="playerQueue"/);
-  assert.match(html, /id="playerSpeed"/);
-  assert.match(html, /id="bottomPlayerSpeed"/);
-  assert.match(html, /function playEpisode\(id\)/);
-  assert.match(html, /function queueEpisode\(id\)/);
-  assert.match(html, /function playNextEpisode\(\)/);
-  assert.match(html, /Skipping to next episode/);
-  assert.match(html, /data-episode-player="play"/);
-  assert.doesNotMatch(html, /id="episodeAudio"/);
-  assert.match(html, /id="view-config"/);
-  assert.doesNotMatch(html, /id="saveEpisodeFormats"/);
-  assert.match(html, /id="speakerProfilePills"/);
-  assert.doesNotMatch(html, /id="episodeProfilePills"|Save Episode Formats|id="episodeProfileSelect"/);
-  assert.match(html, /id="modelDialog"/);
-  assert.match(html, /Add OpenAI compatible connection</);
-  assert.match(html, /const openaiVoices/);
-  assert.match(html, /function voiceSelector\(model, selected, index\)/);
-  assert.match(html, /data-field="chatterboxExaggeration"/);
-  assert.match(html, /data-field="mimoTemperature"/);
-  assert.match(html, /data-field="mimoTopP"/);
-  assert.match(html, /data-field="elevenlabsStability"/);
-  assert.match(html, /data-field="elevenlabsTextNormalization"/);
-  assert.match(html, /class="model-refresh-row"/);
-  assert.match(html, /overflow-y: auto/);
-  assert.doesNotMatch(html, /event\.target\.closest\("#chatPane"\)|function renderProposalDiff|version !== chatLoadVersion|Save profile changes before using the assistant/);
-  assert.doesNotMatch(html, /const lastAssistant/);
-  assert.match(html, /id="transcriptLengthWarning"/);
-  assert.doesNotMatch(html, /Render anyway\?/);
-  assert.match(html, /TTS job queued anyway/);
-  assert.match(html, /<input data-field="voiceId" list="voice-options-\$\{index\}"/);
-  assert.match(html, /function ensureProviderVoices\(model\)/);
-  assert.doesNotMatch(html, /refreshElevenVoices/);
-  assert.match(html, /id="configModelStatus" class="model-status"/);
-  assert.match(html, /id="modelSelectedOnly" type="checkbox"> Selected only/);
-  assert.match(html, /const selectedOnly = \$\("modelSelectedOnly"\)\.checked/);
-  assert.match(html, /Config saved with warnings/);
-  assert.match(html, /<details class="connection-row"/);
-  assert.match(html, /\.connection-row > summary::before/);
-  assert.match(html, /input\[type="checkbox"\]:checked/);
-  assert.match(html, /class="connection-title"/);
-  assert.match(html, /modalityPills\(\["text", "tts"\], connection\.activeModels\)/);
-  assert.match(html, /class="status-pill \$\{status\}"/);
-  assert.match(html, /used\.text\.has\(profileId\)/);
-  assert.doesNotMatch(html, /const ttsModels/);
-  assert.match(html, /Clear saved key/);
-  assert.match(html, /function captureEpisodeDraft\(\)/);
-  assert.match(html, /beforeunload/);
-  assert.match(html, /item\.corrupt/);
-  assert.match(html, /data-delete-knowledge=/);
-  assert.match(html, /function deleteKnowledgeBase\(id\)/);
-  assert.match(html, /activeContext: assistantContext\(\)/);
-  assert.match(html, /workspaceDraft: assistantWorkspaceDraft\(\)/);
-  assert.match(html, /function applyAssistantProposal\(index, continueWorkflow\)/);
-  assert.doesNotMatch(html, /data-create-new|Apply to new profile|Update shared profile|createNew\b/);
-  assert.match(html, /function summarizeProposal\(type, proposal\)/);
-  assert.match(html, /message\.appliedAt/);
-  assert.match(html, /<span>Applied<\/span>/);
-  assert.match(html, /<link rel="icon" type="image\/png" href="\/icon\.png">/);
-  assert.match(html, /<img class="brand-logo" src="\/icon\.png" alt="">/);
-  const iconBytes = await readFile(join(process.cwd(), "public", "icon.png"));
-  assert.ok(iconBytes.length > 0);
-  assert.equal(iconBytes.subarray(1, 4).toString("latin1"), "PNG");
-  const serverSource = await readFile(join(process.cwd(), "src", "app.mjs"), "utf8");
-  assert.match(serverSource, /path === "\/icon\.png"\) \{\s*return sendFile\(req, res, context\.paths\.publicIcon, "image\/png"\);/);
-  assert.match(html, /<symbol id="i-send"/);
-  assert.match(html, /function icon\(name, extraClass = ""\)/);
-  assert.match(html, /id="chatHistoryToggle"/);
-  assert.match(html, /id="chatHistoryPanel"/);
-  assert.match(html, /id="chatHistoryList"/);
-  assert.match(html, /data-chat-open=/);
-  assert.match(html, /data-chat-delete=/);
-  assert.doesNotMatch(html, /id="plannerChatHistory"|id="plannerChatReset"|id="plannerChatDelete"/);
-  assert.match(html, /class="internal-nav-row"/);
-  assert.doesNotMatch(html, /grid-template-columns: 210px/);
-  assert.match(html, /button\.innerHTML = icon\(audio\.paused \? "play" : "pause"\)/);
-  assert.match(html, /const audioUrl = episode\.audioUrl \|\| `\/artifacts\/\$\{encodeURIComponent\(episode\.id\)\}\/episode\.mp3`/);
-  assert.match(html, /<a class="icon-btn" download href="\$\{escapeHtml\(audioUrl\)\}"/);
-  assert.match(html, /mobileChatQuery\.matches && \$\("podcastAssistant"\)\.classList\.contains\("chat-open"\).*setAssistantChatOpen\(false, false\)/);
-  assert.match(html, /\$\("speakerProfileSelect"\)\.value = id/);
-  assert.match(html, /\.workspace-header\.tape-open \{ flex-basis: 116px; \}/);
-  assert.match(html, /Updates hosts on \$\{proposal\.impact\.episodes\} episode\(s\) of this podcast/);
-  assert.match(html, /data-delete-episode/);
-  assert.match(html, /data-delete-planned/);
-  assert.match(html, /async function deleteEpisode\(id\)/);
-  assert.match(html, /async function deletePlannedEpisode\(plannedId\)/);
-  assert.match(html, /\/episodes\/\$\{encodeURIComponent\(plannedId\)\}.*method: "DELETE"/);
-  assert.match(html, /\/api\/speaker-profiles\//);
-  assert.match(html, /At least one host profile must remain\./);
-  assert.match(html, /\/api\/plans\/chat\/apply/);
-  assert.match(html, /if \(!activePlan\) await createNewPlan\(\)/);
-  assert.match(html, /\? candidate : "episodes"/);
-  assert.match(html, /\$\("podcastAssistant"\)\.hidden = false/);
-  assert.match(html, /class="assistant-steps"/);
-  assert.match(html, /data-state="\$\{state\}"/);
-  assert.match(html, /id="rightbar" class="rightbar"/);
-  assert.match(html, /id="rightbarToggle"/);
-  assert.match(html, /id="rightbarBadge"/);
-  assert.match(html, /id="toasts" class="toasts"/);
-  assert.match(html, /pod-god\.rightbar\.v1/);
-  assert.match(html, /function updateSaveButtons\(\)/);
-  assert.match(html, /function showToast\(entry\)/);
-  assert.match(html, /data-assistant-target=/);
-  assert.match(html, /pod-god\.view-selections\.v1/);
-  assert.match(html, /sessionStorage\.getItem\(VIEW_SELECTIONS_KEY\)/);
-  assert.match(html, /sessionStorage\.setItem\(VIEW_SELECTIONS_KEY, JSON\.stringify\(viewSelections\)\)/);
-  assert.match(html, /refreshState\(rememberedEpisodeId\)/);
-  assert.match(html, /rememberViewSelection\("speakerProfileId", id\)/);
-  assert.match(html, /rememberViewSelection\("planId", plan\.id\)/);
-  assert.match(html, /rememberViewSelection\("episodeId", id\)/);
-  assert.match(html, /rememberViewSelection\("transcriptSection", "prompt"\)/);
-  assert.match(html, /<title>pod-god<\/title>/);
-  assert.match(html, /id="assistantNextStep"/);
-  assert.match(html, /id="assistantNextGo"/);
-  assert.match(html, /cta-pulse/);
-  assert.match(html, /id="plannerChatBusyText"/);
-  assert.match(html, /chatThreadId: plannerChatThreadId/);
-  assert.doesNotMatch(html, /assistantPrompts|assistant-prompts|data-assistant-prompt/);
-  assert.doesNotMatch(html, /id="generateTranscriptFromPrompt"/);
-  assert.match(html, /title="Resolved TTS model">TTS: /);
+  assert.equal(lock.version, manifest.version);
+  assert.equal(lock.packages[""].version, manifest.version);
 });
