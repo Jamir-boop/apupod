@@ -3,6 +3,8 @@ data/
 node_modules/
 dist/
 .claude/settings.local.json
+.claude/skills/
+.agents/skills/
 .impeccable/build-*.png
 .impeccable/review-*.png
 .impeccable/questions/
