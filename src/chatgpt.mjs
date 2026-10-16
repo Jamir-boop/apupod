@@ -659,7 +659,7 @@ export async function createChatGptClient({
       const data = await json(response);
       if (!response.ok) throw responseError(data, response, "chatgpt_models_failed", [token]);
       if (!Array.isArray(data.models)) throw new ChatGptError("chatgpt_invalid_model_catalog", { status: 502 });
-      return data.models.filter((item) => item.visibility === "list" && typeof item.slug === "string" && item.slug && typeof item.display_name === "string")
+      return data.models.filter((item) => item?.visibility === "list" && typeof item.slug === "string" && item.slug && typeof item.display_name === "string")
         .map((item) => ({ slug: item.slug, display_name: item.display_name, visibility: item.visibility }));
     });
   }

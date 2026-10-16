@@ -6,7 +6,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { badRequest, conflict, notFound, oneLine, normalizeDelivery, validateId, requireText, validateNumber, validateOptionalNumber, validateOptionalInteger, escapeRegex, assertSafeId, readJsonBody, sendJson } from "./util.mjs";
+import { badRequest, conflict, notFound, oneLine, normalizeDelivery, validateId, requireText, validateNumber, validateOptionalNumber, validateOptionalInteger, assertSafeId, readJsonBody, sendJson } from "./util.mjs";
 import { TTS_MODELS, TEXT_MODELS, LANGUAGE_OPTIONS, normalizeEffort, resolveLanguage } from "./providers/catalog.mjs";
 import { CHATTERBOX_DEFAULTS, ELEVENLABS_DEFAULTS, MIMO_INSTRUCTION_PRESETS, CHATTERBOX_TAGS, TTS_CUE_RE, ELEVEN_BREAK_RE, ELEVEN_BREAK_ANY_RE, TTS_DOCS, speakerAccent, ttsCueCapability, callTextModel, chatterboxSettings, mimoTtsSettings, assertElevenLabsMarkup, elevenLabsSettings, parseChatJson } from "./providers/generate.mjs";
 import { isActiveJob, planPath, planIndexItem, listPlans, loadPlan, savePlan, nextUpdatedAt, profileRevision, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, writeTextAtomic, exists } from "./store.mjs";
@@ -65,6 +65,7 @@ export async function deleteSpeakerProfileRequest(res, context, id) {
     ...profiles,
     speakerProfiles: profiles.speakerProfiles.filter((item) => item.id !== id),
     episodeProfiles: profiles.episodeProfiles.map((item) => item.speakerProfileId === id ? { ...item, speakerProfileId: fallback.id } : item),
+    updatedAt: nextUpdatedAt(profiles.updatedAt),
   };
   applyProfileRevisions(nextProfiles, profiles);
   const planIndex = await readJson(paths.plansIndex);
@@ -87,7 +88,7 @@ export async function deleteSpeakerProfileRequest(res, context, id) {
     for (const write of applied.reverse()) await writeJsonAtomic(write.path, write.before).catch(() => {});
     throw error;
   }
-  sendJson(res, 200, { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length, profiles: nextProfiles, beforeRevisions });
+  sendJson(res, 200, { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length, profiles: nextProfiles, previousProfilesUpdatedAt: profiles.updatedAt ?? null, beforeRevisions });
 }
 
 export function derivedNumSegments(targetMinutes) {
@@ -659,7 +660,7 @@ export function transcriptToMarkdown(value) {
 
 export function parseTranscript(markdown, speakers, expectedSegments) {
   const speakerNames = speakers.map((speaker) => speaker.name).sort((a, b) => b.length - a.length);
-  const speakerPattern = speakerNames.map(escapeRegex).join("|");
+  const speakerPattern = speakerNames.map(RegExp.escape).join("|");
   const turnRe = new RegExp(`^(${speakerPattern})(?:\\s*\\[(.*)\\])?:\\s*(.+)$`);
   const segments = [];
   let current = null;

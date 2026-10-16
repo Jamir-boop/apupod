@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { ChatGptError } from "../chatgpt.mjs";
 import { badRequest, oneLine, normalizeDelivery } from "../util.mjs";
-import { MAX_JSON_RESPONSE_BYTES, MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, LLM_TIMEOUT_MS, TTS_TIMEOUT_MS, LLM_RETRIES, MAX_STREAM_RESPONSE_BYTES, fetchJsonWithBody, fetchBytes, cappedFetch, openAiClient, anthropicClient, callOptions, sdkJson, providerError } from "./transport.mjs";
+import { MAX_JSON_RESPONSE_BYTES, MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, LLM_TIMEOUT_MS, TTS_TIMEOUT_MS, LLM_RETRIES, MAX_STREAM_RESPONSE_BYTES, fetchJsonWithBody, fetchBytes, audioResult, cappedFetch, openAiClient, anthropicClient, callOptions, sdkJson, providerError } from "./transport.mjs";
 import { ANTHROPIC_BASE_URL, openCodeGoProtocol, resolveOpenCodeGoCredential, awaitLatestModelCatalog, parseCompatibleModelId, builtInConnectionId, effortLevelsForModel, usesResponsesApi, compatibleConnection, builtInChatterboxConnection, availableModelIds, isElevenLabsModel, modelLanguageError, elevenLabsCapabilities, apiKeyName } from "./catalog.mjs";
 
 const ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
@@ -229,8 +229,8 @@ export async function synthesizeTurn(context, profile, speaker, text, delivery, 
   if (!audio) throw new Error("MiMo TTS response did not include choices[0].message.audio.data.");
   const wav = Buffer.from(audio, "base64");
   if (wav.length > MAX_AUDIO_RESPONSE_BYTES) throw new Error(`MiMo TTS response exceeds ${MAX_AUDIO_RESPONSE_BYTES} byte audio limit.`);
-  assertWav(wav);
-  return { bytes: wav, contentType: "audio/wav", extension: "wav" };
+  assertWav(wav, "MiMo TTS");
+  return { bytes: wav, contentType: "audio/wav", extension: "wav", label: "MiMo TTS" };
 }
 
 async function synthesizeCompatible(context, compositeModelId, voiceId, text, delivery, language, accent, style, chatterbox) {
@@ -266,14 +266,9 @@ async function synthesizeCompatible(context, compositeModelId, voiceId, text, de
     response = await openAiClient({ baseURL: connection.ttsBaseUrl || connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_AUDIO_RESPONSE_BYTES, label) }).audio.speech.create(body, callOptions(TTS_TIMEOUT_MS));
     bytes = Buffer.from(await response.arrayBuffer());
   } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), TTS_TIMEOUT_MS);
+    throw providerError(error, label, apiKeyName(connection), TTS_TIMEOUT_MS, apiKey);
   }
-  if (bytes.length === 0) throw new Error(`${label} returned empty audio.`);
-  return {
-    bytes,
-    contentType: response.headers.get("content-type") || "audio/mpeg",
-    extension: (response.headers.get("content-type") || "").includes("wav") ? "wav" : "mp3",
-  };
+  return audioResult(bytes, response.headers.get("content-type"), label, [apiKey]);
 }
 
 async function synthesizeElevenLabs(context, model, voiceId, text, delivery, language, settings) {
@@ -354,14 +349,14 @@ export async function fetchElevenLabsVoices(context, timeoutMs = TTS_TIMEOUT_MS)
   const apiKey = runtimeCredential(context, "ELEVENLABS_API_KEY");
   if (!apiKey) throw badRequest("ELEVENLABS_API_KEY is required in .env.");
   const data = await fetchJsonWithBody(context.fetchImpl, ELEVENLABS_VOICES_URL, { headers: { "xi-api-key": apiKey } }, "ElevenLabs voices", timeoutMs);
-  const voices = (data?.voices || []).map((voice) => ({
+  const voices = (Array.isArray(data?.voices) ? data.voices : []).filter((voice) => typeof voice?.voice_id === "string").map((voice) => ({
     id: voice.voice_id,
     name: voice.name,
     labels: voice.labels || {},
     verifiedLanguages: (Array.isArray(voice.verified_languages) ? voice.verified_languages : []).map((language) => ({
-      language: language.language,
-      locale: language.locale,
-      accent: language.accent,
+      language: language?.language,
+      locale: language?.locale,
+      accent: language?.accent,
     })),
   }));
   return { voices, hasMore: Boolean(data?.has_more) };
@@ -407,9 +402,8 @@ async function callMimo(context, payload, timeoutMs) {
       fetch: cappedFetch(context.fetchImpl, payload.audio ? MAX_TTS_JSON_RESPONSE_BYTES : MAX_JSON_RESPONSE_BYTES, "MiMo"),
     }).chat.completions.create(payload, callOptions(timeoutMs, payload.audio ? 0 : LLM_RETRIES)), "MiMo");
   } catch (error) {
-    throw providerError(error, "MiMo", "MIMO_API_KEY", timeoutMs);
+    throw providerError(error, "MiMo", "MIMO_API_KEY", timeoutMs, apiKey);
   }
-  if (data?.error) throw new Error(`MiMo request failed: ${data.error.message || JSON.stringify(data.error)}`);
   return data;
 }
 
@@ -426,7 +420,7 @@ async function callCompatibleChat(context, compositeModelId, payload, timeoutMs)
     return await sdkJson(openAiClient({ baseURL: connection.llmBaseUrl || connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) })
       .chat.completions.create(payload, callOptions(timeoutMs, LLM_RETRIES)), label);
   } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), timeoutMs);
+    throw providerError(error, label, apiKeyName(connection), timeoutMs, apiKey);
   }
 }
 
@@ -455,7 +449,7 @@ async function callOpenCodeGoMessages(context, compositeModelId, { system, promp
       top_p: topP,
     }, callOptions(timeoutMs, LLM_RETRIES)), label);
   } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), timeoutMs);
+    throw providerError(error, label, apiKeyName(connection), timeoutMs, apiKey);
   }
   const text = Array.isArray(data?.content)
     ? data.content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n")
@@ -485,7 +479,7 @@ async function callAnthropicMessages(context, compositeModelId, { system, prompt
       ...(effort && entry?.effortLevels?.includes(effort) ? { output_config: { effort } } : {}),
     }, callOptions(LLM_TIMEOUT_MS, LLM_RETRIES)).finalMessage();
   } catch (error) {
-    throw providerError(error, label, "ANTHROPIC_API_KEY", LLM_TIMEOUT_MS);
+    throw providerError(error, label, "ANTHROPIC_API_KEY", LLM_TIMEOUT_MS, apiKey);
   }
   if (message.stop_reason === "refusal") throw new Error(`Anthropic model ${parsed.modelId} declined this request (category: ${message.stop_details?.category ?? "none"}). Change the request or select another model.`);
   if (message.stop_reason === "max_tokens") throw new Error(`Anthropic model ${parsed.modelId} stopped at its ${maxTokens}-token output limit before it finished. Lower the effort or shorten the request.`);
@@ -516,7 +510,7 @@ async function callOpenAiResponses(context, compositeModelId, { system, prompt, 
     data = await sdkJson(openAiClient({ baseURL: connection.llmBaseUrl || connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) })
       .responses.create(body, callOptions(timeoutMs, LLM_RETRIES)), label);
   } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), timeoutMs);
+    throw providerError(error, label, apiKeyName(connection), timeoutMs, apiKey);
   }
   const text = data?.output_text
     || (Array.isArray(data?.output) ? data.output.flatMap((item) => item?.content || []).find((part) => part?.type === "output_text")?.text : "");
@@ -548,8 +542,8 @@ export function parseJsonLoose(content) {
   }
 }
 
-export function assertWav(buffer) {
+export function assertWav(buffer, label = "TTS") {
   if (!Buffer.isBuffer(buffer) || buffer.length < 12 || buffer.subarray(0, 4).toString("ascii") !== "RIFF" || buffer.subarray(8, 12).toString("ascii") !== "WAVE") {
-    throw new Error("MiMo TTS returned audio data, but it is not a WAV RIFF file.");
+    throw new Error(`${label} returned audio data, but it is not a WAV RIFF file.`);
   }
 }

@@ -10,30 +10,8 @@ import { DEFAULT_MIMO_BASE_URL, DEFAULT_OPENAI_BASE_URL, openCodeGoProtocol, res
 import { listPlans, loadPlan, listEpisodes, readJson, writeJsonAtomic, writeTextAtomic, exists, listChatThreads } from "./store.mjs";
 
 const ENV_FILE_MODE = 0o600;
-const DEFAULT_CONFIG = {
-  providers: {
-    mimo: { baseUrl: DEFAULT_MIMO_BASE_URL, enabled: true, activeModels: {} },
-    elevenlabs: { enabled: true, activeModels: {} },
-    openai: { baseUrl: DEFAULT_OPENAI_BASE_URL, llmBaseUrl: "", ttsBaseUrl: "", modelsUrl: "", enabled: true, activeModels: {} },
-    chatgpt: { enabled: false, activeModels: {} },
-    opencodeGo: { enabled: true, activeModels: {} },
-    chatterbox: { baseUrl: "", modelsUrl: "", enabled: false, activeModels: {} },
-  },
-  compatibleConnections: [],
-  assistantDecision: { enabled: false, provider: "typesafe", model: JEV_MODEL },
-};
-
 export function defaultConfig() {
-  return {
-    providers: {
-      mimo: { baseUrl: (process.env.MIMO_BASE_URL?.trim() || DEFAULT_MIMO_BASE_URL).replace(/\/+$/, ""), enabled: true, activeModels: {} },
-      elevenlabs: { enabled: true, activeModels: {} },
-      openai: structuredClone(DEFAULT_CONFIG.providers.openai),
-      opencodeGo: structuredClone(DEFAULT_CONFIG.providers.opencodeGo),
-      chatterbox: structuredClone(DEFAULT_CONFIG.providers.chatterbox),
-    },
-    compatibleConnections: [],
-  };
+  return normalizeConfig({ providers: { mimo: { baseUrl: process.env.MIMO_BASE_URL } } });
 }
 
 export async function readConfig(paths) {
@@ -118,6 +96,14 @@ function normalizeOpenCodeGoCapabilityMap(value) {
   }]));
 }
 
+// A Map, not an object: a custom connection id such as "__proto__" must not resolve to a prototype key.
+const BUILT_IN_PROVIDER_KEYS = new Map([["openai", "openai"], ["chatgpt", "chatgpt"], ["anthropic", "anthropic"], ["opencode-go", "opencodeGo"], ["chatterbox", "chatterbox"]]);
+
+function connectionProviderConfig(config, connectionId) {
+  const key = BUILT_IN_PROVIDER_KEYS.get(builtInConnectionId(config, connectionId));
+  return key ? config.providers[key] : config.compatibleConnections.find((connection) => connection.id === connectionId);
+}
+
 export function activateReferencedModels(config, profiles) {
   let changed = false;
   const activate = (target, modelId, type) => {
@@ -132,17 +118,7 @@ export function activateReferencedModels(config, profiles) {
     if (!parsed) return false;
     const builtInId = builtInConnectionId(config, parsed.connectionId);
     if (builtInId === "opencode-go" && (type !== "text" || !openCodeGoProtocol(parsed.modelId))) return true;
-    const target = builtInId === "openai"
-      ? config.providers.openai.activeModels
-      : builtInId === "chatgpt"
-        ? type === "text" ? config.providers.chatgpt.activeModels : null
-      : builtInId === "anthropic"
-        ? type === "text" ? config.providers.anthropic.activeModels : null
-      : builtInId === "opencode-go"
-        ? config.providers.opencodeGo.activeModels
-        : builtInId === "chatterbox"
-          ? config.providers.chatterbox.activeModels
-          : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)?.activeModels;
+    const target = ["chatgpt", "anthropic"].includes(builtInId) && type !== "text" ? null : connectionProviderConfig(config, parsed.connectionId)?.activeModels;
     if (target) activate(target, parsed.modelId, type);
     return true;
   };
@@ -404,20 +380,9 @@ function inactiveModelWarnings(current, config, dependents) {
 
 function modelIsActive(config, modelId, type) {
   const parsed = parseCompatibleModelId(modelId);
-  const builtInId = builtInConnectionId(config, parsed?.connectionId);
   const rawId = parsed?.modelId || modelId;
   const provider = parsed
-    ? builtInId === "openai"
-      ? config.providers.openai
-      : builtInId === "chatgpt"
-        ? config.providers.chatgpt
-      : builtInId === "anthropic"
-        ? config.providers.anthropic
-      : builtInId === "opencode-go"
-        ? config.providers.opencodeGo
-      : builtInId === "chatterbox"
-          ? config.providers.chatterbox
-          : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)
+    ? connectionProviderConfig(config, parsed.connectionId)
     : type === "text" || modelId === "mimo-v2.5-tts"
       ? config.providers.mimo
       : config.providers.elevenlabs;

@@ -327,6 +327,7 @@ export async function generatePlanRequest(req, res, context, id) {
       const models = availableModelIds(context);
       mergeSavedProfileSelections(models, latestProfiles);
       validateProfileData(profiles, models);
+      profiles.updatedAt = nextUpdatedAt(latestProfiles.updatedAt);
       await writeJsonAtomic(context.paths.profiles, profiles);
       profilesWritten = true;
       plan.episodeFormatId = episodeFormat.id;

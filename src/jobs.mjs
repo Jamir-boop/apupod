@@ -169,9 +169,12 @@ async function isNormalizedWav(path) {
 }
 
 export async function listJobsResponse(res, context) {
-  const episodes = await listEpisodes(context.paths);
-  const names = new Map(episodes.map((episode) => [episode.id, episode.name]));
-  for (const episode of episodes.toReversed()) if (episode.job) rememberJob(context, episode.job);
+  // Read only the episodes that recent jobs name: this runs on every 1 s poll, and job writes already call rememberJob.
+  const names = new Map();
+  for (const episodeId of new Set([...context.recentJobs.values()].map((job) => job.episodeId))) {
+    // A deleted or unreadable episode drops its jobs from the list.
+    try { names.set(episodeId, (await readJson(join(episodeDir(context.paths, episodeId), "episode.json"))).name); } catch {}
+  }
   const jobs = [...context.recentJobs.values()]
     .filter((job) => names.has(job.episodeId))
     .map((job) => ({ ...job, episodeName: names.get(job.episodeId) || job.episodeId }))
@@ -472,7 +475,7 @@ export async function writeAudioAsWav(audio, outputPath) {
   const temporaryWav = `${outputPath}.tmp.wav`;
   const source = `${outputPath}.source.${audio.extension}`;
   await rm(temporaryWav, { force: true });
-  if (audio.extension === "wav") assertWav(audio.bytes);
+  if (audio.extension === "wav") assertWav(audio.bytes, audio.label);
   await writeFile(source, audio.bytes);
   try {
     await runProcess("ffmpeg", [

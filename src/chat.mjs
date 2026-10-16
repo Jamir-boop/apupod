@@ -6,10 +6,10 @@ import {
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { decideAssistantConfiguration, enforceJevSelections } from "./jev.mjs";
-import { badRequest, conflict, notFound, oneLine, ID_RE, escapeRegex, assertSafeId, readJsonBody, sendJson } from "./util.mjs";
+import { badRequest, conflict, notFound, oneLine, ID_RE, assertSafeId, readJsonBody, sendJson } from "./util.mjs";
 import { MIMO_VOICES, OPENAI_VOICES, LANGUAGE_OPTIONS, awaitLatestModelCatalog, modelRuntimeSnapshot, chatGptCatalogAccount, parseCompatibleModelId, builtInConnectionId, normalizeEffort, compatibleConnection, availableModelIds, isElevenLabsModel, resolveLanguage, modelLanguageError } from "./providers/catalog.mjs";
 import { OPENAI_TTS_NO_INSTRUCTIONS, MIMO_INSTRUCTION_PRESETS, callTextModel, fetchElevenLabsVoices, fetchChatterboxVoices, parseJsonLoose } from "./providers/generate.mjs";
-import { serializeMutation, isActiveJob, listPlans, loadPlan, savePlan, profileRevision, listEpisodes, loadEpisode, episodeDir, readJson, writeJsonAtomic, exists, chatThreadPath, loadChatThread, saveChatThread, chatSummary, listChatThreads } from "./store.mjs";
+import { serializeMutation, isActiveJob, listPlans, loadPlan, savePlan, nextUpdatedAt, profileRevision, listEpisodes, loadEpisode, episodeDir, readJson, writeJsonAtomic, exists, chatThreadPath, loadChatThread, saveChatThread, chatSummary, listChatThreads } from "./store.mjs";
 import { derivedNumSegments, saveEpisodeFromBody, validateProfileData, applyProfileRevisions, mergeSavedProfileSelections, modelReferenceWarnings, assertProfilesCompatibleWithEpisodes } from "./episodes.mjs";
 import { PLAN_MAX_TEXT_CHARS, PLAN_MAX_EPISODES, normalizePlannedEpisode, normalizePlanInput, validatePlanReferences } from "./plans.mjs";
 import { clipCacheKey } from "./jobs.mjs";
@@ -413,7 +413,7 @@ function jevCandidates({ context, plan, profiles, profileTargets, focusEpisode, 
   const mentions = (items, speakerName = "", allowSharedModel = false) => {
     const byId = new Map(items.map((item) => [item.id, item]));
     if (!byId.size) return { value: undefined, excluded: [] };
-    const ids = [...byId.keys()].sort((left, right) => right.length - left.length).map(escapeRegex).join("|");
+    const ids = [...byId.keys()].sort((left, right) => right.length - left.length).map(RegExp.escape).join("|");
     const tokens = new RegExp(`(?<![\\p{L}\\p{N}_:/.-])(${ids})(?![\\p{L}\\p{N}_:/-]|\\.[\\p{L}\\p{N}_-])`, "gu");
     const positive = new Set();
     const excluded = new Set();
@@ -422,7 +422,7 @@ function jevCandidates({ context, plan, profiles, profileTargets, focusEpisode, 
       const clauseStart = [...before.matchAll(/[!?;\n]|\.(?=\s)/g)].at(-1)?.index;
       const prefix = before.slice(clauseStart == null ? 0 : clauseStart + 1);
       if (speakerName) {
-        const names = hostNames.slice().sort((left, right) => right.length - left.length).map(escapeRegex).join("|");
+        const names = hostNames.slice().sort((left, right) => right.length - left.length).map(RegExp.escape).join("|");
         const afterId = text.slice(match.index + match[1].length);
         if (/^\s+(?:for|para)\b/i.test(afterId)) {
           const assigned = afterId.match(new RegExp(`^\\s+(?:for|para)\\s+(${names})(?![\\p{L}\\p{N}_])`, "u"));
@@ -830,6 +830,7 @@ export async function applyPlannerChatProposal(req, res, context) {
     await assertProfilesCompatibleWithEpisodes(context.paths, nextProfiles, currentProfiles);
     await validatePlanReferences(context, result.plan, { profiles: nextProfiles });
     applyProfileRevisions(nextProfiles, currentProfiles);
+    nextProfiles.updatedAt = nextUpdatedAt(currentProfiles.updatedAt);
     await writeJsonAtomic(context.paths.profiles, nextProfiles);
     rollbacks.push(() => writeJsonAtomic(context.paths.profiles, currentProfiles));
     if (result.plan.updatedAt !== plan.updatedAt || result.plan.speakerProfileId !== plan.speakerProfileId || result.plan.episodeFormatId !== plan.episodeFormatId) {
@@ -837,6 +838,8 @@ export async function applyPlannerChatProposal(req, res, context) {
       rollbacks.push(() => savePlan(context.paths, plan, { restore: true }));
     }
     result.profiles = nextProfiles;
+    // The page adopts the new updatedAt only when it held this one, so a stale tab still gets 409 on its next save.
+    result.previousProfilesUpdatedAt = currentProfiles.updatedAt ?? null;
     const relevantEpisodeProfiles = new Set([result.plan.episodeFormatId, ...result.plan.episodes.map((item) => item.episodeProfileId)].filter(Boolean));
     result.warnings.push(...modelReferenceWarnings({
       speakerProfiles: nextProfiles.speakerProfiles.filter((item) => item.id === result.plan.speakerProfileId),

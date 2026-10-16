@@ -32,11 +32,27 @@ export async function readResponseBuffer(response, maximum, label) {
   return Buffer.from(await capResponse(response, maximum, label).arrayBuffer());
 }
 
+const KEY_HEADERS = ["authorization", "x-api-key", "api-key", "xi-api-key"];
+
+// The key values this request sent, so an error body that echoes one never reaches a message.
+function sentKeys(init) {
+  const headers = new Headers(init?.headers ?? undefined);
+  return KEY_HEADERS.map((name) => headers.get(name)?.replace(/^Bearer\s+/i, "").trim()).filter(Boolean);
+}
+
+export function redactSecrets(text, keys = []) {
+  let result = String(text);
+  for (const key of keys) if (key?.length >= 6) result = result.replaceAll(key, "[redacted]");
+  // Only token-like values, so "Missing bearer token" or "api-key: missing" keep their meaning.
+  return result.replace(/(Bearer\s+|(?i:(?:x-|xi-)?api-key)["']?\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{12,}/g, "$1[redacted]");
+}
+
 // The SDKs keep only body.error of an error body. This keeps the old detail rule: error.message, then detail.message, then raw text.
-async function errorResponse(response, label) {
+async function errorResponse(response, label, keys) {
   let text;
   try { text = (await readResponseBuffer(response, MAX_ERROR_RESPONSE_BYTES, label)).toString("utf8"); }
   catch (error) { if (error.code !== "response_too_large") throw error; text = error.message; }
+  text = redactSecrets(text, keys);
   let data = null;
   try { data = JSON.parse(text); } catch {}
   const error = data?.error && typeof data.error === "object" ? data.error : {};
@@ -53,7 +69,7 @@ async function errorResponse(response, label) {
 export function cappedFetch(fetchImpl, maximum, label) {
   return async (url, init) => {
     const response = await fetchImpl(url, init);
-    return response.ok ? capResponse(response, maximum, label) : errorResponse(response, label);
+    return response.ok ? capResponse(response, maximum, label) : errorResponse(response, label, sentKeys(init));
   };
 }
 
@@ -69,6 +85,13 @@ function requireBaseURL(baseURL) {
   if (!baseURL) throw new Error("Provider base URL is not configured.");
 }
 
+// fetch drops only Authorization on a cross-origin redirect, so a client that sends the key in another header must not follow one.
+const NO_REDIRECT = { redirect: "error" };
+const rawOptions = (options, signal) => {
+  const headers = new Headers(options?.headers ?? undefined);
+  return { ...(KEY_HEADERS.some((name) => name !== "authorization" && headers.has(name)) ? NO_REDIRECT : {}), ...options, signal };
+};
+
 export function openAiClient({ baseURL, apiKey, headers, fetch, fetchOptions }) {
   requireBaseURL(baseURL);
   return withoutEnv("OPENAI_CUSTOM_HEADERS", () => new OpenAI({
@@ -77,14 +100,14 @@ export function openAiClient({ baseURL, apiKey, headers, fetch, fetchOptions }) 
     adminAPIKey: null, organization: null, project: null, webhookSecret: null,
     // "none" only satisfies the constructor. The null header removes it, so a keyless server gets no Authorization.
     defaultHeaders: { ...(apiKey ? {} : { Authorization: null }), ...headers },
-    fetch, fetchOptions, maxRetries: 0, logLevel: "off",
+    fetch, fetchOptions: headers?.["api-key"] ? { ...NO_REDIRECT, ...fetchOptions } : fetchOptions, maxRetries: 0, logLevel: "off",
   }));
 }
 
 export function anthropicClient({ baseURL, apiKey, fetch }) {
   // Explicit baseURL, apiKey and authToken stop the SDK reading ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and profiles.
   requireBaseURL(baseURL);
-  return withoutEnv("ANTHROPIC_CUSTOM_HEADERS", () => new Anthropic({ baseURL, apiKey, authToken: null, fetch, maxRetries: 0, logLevel: "off" }));
+  return withoutEnv("ANTHROPIC_CUSTOM_HEADERS", () => new Anthropic({ baseURL, apiKey, authToken: null, fetch, fetchOptions: NO_REDIRECT, maxRetries: 0, logLevel: "off" }));
 }
 
 // The SDK timeout covers one attempt (for a stream, only until headers). The signal is the app's total deadline across retries and the body.
@@ -96,19 +119,36 @@ export async function sdkJson(request, label) {
   let data;
   try { data = JSON.parse(text); } catch { data = null; }
   if (data == null) throw new Error(`${label} response was not valid JSON.`);
+  if (data.error && typeof data.error === "object") throw new Error(`${label} request failed: ${data.error.message || JSON.stringify(data.error)}`);
   return data;
+}
+
+// Undici reports a refused redirect as "fetch failed" and keeps the reason ("unexpected redirect") on the deepest cause.
+function causeMessage(error) {
+  let deepest = error;
+  for (let depth = 0; depth < 10 && deepest?.cause?.message; depth++) deepest = deepest.cause;
+  const message = error?.message || String(error);
+  return deepest !== error && deepest.message !== message ? `${message} (${deepest.message})` : message;
 }
 
 const sdkError = (error, name) => error instanceof OpenAI[name] || error instanceof Anthropic[name];
 
-export function providerError(error, label, keyName, timeoutMs) {
+// apiKey is the key this call sent: it is redacted from every message, and no key means a 401 or 403 asks for one.
+export function providerError(error, label, keyName, timeoutMs, apiKey) {
+  const result = providerMessage(error, label, keyName, timeoutMs, Boolean(apiKey));
+  if (result instanceof Error) result.message = redactSecrets(result.message, [apiKey]);
+  return result;
+}
+
+function providerMessage(error, label, keyName, timeoutMs, keySent) {
   const tooLarge = [error, error?.cause].find((item) => item?.code === "response_too_large");
   if (tooLarge) return new Error(`${label} request failed: ${tooLarge.message}`);
   if (sdkError(error, "APIUserAbortError") || sdkError(error, "APIConnectionTimeoutError") || ["AbortError", "TimeoutError"].includes(error?.name)) return new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
-  if (sdkError(error, "APIConnectionError")) return new Error(`${label} request failed: ${error.cause?.message || error.message}`);
+  if (sdkError(error, "APIConnectionError")) return new Error(`${label} request failed: ${causeMessage(error.cause?.message ? error.cause : error)}`);
   if (error instanceof SyntaxError) return new Error(`${label} response was not valid JSON.`);
   if (!sdkError(error, "APIError")) return error;
   const detail = error.error?.error?.message ?? error.error?.message ?? error.message;
+  if (!keySent && (error.status === 401 || error.status === 403)) return new Error(`${label} request failed: HTTP ${error.status}. The provider requires an API key and none is configured. Set ${keyName} in .env, then refresh models. ${detail}`);
   if (error.status === 401 || error.status === 403) return new Error(`${label} request failed: HTTP ${error.status}. The provider rejected ${keyName}${error.status === 403 ? " for this model or endpoint" : ""}. Check the key. ${detail}`);
   if (error.status === 429 || error.type === "rate_limit_error") return new Error(`${label} is rate-limited (HTTP 429). Wait, then try again. ${detail}`);
   if (error.status === 529 || error.type === "overloaded_error") return new Error(`${label} is overloaded (HTTP 529). Try again shortly. ${detail}`);
@@ -116,10 +156,9 @@ export function providerError(error, label, keyName, timeoutMs) {
 }
 
 export async function fetchJsonWithBody(fetchImpl, url, options, label, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = AbortSignal.timeout(timeoutMs);
   try {
-    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    const response = await fetchImpl(url, rawOptions(options, signal));
     const text = (await readResponseBuffer(response, MAX_JSON_RESPONSE_BYTES, label)).toString("utf8");
     let data;
     try {
@@ -127,36 +166,34 @@ export async function fetchJsonWithBody(fetchImpl, url, options, label, timeoutM
     } catch {
       data = null;
     }
-    if (!response.ok) throw new Error(`${label} request failed: HTTP ${response.status} ${data?.error?.message || data?.detail?.message || text || response.statusText}`);
+    if (!response.ok) throw new Error(redactSecrets(`${label} request failed: HTTP ${response.status} ${data?.error?.message || data?.detail?.message || text || response.statusText}`, sentKeys(options)));
     if (data == null) throw new Error(`${label} response was not valid JSON.`);
     return data;
   } catch (error) {
-    if (error?.name === "AbortError") throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
+    if (signal.aborted) throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
     if (String(error?.message || error).startsWith(`${label} request`)) throw error;
-    throw new Error(`${label} request failed: ${error.message || error}`);
-  } finally {
-    clearTimeout(timer);
+    throw new Error(redactSecrets(`${label} request failed: ${causeMessage(error)}`, sentKeys(options)));
   }
 }
 
 export async function fetchBytes(fetchImpl, url, options, label, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = AbortSignal.timeout(timeoutMs);
+  let response;
+  let bytes;
   try {
-    const response = await fetchImpl(url, { ...options, signal: controller.signal });
-    const bytes = await readResponseBuffer(response, MAX_AUDIO_RESPONSE_BYTES, label);
-    if (!response.ok) throw new Error(`${label} request failed: HTTP ${response.status} ${bytes.toString("utf8") || response.statusText}`);
-    if (bytes.length === 0) throw new Error(`${label} returned empty audio.`);
-    return {
-      bytes,
-      contentType: response.headers.get("content-type") || "audio/mpeg",
-      extension: (response.headers.get("content-type") || "").includes("wav") ? "wav" : "mp3",
-    };
+    response = await fetchImpl(url, rawOptions(options, signal));
+    bytes = await readResponseBuffer(response, MAX_AUDIO_RESPONSE_BYTES, label);
   } catch (error) {
-    if (error?.name === "AbortError") throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
-    if (String(error?.message || error).startsWith(`${label} request`)) throw error;
-    throw new Error(`${label} request failed: ${error.message || error}`);
-  } finally {
-    clearTimeout(timer);
+    if (signal.aborted) throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
+    throw new Error(redactSecrets(`${label} request failed: ${causeMessage(error)}`, sentKeys(options)));
   }
+  if (!response.ok) throw new Error(redactSecrets(`${label} request failed: HTTP ${response.status} ${bytes.toString("utf8") || response.statusText}`, sentKeys(options)));
+  return audioResult(bytes, response.headers.get("content-type"), label, sentKeys(options));
+}
+
+// A 2xx JSON or text body is a provider error page, not audio; ffmpeg would only report it as a decode failure.
+export function audioResult(bytes, contentType, label, keys) {
+  if (bytes.length === 0) throw new Error(`${label} returned empty audio.`);
+  if (/json|^text\//i.test(contentType || "")) throw new Error(redactSecrets(`${label} returned ${contentType} instead of audio: ${bytes.toString("utf8", 0, 500)}`, keys));
+  return { bytes, contentType: contentType || "audio/mpeg", extension: (contentType || "").includes("wav") ? "wav" : "mp3", label };
 }

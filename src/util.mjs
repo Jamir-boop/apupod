@@ -65,10 +65,6 @@ export function validateOptionalInteger(value, minimum, maximum, label) {
   return number;
 }
 
-export function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 export function assertSafeId(id) {
   if (!ID_RE.test(String(id))) throw badRequest("Invalid identifier.");
 }

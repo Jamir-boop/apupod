@@ -87,7 +87,8 @@ test("profile save keeps later Hosts and Format edits and the new saved revision
   await tick();
   input.value = "Later host edit";
   context.state.profiles.episodeProfiles[0].description = "Later format edit";
-  const saved = structuredClone(submitted);
+  // The server consumes expectedUpdatedAt and never stores or returns it.
+  const { expectedUpdatedAt, ...saved } = structuredClone(submitted);
   for (const profiles of Object.values(saved)) for (const profile of profiles) profile.revision = 2;
   request.resolve({ profiles: saved });
   await saving;
@@ -427,6 +428,7 @@ test("same-tab Hosts deletion advances a current Format draft base and lets it s
   context.api = async (path, options) => {
     if (path.startsWith("/api/speaker-profiles/")) return { fallbackId: "keep", profiles: saved, beforeRevisions: { speakerProfiles: { keep: 1 }, episodeProfiles: { f: 1 } } };
     submitted = JSON.parse(options.body);
+    delete submitted.expectedUpdatedAt;
     assert.equal(submitted.episodeProfiles[0].revision, 2);
     return { profiles: submitted };
   };
@@ -452,7 +454,7 @@ test("a state snapshot from before a successful Hosts save cannot restore the ol
   context.api = async (path, options) => {
     if (path === "/api/state") return oldState;
     if (path === "/api/chatgpt/status") return status.promise;
-    const profiles = JSON.parse(options.body);
+    const { expectedUpdatedAt, ...profiles } = JSON.parse(options.body);
     profiles.speakerProfiles[0].revision = 2;
     return { profiles };
   };
@@ -693,4 +695,40 @@ test("chat refresh keeps unsent effort, including default, and an explicit plan 
   assert.equal(context.$("plannerChatEffort").value, "");
   context.loadPlanForm({ id: "p", planningModel: "model", planningEffort: "medium" });
   assert.equal(context.$("plannerChatEffort").value, "medium");
+});
+
+test("Apply keeps an updatedAt that a same-tab save adopted during the request, and a plan-only Apply leaves it alone", async () => {
+  const context = chatContext();
+  install(["saveProfiles"], context);
+  context.plannerChatThread = proposalThread("a");
+  context.state.profiles.updatedAt = "v1";
+  let server = "v1";
+  let apply;
+  context.api = async (path, options) => {
+    if (path === "/api/plans/chat/apply") return (apply = pending()).promise;
+    if (path === "/api/profiles") {
+      const { expectedUpdatedAt, ...profiles } = JSON.parse(options.body);
+      assert.equal(expectedUpdatedAt, server);
+      server = `${server}+`;
+      return { previousProfilesUpdatedAt: expectedUpdatedAt, profiles: { ...profiles, updatedAt: server } };
+    }
+    return path.startsWith("/api/chats?") ? { chats: [{ threadId: "a" }] } : proposalThread("a");
+  };
+  const applyWith = async (profiles) => {
+    const applying = context.applyAssistantProposal(0, false);
+    await tick();
+    context.profilesDirty = true;
+    await context.saveProfiles();
+    const previousProfilesUpdatedAt = server;
+    if (profiles) server = `${server}+`;
+    apply.resolve({ previousProfilesUpdatedAt, profiles: profiles && { ...structuredClone(context.state.profiles), updatedAt: server }, appliedType: "planPatch", plan: null, warnings: [] });
+    await applying;
+  };
+  await applyWith(true);
+  assert.equal(context.state.profiles.updatedAt, "v1++");
+  await applyWith(false);
+  assert.equal(context.state.profiles.updatedAt, "v1+++");
+  context.profilesDirty = true;
+  await context.saveProfiles();
+  assert.equal(context.state.profiles.updatedAt, "v1++++");
 });

@@ -7,11 +7,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_DATA } from "./defaults.mjs";
 import { createChatGptClient, ChatGptError } from "./chatgpt.mjs";
-import { badRequest, assertSafeId, readJsonBody, assertLocalRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
+import { badRequest, conflict, assertSafeId, readJsonBody, assertLocalRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
 import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog, chatGptRecovery, chatGptStatus, chatGptCatalogAccount, refreshChatGptAccount, availableModelIds } from "./providers/catalog.mjs";
-export { MIMO_VOICES, ELEVENLABS_MODELS, TTS_MODELS } from "./providers/catalog.mjs";
 import { fetchElevenLabsVoices, fetchChatterboxVoices } from "./providers/generate.mjs";
-import { serializeMutation, listPlans, listEpisodes, readJson, writeJsonAtomic, exists } from "./store.mjs";
+import { serializeMutation, listPlans, listEpisodes, readJson, writeJsonAtomic, exists, nextUpdatedAt } from "./store.mjs";
 import { defaultConfig, readConfig, activateReferencedModels, redactConfig, saveConfigRequest } from "./config.mjs";
 import { deleteEpisodeRequest, deleteSpeakerProfileRequest, saveEpisodeRequest, getEpisodeResponse, renameEpisodeRequest, applyLatestProfilesRequest, resolveTranscriptPromptRequest, saveTranscriptRequest, validateProfileData, assertProfileRevisionsCurrent, applyProfileRevisions, mergeSavedProfileSelections, modelReferenceWarnings, assertProfilesCompatibleWithEpisodes } from "./episodes.mjs";
 import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanResponse, updatePlanRequest, deletePlannedEpisodeRequest, deletePlanRequest, generatePlanRequest, createPlanEpisodesRequest } from "./plans.mjs";
@@ -118,10 +117,11 @@ function makePaths(rootDir) {
   };
 }
 
-async function quarantineCorruptJson(path) {
+// isUsable rejects valid JSON with a shape that every reader would fail on; it is quarantined like invalid JSON.
+async function quarantineCorruptJson(path, isUsable = () => true) {
   if (!(await exists(path))) return;
   try {
-    await readJson(path);
+    if (!isUsable(await readJson(path))) throw Object.assign(new Error("unexpected data shape"), { invalidJson: true });
   } catch (error) {
     if (!error.invalidJson) throw error;
     const moved = `${path}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -132,9 +132,14 @@ async function quarantineCorruptJson(path) {
 
 async function ensureData(paths) {
   await Promise.all([mkdir(paths.knowledge, { recursive: true }), mkdir(paths.plans, { recursive: true }), mkdir(paths.episodes, { recursive: true }), mkdir(paths.chat, { recursive: true })]);
-  await Promise.all([quarantineCorruptJson(paths.profiles), quarantineCorruptJson(paths.config)]);
+  await Promise.all([
+    quarantineCorruptJson(paths.profiles, (value) => Array.isArray(value?.speakerProfiles) && Array.isArray(value?.episodeProfiles)),
+    quarantineCorruptJson(paths.config),
+    quarantineCorruptJson(paths.knowledgeIndex, Array.isArray),
+    quarantineCorruptJson(paths.plansIndex, Array.isArray),
+  ]);
   if (!(await exists(paths.profiles))) {
-    await writeJsonAtomic(paths.profiles, DEFAULT_DATA);
+    await writeJsonAtomic(paths.profiles, { ...DEFAULT_DATA, updatedAt: nextUpdatedAt() });
   }
   if (!(await exists(paths.knowledgeIndex))) {
     await writeJsonAtomic(paths.knowledgeIndex, []);
@@ -226,14 +231,19 @@ async function routeRequest(req, res, context) {
 
   if (method === "PUT" && path === "/api/profiles") {
     const value = await readJsonBody(req);
+    // Optional, like PUT /api/plans/:id: a stale tab's list would bring back deleted hosts or drop hosts added elsewhere.
+    const expectedUpdatedAt = value?.expectedUpdatedAt;
+    if (value && typeof value === "object") delete value.expectedUpdatedAt;
     const result = await serializeWithLatestModelCatalog(context, async () => {
       const models = availableModelIds(context);
       const current = await readJson(context.paths.profiles);
+      if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== (current.updatedAt ?? null)) throw conflict("Profiles changed somewhere else after this page loaded. Reload the page, then apply the change again.");
       mergeSavedProfileSelections(models, current);
       validateProfileData(value, models);
       assertProfileRevisionsCurrent(value, current);
       await assertProfilesCompatibleWithEpisodes(context.paths, value, current);
       applyProfileRevisions(value, current);
+      value.updatedAt = nextUpdatedAt(current.updatedAt);
       await writeJsonAtomic(context.paths.profiles, value);
       return { profiles: value, warnings: modelReferenceWarnings(value, availableModelIds(context)) };
     });

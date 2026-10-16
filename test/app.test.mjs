@@ -1701,13 +1701,15 @@ test("corrupt config and profiles are quarantined at boot and JSON errors name t
     assert.equal(await readFile(join(rootDir, "data", quarantined[0]), "utf8"), '{"truncated":');
   }
 
-  const { baseUrl } = await startTestServer(t, "podcast-corrupt-index-", {}, async (root) => {
+  const { rootDir: indexRoot, baseUrl } = await startTestServer(t, "podcast-corrupt-index-", {}, async (root) => {
     await mkdir(join(root, "data", "knowledge"), { recursive: true });
     await writeFile(join(root, "data", "knowledge", "index.json"), "{");
   });
   const response = await fetch(`${baseUrl}/api/state`);
-  assert.equal(response.status, 500);
-  assert.match((await response.json()).error, /knowledge[/\\]index\.json is not valid JSON/);
+  assert.equal(response.status, 200);
+  const quarantinedIndex = (await readdir(join(indexRoot, "data", "knowledge"))).filter((name) => name.startsWith("index.json.corrupt-"));
+  assert.equal(quarantinedIndex.length, 1);
+  assert.equal(await readFile(join(indexRoot, "data", "knowledge", quarantinedIndex[0]), "utf8"), "{");
 });
 
 test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", { concurrency: false }, async (t) => {

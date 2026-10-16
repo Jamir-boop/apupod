@@ -2540,11 +2540,12 @@
         syncSpeakerForm();
         syncFormatForm();
         const submitted = structuredClone(state.profiles);
-        const result = await api("/api/profiles", { method: "PUT", body: JSON.stringify(submitted) });
+        const result = await api("/api/profiles", { method: "PUT", body: JSON.stringify({ ...submitted, expectedUpdatedAt: submitted.updatedAt ?? null }) });
         ++uiRequests.state;
         syncSpeakerForm();
         syncFormatForm();
         const saved = result.profiles || result;
+        state.profiles.updatedAt = saved.updatedAt;
         for (const key of ["speakerProfiles", "episodeProfiles"]) {
           state.profiles[key] = state.profiles[key].map((profile) => {
             const original = submitted[key].find((item) => item.id === profile.id);
@@ -3622,6 +3623,8 @@
         syncFormatForm();
         const result = await api(`/api/speaker-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
         ++uiRequests.state;
+        // A stale tab keeps its old updatedAt, so its next save gets 409 instead of dropping hosts added elsewhere.
+        if (result.previousProfilesUpdatedAt === (state.profiles.updatedAt ?? null)) state.profiles.updatedAt = result.profiles.updatedAt;
         fallbackId = result.fallbackId;
         if (activePlan?.speakerProfileId === id) {
           affectedPlan = structuredClone(activePlan);
@@ -4157,9 +4160,11 @@
         if (!currentProposal()) throw new Error("This chat proposal changed. Review the current proposal before Apply.");
         const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId, messageIndex: index, ...(draftSource ? { workspaceDraft } : {}) }) });
         ++uiRequests.state;
+        // Same rule as host delete, checked now: a same-tab save that finished during the request keeps its newer updatedAt.
+        if (data.profiles && data.previousProfilesUpdatedAt === (state.profiles.updatedAt ?? null)) state.profiles.updatedAt = data.profiles.updatedAt;
         if (!currentProposal()) { notify("Proposal applied to the previous chat. Open that chat to review the result.", "ok"); return; }
         if (draftSource) {
-          state.profiles = mergeAppliedHostsDraft(pendingProfiles, data.profiles, draftSource.profileId, data.appliedId);
+          state.profiles = { ...mergeAppliedHostsDraft(pendingProfiles, data.profiles, draftSource.profileId, data.appliedId), updatedAt: state.profiles.updatedAt };
           profilesDirty = JSON.stringify(state.profiles) !== JSON.stringify(data.profiles);
         }
         if (data.appliedType === "speakerProfile") activeSpeakerProfileId = data.appliedId;

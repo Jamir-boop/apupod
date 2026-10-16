@@ -861,3 +861,10 @@ test("shutdown is idempotent, closes callback listener, and prevents future netw
   assert.equal((await readdir(h.storageDir)).includes("lock.json"), false);
   assert.equal(ChatGptError.prototype instanceof Error, true);
 });
+
+test("the model list skips a null entry", async (t) => {
+  const h = await harness(t);
+  await h.login();
+  h.handlers.models = () => json({ models: [null, { slug: "model-a", display_name: "Model A", visibility: "list" }] });
+  assert.deepEqual((await h.client.models()).map((item) => item.slug), ["model-a"]);
+});

@@ -148,7 +148,7 @@ test("an old config.json without an anthropic entry still loads with the provide
   assert.deepEqual(config.providers.anthropic, { enabled: true, activeModels: {}, hasApiKey: false });
   const anthropic = (await settledModels(base)).providers.anthropic;
   assert.equal(anthropic.status, "unconfigured");
-  assert.equal(anthropic.error, "API key is not configured.");
+  assert.equal(anthropic.error, "Anthropic API key is not configured. Set ANTHROPIC_API_KEY in .env.");
 });
 
 test("discovery follows pagination and keeps effort levels and max tokens from the model capabilities", async (t) => {
