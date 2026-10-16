@@ -18,6 +18,9 @@ import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_DATA } from "./defaults.mjs";
+import { createChatGptClient, ChatGptError } from "./chatgpt.mjs";
+import { decideAssistantConfiguration, enforceJevSelections, JEV_MODEL } from "./jev.mjs";
+import { DECISIONS_MODEL } from "./decisions.mjs";
 
 const HERE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
@@ -90,7 +93,7 @@ const TTS_DOCS = {
 
 export const MIMO_VOICES = ["mimo_default", "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean"];
 const OPENAI_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"];
-export const ELEVENLABS_MODELS = ["eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_v3"];
+export const ELEVENLABS_MODELS = ["eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_v3", "eleven_v4"];
 export const TTS_MODELS = ["mimo-v2.5-tts", ...ELEVENLABS_MODELS];
 const TEXT_MODELS = ["mimo-v2.5-pro", "mimo-v2.5"];
 const LANGUAGE_OPTIONS = [
@@ -128,15 +131,18 @@ const LANGUAGE_OPTIONS = [
   ["vi-VN", "vi", "Vietnamese (Vietnam)", "Vietnamese"],
 ].map(([id, apiCode, name, defaultAccent]) => ({ id, apiCode, name, defaultAccent }));
 const MIMO_LANGUAGE_CODES = new Set(["en", "zh"]);
+const ELEVEN_LANGUAGE_CODES = new Map(`afr:af amh:am ara:ar hye:hy asm:as aze:az bel:be ben:bn bos:bs bul:bg mya:my cat:ca hrv:hr ces:cs dan:da nld:nl eng:en est:et fin:fi fra:fr ful:ff glg:gl kat:ka deu:de ell:el guj:gu hau:ha heb:he hin:hi hun:hu isl:is ind:id ita:it jpn:ja jav:jv kan:kn kaz:kk kor:ko kir:ky lao:lo lav:lv lin:ln lit:lt lug:lg ltz:lb mkd:mk msa:ms mal:ml mlt:mt cmn:zh zho:zh mri:mi mar:mr mon:mn nep:ne nob:no nor:no oci:oc ori:or pus:ps fas:fa pol:pl por:pt pan:pa ron:ro rus:ru srp:sr sna:sn snd:sd slk:sk slv:sl som:so spa:es swa:sw swe:sv tgk:tg tam:ta tel:te tha:th tur:tr ukr:uk urd:ur uzb:uz vie:vi cym:cy wol:wo zul:zu gle:ga nya:ny`.split(" ").map((pair) => pair.split(":")));
 const DEFAULT_CONFIG = {
   providers: {
     mimo: { baseUrl: DEFAULT_MIMO_BASE_URL, enabled: true, activeModels: {} },
     elevenlabs: { enabled: true, activeModels: {} },
     openai: { baseUrl: DEFAULT_OPENAI_BASE_URL, llmBaseUrl: "", ttsBaseUrl: "", modelsUrl: "", enabled: true, activeModels: {} },
+    chatgpt: { enabled: false, activeModels: {} },
     opencodeGo: { enabled: true, activeModels: {} },
     chatterbox: { baseUrl: "", modelsUrl: "", enabled: false, activeModels: {} },
   },
   compatibleConnections: [],
+  assistantDecision: { enabled: false, provider: "typesafe", model: JEV_MODEL },
 };
 
 async function createAppContext(options = {}) {
@@ -167,6 +173,10 @@ async function createAppContext(options = {}) {
   for (const episode of (await listEpisodes(paths)).toReversed()) if (episode.job) rememberJob(context, episode.job);
   await cleanupStoredArtifacts(context);
   await cleanupLegacyAssistantChats(paths);
+  context.chatgptClient = options.chatgptClient || await createChatGptClient({ fetchImpl,
+    ...(options.chatgptStorageDir || resolve(rootDir) !== HERE ? { storageDir: options.chatgptStorageDir || join(rootDir, ".chatgpt-auth") } : {}),
+  });
+  context.chatgptCatalogAccount = chatGptCatalogAccount(context);
   void queueModelCatalogRefresh(context).promise;
 
   return context;
@@ -174,15 +184,27 @@ async function createAppContext(options = {}) {
 
 export async function createPodcastServer(options = {}) {
   const context = await createAppContext(options);
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     routeRequest(req, res, context).catch((error) => {
       if (res.headersSent) {
         res.end();
         return;
       }
+      if (error instanceof ChatGptError) {
+        const diagnostics = Object.fromEntries(["requestId", "param", "bodyShape"].filter((key) => typeof error[key] === "string" && error[key].length <= 160 && /^[A-Za-z0-9_.:/\[\]-]+$/.test(error[key])).map((key) => [key, error[key]]));
+        return sendJson(res, error.status || 502, { error: chatGptRecovery(error.code, diagnostics.param), code: error.code, ...diagnostics });
+      }
       sendJson(res, error.statusCode || 500, { error: error.message || String(error) });
     });
   });
+  const close = server.close.bind(server);
+  let closing;
+  server.close = (callback) => {
+    closing ||= Promise.resolve(context.chatgptClient.close());
+    void closing.then(() => close(callback), () => close(callback));
+    return server;
+  };
+  return server;
 }
 
 async function serializeMutation(context, action) {
@@ -299,6 +321,7 @@ function normalizeConfig(value) {
         enabled: providers.openai?.enabled !== false,
         activeModels: normalizeCapabilityMap(providers.openai?.activeModels || providers.openai?.modelCapabilities),
       },
+      chatgpt: { enabled: providers.chatgpt?.enabled === true, activeModels: normalizeTextCapabilityMap(providers.chatgpt?.activeModels) },
       opencodeGo: {
         enabled: providers.opencodeGo?.enabled !== false,
         activeModels: normalizeOpenCodeGoCapabilityMap(providers.opencodeGo?.activeModels),
@@ -313,6 +336,8 @@ function normalizeConfig(value) {
     compatibleConnections: Array.isArray(raw.compatibleConnections)
       ? raw.compatibleConnections.map((connection) => normalizeCompatibleConnection(connection))
       : [],
+    assistantDecision: { enabled: raw.assistantDecision?.enabled === true && [undefined, "typesafe", "openai"].includes(raw.assistantDecision?.provider),
+      provider: raw.assistantDecision?.provider === "openai" ? "openai" : "typesafe", model: raw.assistantDecision?.provider === "openai" ? DECISIONS_MODEL : JEV_MODEL },
   };
 }
 
@@ -338,6 +363,10 @@ function normalizeCapabilityMap(value) {
     text: Boolean(capability?.text),
     tts: Boolean(capability?.tts),
   }]));
+}
+
+function normalizeTextCapabilityMap(value) {
+  return Object.fromEntries(Object.entries(normalizeCapabilityMap(value)).map(([id, capability]) => [id, { text: capability.text, tts: false }]));
 }
 
 function normalizeOpenCodeGoCapabilityMap(value) {
@@ -389,12 +418,15 @@ function activateReferencedModels(config, profiles) {
   const activateComposite = (modelId, type) => {
     const parsed = parseCompatibleModelId(modelId);
     if (!parsed) return false;
-    if (parsed.connectionId === "opencode-go" && (type !== "text" || !openCodeGoProtocol(parsed.modelId))) return true;
-    const target = parsed.connectionId === "openai"
+    const builtInId = builtInConnectionId(config, parsed.connectionId);
+    if (builtInId === "opencode-go" && (type !== "text" || !openCodeGoProtocol(parsed.modelId))) return true;
+    const target = builtInId === "openai"
       ? config.providers.openai.activeModels
-      : parsed.connectionId === "opencode-go"
+      : builtInId === "chatgpt"
+        ? type === "text" ? config.providers.chatgpt.activeModels : null
+      : builtInId === "opencode-go"
         ? config.providers.opencodeGo.activeModels
-        : parsed.connectionId === "chatterbox"
+        : builtInId === "chatterbox"
           ? config.providers.chatterbox.activeModels
           : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)?.activeModels;
     if (target) activate(target, parsed.modelId, type);
@@ -429,6 +461,7 @@ async function redactConfig(config) {
         ...config.providers.openai,
         hasApiKey: Boolean(process.env.OPENAI_API_KEY?.trim()),
       },
+      chatgpt: { ...config.providers.chatgpt },
       opencodeGo: {
         ...config.providers.opencodeGo,
         hasApiKey: Boolean(openCodeGoCredential.key),
@@ -443,6 +476,7 @@ async function redactConfig(config) {
       ...connection,
       hasApiKey: Boolean(process.env[connection.apiKeyEnv]?.trim()),
     })),
+    assistantDecision: { ...config.assistantDecision, hasApiKey: Boolean(process.env.TYPESAFE_API_KEY?.trim()), hasOpenAiApiKey: Boolean(process.env.OPENAI_API_KEY?.trim()) },
   };
 }
 
@@ -456,6 +490,7 @@ function createModelCatalog(credentials = null) {
       mimo: { configured: Boolean(credential("MIMO_API_KEY")), status: "loading", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
       elevenlabs: { configured: Boolean(credential("ELEVENLABS_API_KEY")), status: "loading", error: null, discoveredModels: [], ttsModels: [] },
       openai: { id: "openai", name: "OpenAI", configured: Boolean(credential("OPENAI_API_KEY")), status: "loading", error: null, textModels: [], ttsModels: [] },
+      chatgpt: { id: "chatgpt", name: "ChatGPT plan", configured: false, status: "unconfigured", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
       opencodeGo: { id: "opencode-go", name: "OpenCode Go", configured: Boolean(credential("OPENCODE_GO_API_KEY")), status: "loading", error: null, credentialSource: null, discoveredModels: [], textModels: [], ttsModels: [] },
       chatterbox: { id: "chatterbox", name: "Chatterbox", configured: false, status: "unconfigured", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
       compatible: [],
@@ -470,6 +505,7 @@ function modelDiscoverySnapshot(context) {
     "ELEVENLABS_API_KEY",
     "OPENAI_API_KEY",
     "CHATTERBOX_API_KEY",
+    "TYPESAFE_API_KEY",
     ...config.compatibleConnections.map((connection) => connection.apiKeyEnv),
   ]);
   const credentials = Object.fromEntries([...names].map((name) => [name, process.env[name]?.trim() || ""]));
@@ -481,6 +517,8 @@ function modelDiscoverySnapshot(context) {
     },
     openCodeGoCredentialSource: openCodeGoCredential.source,
     openCodeGoCredentialError: openCodeGoCredential.error,
+    chatgptClient: context.chatgptClient,
+    chatgptAccountId: chatGptCatalogAccount(context),
   }));
 }
 
@@ -535,6 +573,7 @@ async function buildModelCatalog(fetchImpl, snapshot) {
   const mimo = catalog.providers.mimo;
   const elevenlabs = catalog.providers.elevenlabs;
   const openai = catalog.providers.openai;
+  const chatgpt = catalog.providers.chatgpt;
   const openaiConnection = builtInOpenAiConnection(context.config);
   const opencodeGo = catalog.providers.opencodeGo;
   const openCodeGoConnection = builtInOpenCodeGoConnection(context.config);
@@ -553,16 +592,21 @@ async function buildModelCatalog(fetchImpl, snapshot) {
   catalog.providers.compatible = compatible;
   mimo.configured = Boolean(context.config.providers.mimo.enabled && context.credentials.MIMO_API_KEY);
   elevenlabs.configured = Boolean(context.config.providers.elevenlabs.enabled && context.credentials.ELEVENLABS_API_KEY);
-  openai.configured = Boolean(openaiConnection.enabled && context.credentials.OPENAI_API_KEY);
-  opencodeGo.configured = Boolean(openCodeGoConnection.enabled && context.credentials.OPENCODE_GO_API_KEY);
+  openai.configured = Boolean(openaiConnection.enabled && context.credentials.OPENAI_API_KEY && builtInConnectionId(context.config, "openai"));
+  chatgpt.configured = Boolean(context.config.providers.chatgpt.enabled && context.chatgptAccountId && builtInConnectionId(context.config, "chatgpt"));
+  opencodeGo.configured = Boolean(openCodeGoConnection.enabled && context.credentials.OPENCODE_GO_API_KEY && builtInConnectionId(context.config, "opencode-go"));
   opencodeGo.credentialSource = snapshot.openCodeGoCredentialSource;
-  chatterbox.configured = Boolean(chatterboxConnection.enabled && chatterboxConnection.baseUrl);
-  for (const provider of [mimo, elevenlabs, openai, opencodeGo, chatterbox, ...compatible]) {
+  chatterbox.configured = Boolean(chatterboxConnection.enabled && chatterboxConnection.baseUrl && builtInConnectionId(context.config, "chatterbox"));
+  for (const provider of [mimo, elevenlabs, openai, chatgpt, opencodeGo, chatterbox, ...compatible]) {
     provider.status = provider.configured ? "loading" : "unconfigured";
     provider.error = provider.configured ? null : unconfiguredProviderMessage(context, provider);
     provider.ttsModels = [];
     provider.discoveredModels = [];
     if ("textModels" in provider) provider.textModels = [];
+  }
+  for (const provider of [openai, chatgpt, opencodeGo, chatterbox]) if (!builtInConnectionId(context.config, provider.id)) {
+    provider.status = "error";
+    provider.error = `A saved compatible connection uses the reserved ID "${provider.id}". Its references are preserved. Resolve this connection ID conflict before using built-in ${provider.name}.`;
   }
   catalog.status = "loading";
   catalog.languages = structuredClone(LANGUAGE_OPTIONS);
@@ -571,6 +615,7 @@ async function buildModelCatalog(fetchImpl, snapshot) {
     mimo.configured ? loadMimoModels(context).catch((error) => setProviderError(mimo, error)) : null,
     elevenlabs.configured ? loadElevenLabsModels(context).catch((error) => setProviderError(elevenlabs, error)) : null,
     openai.configured ? loadCompatibleModels(context, openaiConnection, openai).catch((error) => setProviderError(openai, error)) : null,
+    chatgpt.configured ? loadChatGptModels(context).catch((error) => { chatgpt.status = "error"; chatgpt.error = chatGptRecovery(error.code); }) : null,
     opencodeGo.configured ? loadCompatibleModels(context, openCodeGoConnection, opencodeGo).catch((error) => setProviderError(opencodeGo, error)) : null,
     chatterbox.configured ? loadCompatibleModels(context, chatterboxConnection, chatterbox).catch((error) => setProviderError(chatterbox, error)) : null,
     ...context.config.compatibleConnections.map((connection) => {
@@ -578,7 +623,7 @@ async function buildModelCatalog(fetchImpl, snapshot) {
       return provider?.configured ? loadCompatibleModels(context, connection, provider).catch((error) => setProviderError(provider, error)) : null;
     }),
   ]);
-  const configured = [mimo, elevenlabs, openai, opencodeGo, chatterbox, ...compatible].filter((provider) => provider.configured);
+  const configured = [mimo, elevenlabs, openai, chatgpt, opencodeGo, chatterbox, ...compatible].filter((provider) => provider.configured);
   const ready = configured.filter((provider) => provider.status === "ready").length;
   mergeDiscoveredLanguages(catalog);
   catalog.status = configured.length === 0 ? "unconfigured" : ready === configured.length ? "ready" : ready > 0 ? "partial" : "error";
@@ -587,6 +632,7 @@ async function buildModelCatalog(fetchImpl, snapshot) {
 }
 
 function unconfiguredProviderMessage(context, provider) {
+  if (provider === context.modelCatalog.providers.chatgpt) return context.config.providers.chatgpt.enabled ? "Sign in to ChatGPT and enable plan usage." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.mimo) return context.config.providers.mimo.enabled ? "API key is not configured." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.elevenlabs) return context.config.providers.elevenlabs.enabled ? "API key is not configured." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.openai) return context.config.providers.openai.enabled ? "API key is not configured." : "Provider is disabled.";
@@ -624,12 +670,65 @@ async function loadElevenLabsModels(context) {
       name: model.name || model.model_id,
       provider: "elevenlabs",
       requiresAlphaAccess: Boolean(model.requires_alpha_access),
+      supported: !["eleven_v4_turbo", "eleven_v3_conversational"].includes(model.model_id),
+      unsupportedReason: ["eleven_v4_turbo", "eleven_v3_conversational"].includes(model.model_id)
+        ? `${model.name || model.model_id} requires the realtime dialogue API, which is not supported by this app.` : "",
+      canUseStyle: typeof model.can_use_style === "boolean" ? model.can_use_style : null,
+      canUseSpeakerBoost: typeof model.can_use_speaker_boost === "boolean" ? model.can_use_speaker_boost : null,
+      maximumTextLengthPerRequest: Number.isSafeInteger(model.maximum_text_length_per_request) && model.maximum_text_length_per_request > 0
+        ? model.maximum_text_length_per_request : null,
+      ttsCapabilities: elevenLabsCapabilities(model.model_id),
       languages: (Array.isArray(model.languages) ? model.languages : [])
         .filter((language) => typeof language?.language_id === "string")
-        .map((language) => ({ id: language.language_id, name: language.name || language.language_id })),
+        .map((language) => ({ id: ELEVEN_LANGUAGE_CODES.get(language.language_id) || language.language_id, name: language.name || language.language_id })),
     }));
   const active = context.config.providers.elevenlabs.activeModels;
-  provider.ttsModels = provider.discoveredModels.filter((model) => active[model.id]?.tts);
+  provider.ttsModels = provider.discoveredModels.filter((model) => model.supported && active[model.id]?.tts);
+  provider.status = "ready";
+  provider.error = null;
+}
+
+function chatGptRecovery(code, param) {
+  if (/unsupported_capability/.test(code || "")) return `The selected ChatGPT model does not support ${param ? `parameter "${param}"` : "this request capability"}. Remove this setting or select a model that supports it.`;
+  if (/plan_usage_disabled/.test(code || "")) return "ChatGPT plan usage is not allowed. Continue with ChatGPT and allow plan usage.";
+  if (/account_changed/.test(code || "")) return "The ChatGPT account changed. Select an account and try again.";
+  if (/sign_in|required|token|grant|401/.test(code || "")) return "Sign in to ChatGPT again to use this account.";
+  if (/limit|quota|usage|credits|rate/.test(code || "")) return "ChatGPT usage is limited. Check Manage usage or select another provider. API-key billing will not start automatically.";
+  return `ChatGPT could not complete the request (${code || "connection_error"}). Check the connection and try again.`;
+}
+
+function chatGptStatus(context) {
+  const status = context.chatgptClient.status();
+  return {
+    activeAccountId: status.activeAccountId || null,
+    accounts: (status.accounts || []).map((account) => ({ id: account.id, label: account.label, active: account.active === true, grant: account.grant === true, status: account.status })),
+    pending: status.pending ? { accountId: status.pending.accountId || null, status: status.pending.status } : null,
+    lastSignIn: { status: status.lastSignIn?.status || "idle", ...(status.lastSignIn?.error?.code ? { error: chatGptRecovery(status.lastSignIn.error.code) } : {}) },
+  };
+}
+
+function chatGptCatalogAccount(context) {
+  const status = context.chatgptClient?.status();
+  return status?.accounts?.some((account) => account.id === status.activeAccountId && account.status === "connected" && account.grant) ? status.activeAccountId : null;
+}
+
+function refreshChatGptAccount(context, force = false) {
+  const accountId = chatGptCatalogAccount(context);
+  if (force || accountId !== context.chatgptCatalogAccount) {
+    context.chatgptCatalogAccount = accountId;
+    return queueModelCatalogRefresh(context, { force: true });
+  }
+  return null;
+}
+
+async function loadChatGptModels(context) {
+  const provider = context.modelCatalog.providers.chatgpt;
+  const models = await context.chatgptClient.models(context.chatgptAccountId);
+  provider.discoveredModels = models.filter((model) => model.visibility === "list" && typeof model.slug === "string" && model.slug).map((model) => ({
+    id: compatibleModelId("chatgpt", model.slug), rawId: model.slug, name: model.display_name || model.slug,
+    connectionId: "chatgpt", connectionName: "ChatGPT plan", provider: "chatgpt", suggested: { text: true, tts: false },
+  }));
+  provider.textModels = provider.discoveredModels.filter((model) => context.config.providers.chatgpt.activeModels[model.rawId]?.text);
   provider.status = "ready";
   provider.error = null;
 }
@@ -766,6 +865,10 @@ function parseCompatibleModelId(modelId) {
   return match ? { connectionId: match[1], modelId: match[2] } : null;
 }
 
+function builtInConnectionId(config, connectionId) {
+  return config.compatibleConnections.some((connection) => connection.id === connectionId) ? "" : connectionId;
+}
+
 const EFFORT_LEVELS = new Set(["none", "low", "medium", "high", "xhigh", "max"]);
 
 function normalizeEffort(value) {
@@ -787,10 +890,12 @@ function usesResponsesApi(rawModelId) {
 }
 
 function compatibleConnection(context, connectionId) {
+  const custom = context.config.compatibleConnections.find((item) => item.id === connectionId);
+  if (custom) return custom;
   if (connectionId === "openai") return builtInOpenAiConnection(context.config);
   if (connectionId === "opencode-go") return builtInOpenCodeGoConnection(context.config);
   if (connectionId === "chatterbox") return builtInChatterboxConnection(context.config);
-  return context.config.compatibleConnections.find((item) => item.id === connectionId);
+  return null;
 }
 
 function builtInOpenAiConnection(config) {
@@ -840,14 +945,14 @@ function availableModelIds(context) {
   const compatibleText = (providers.compatible || []).flatMap((provider) => provider.textModels.map((model) => model.id));
   const compatibleTts = (providers.compatible || []).flatMap((provider) => provider.ttsModels.map((model) => model.id));
   return {
-    textModels: new Set([...providers.mimo.textModels.map((model) => model.id), ...openaiText, ...openCodeGoText, ...chatterboxText, ...compatibleText]),
+    textModels: new Set([...providers.mimo.textModels.map((model) => model.id), ...openaiText, ...(providers.chatgpt?.textModels || []).map((model) => model.id), ...openCodeGoText, ...chatterboxText, ...compatibleText]),
     ttsModels: new Set([...providers.mimo.ttsModels, ...providers.elevenlabs.ttsModels, ...openaiTts, ...chatterboxTts, ...compatibleTts].map((model) => typeof model === "string" ? model : model.id)),
     languages: new Set(context.modelCatalog.languages.map((language) => language.id)),
   };
 }
 
 function isElevenLabsModel(context, model) {
-  return ELEVENLABS_MODELS.includes(model) || context.modelCatalog.providers.elevenlabs.ttsModels.some((item) => item.id === model);
+  return ELEVENLABS_MODELS.includes(model) || context.modelCatalog.providers.elevenlabs.discoveredModels.some((item) => item.id === model);
 }
 
 function isCompatibleTtsModel(context, modelId) {
@@ -857,7 +962,7 @@ function isCompatibleTtsModel(context, modelId) {
 }
 
 function compatibleModelProvider(context, connectionId) {
-  return [context.modelCatalog.providers.openai, context.modelCatalog.providers.chatterbox, ...(context.modelCatalog.providers.compatible || [])]
+  return [...(context.modelCatalog.providers.compatible || []), context.modelCatalog.providers.openai, context.modelCatalog.providers.chatterbox]
     .find((provider) => provider.id === connectionId);
 }
 
@@ -887,6 +992,8 @@ function modelLanguageError(context, modelId, language) {
   }
   if (!isElevenLabsModel(context, modelId)) return `Unknown TTS model "${modelId}".`;
   const provider = context.modelCatalog.providers.elevenlabs;
+  const discovered = provider.discoveredModels.find((item) => item.id === modelId);
+  if (discovered?.supported === false) return discovered.unsupportedReason;
   const model = provider.ttsModels.find((item) => item.id === modelId);
   if (!model) return provider.status === "loading"
     ? "ElevenLabs models are still loading; retry shortly."
@@ -1020,7 +1127,7 @@ async function pruneClipCache(directory, usedKeys) {
     if (!entry.isFile()) continue;
     const key = entry.name.endsWith(".wav") ? entry.name.slice(0, -4) : "";
     if (key && usedKeys.has(key) && !entry.name.endsWith(".tmp.wav") && await isNormalizedWav(join(directory, entry.name))) continue;
-    if (!key && !entry.name.includes(".source.")) continue;
+    if (!key && !entry.name.includes(".source.") && !entry.name.endsWith(".concat.txt")) continue;
     await rm(join(directory, entry.name), { force: true });
     removed += 1;
   }
@@ -1031,19 +1138,26 @@ async function isNormalizedWav(path) {
   let file;
   try {
     file = await open(path, "r");
-    const chunk = Buffer.alloc(4096);
-    const { bytesRead } = await file.read(chunk, 0, chunk.length, 0);
-    const buffer = chunk.subarray(0, bytesRead);
-    assertWav(buffer);
-    for (let offset = 12; offset + 8 <= buffer.length;) {
-      const id = buffer.subarray(offset, offset + 4).toString("ascii");
-      const size = buffer.readUInt32LE(offset + 4);
-      if (id === "fmt " && size >= 16 && offset + 24 <= buffer.length) {
-        return buffer.readUInt16LE(offset + 8) === 1
-          && buffer.readUInt16LE(offset + 10) === 1
-          && buffer.readUInt32LE(offset + 12) === 24_000
-          && buffer.readUInt16LE(offset + 22) === 16;
+    const { size: fileSize } = await file.stat();
+    const header = Buffer.alloc(12);
+    const { bytesRead } = await file.read(header, 0, header.length, 0);
+    assertWav(header.subarray(0, bytesRead));
+    let normalized = false;
+    for (let offset = 12; offset + 8 <= fileSize;) {
+      const chunk = Buffer.alloc(24);
+      const { bytesRead: chunkBytes } = await file.read(chunk, 0, Math.min(chunk.length, fileSize - offset), offset);
+      if (chunkBytes < 8) return false;
+      const id = chunk.subarray(0, 4).toString("ascii");
+      const size = chunk.readUInt32LE(4);
+      if (offset + 8 + size > fileSize) return false;
+      if (id === "fmt " && size >= 16 && chunkBytes >= 24) {
+        normalized = chunk.readUInt16LE(8) === 1
+          && chunk.readUInt16LE(10) === 1
+          && chunk.readUInt32LE(12) === 24_000
+          && chunk.readUInt16LE(20) === 2
+          && chunk.readUInt16LE(22) === 16;
       }
+      if (id === "data") return normalized && size >= 2 && size % 2 === 0;
       offset += 8 + size + size % 2;
     }
   } catch {
@@ -1116,6 +1230,27 @@ async function routeRequest(req, res, context) {
 
   if (method === "GET" && path === "/api/models") {
     return sendJson(res, 200, context.modelCatalog);
+  }
+
+  if (path === "/api/chatgpt/status" && method === "GET") {
+    const refresh = refreshChatGptAccount(context);
+    return sendJson(res, 200, { ...chatGptStatus(context), ...(refresh ? { modelCatalog: await refresh.promise } : {}) });
+  }
+  const chatGptAction = path.match(/^\/api\/chatgpt\/(signin|select|signout|cancel)$/);
+  if (chatGptAction && method === "POST") {
+    const body = await readJsonBody(req);
+    const action = chatGptAction[1];
+    const accountId = String(body.accountId || "").trim();
+    let result;
+    if (action === "signin") {
+      result = await context.chatgptClient.signIn(accountId || undefined);
+      const url = new URL(result.authorizeUrl);
+      if (url.origin !== "https://auth.openai.com" || url.pathname !== "/api/accounts/authorize" || url.username || url.password || url.hash) throw badRequest("ChatGPT returned an invalid sign-in URL.");
+    } else if (action === "select") await context.chatgptClient.select(accountId);
+    else if (action === "signout") result = await context.chatgptClient.signOut(accountId || undefined);
+    else context.chatgptClient.cancel();
+    const refresh = refreshChatGptAccount(context, action === "select" || action === "signout");
+    return sendJson(res, 200, { ...chatGptStatus(context), ...(action === "signin" ? { authorizeUrl: result.authorizeUrl } : {}), ...(result?.warning ? { warning: result.warning } : {}), ...(refresh ? { modelCatalog: await refresh.promise } : {}) });
   }
 
   if (method === "POST" && path === "/api/models/refresh") {
@@ -1195,7 +1330,7 @@ async function routeRequest(req, res, context) {
   }
 
   if (method === "DELETE" && path === "/api/chat") {
-    return deleteChatThread(req, res, context);
+    return serializeMutation(context, () => deleteChatThread(req, res, context));
   }
 
   if (method === "POST" && path === "/api/transcript-prompt/resolve") {
@@ -1291,15 +1426,17 @@ async function deleteKnowledgeBase(res, context, id) {
   for (const entry of planIndex.filter((plan) => plan.knowledgeBaseId === id)) plans.push(await loadPlan(paths, entry.id));
   const episodes = (await listEpisodes(paths)).filter((episode) => !episode.corrupt && episode.knowledgeBaseId === id);
   const chats = (await listChatThreads(paths)).filter((thread) => thread.kbId === id);
+  if ([...context.chatBusy.values()].some((request) => request.kbId === id) || chats.some((thread) => context.chatBusy.has(thread.threadId))) throw conflict("Wait for the active assistant request before deleting this Knowledge Base.");
   const active = episodes.find((episode) => isActiveJob(episode.job));
   if (active) throw conflict(`Wait for active job on episode "${active.name}" before deleting this Knowledge Base.`);
 
   const now = new Date().toISOString();
-  const nextPlanIndex = planIndex.map((plan) => plan.knowledgeBaseId === id ? { ...plan, knowledgeBaseId: "", updatedAt: now } : plan);
+  const changedPlans = plans.map((plan) => ({ ...plan, knowledgeBaseId: "", updatedAt: nextUpdatedAt(plan.updatedAt) }));
+  const nextPlanIndex = planIndex.map((plan) => plan.knowledgeBaseId === id ? planIndexItem(changedPlans.find((item) => item.id === plan.id)) : plan);
   const writes = [
     { path: paths.knowledgeIndex, before: knowledgeIndex, after: knowledgeIndex.filter((entry) => entry.id !== id) },
     { path: paths.plansIndex, before: planIndex, after: nextPlanIndex },
-    ...plans.map((plan) => ({ path: planPath(paths, plan.id), before: plan, after: { ...plan, knowledgeBaseId: "", updatedAt: now } })),
+    ...plans.map((plan, index) => ({ path: planPath(paths, plan.id), before: plan, after: changedPlans[index] })),
     ...episodes.map((episode) => ({ path: join(episodeDir(paths, episode.id), "episode.json"), before: episode, after: { ...episode, knowledgeBaseId: "", updatedAt: now } })),
     ...chats.map((thread) => ({ path: chatThreadPath(paths, thread.threadId), before: thread, after: { ...thread, kbId: "", updatedAt: now } })),
   ];
@@ -1340,7 +1477,7 @@ async function deleteEpisodeRequest(res, context, id) {
     await rename(directory, staged);
   } catch (error) {
     const rollbackErrors = [];
-    for (const update of applied.reverse()) await savePlan(context.paths, update.before).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    for (const update of applied.reverse()) await savePlan(context.paths, update.before, { restore: true }).catch((rollbackError) => rollbackErrors.push(rollbackError));
     if (rollbackErrors.length) throw new AggregateError([error, ...rollbackErrors], "Episode deletion failed and could not be fully rolled back.");
     throw error;
   }
@@ -1359,21 +1496,25 @@ async function deleteSpeakerProfileRequest(res, context, id) {
   if (!target) throw notFound("Host profile not found.");
   if (profiles.speakerProfiles.length === 1) throw badRequest("At least one host profile must remain.");
   const fallback = profiles.speakerProfiles.find((item) => item.id !== id);
+  const beforeRevisions = {
+    speakerProfiles: Object.fromEntries(profiles.speakerProfiles.filter((item) => item.id !== id).map((item) => [item.id, profileRevision(item)])),
+    episodeProfiles: Object.fromEntries(profiles.episodeProfiles.map((item) => [item.id, profileRevision(item)])),
+  };
   const nextProfiles = {
     ...profiles,
     speakerProfiles: profiles.speakerProfiles.filter((item) => item.id !== id),
     episodeProfiles: profiles.episodeProfiles.map((item) => item.speakerProfileId === id ? { ...item, speakerProfileId: fallback.id } : item),
   };
   applyProfileRevisions(nextProfiles, profiles);
-  const now = new Date().toISOString();
   const planIndex = await readJson(paths.plansIndex);
   const plans = [];
   for (const entry of planIndex.filter((item) => item.speakerProfileId === id)) plans.push(await loadPlan(paths, entry.id));
-  const nextPlanIndex = planIndex.map((item) => item.speakerProfileId === id ? { ...item, speakerProfileId: fallback.id, updatedAt: now } : item);
+  const changedPlans = plans.map((plan) => ({ ...plan, speakerProfileId: fallback.id, updatedAt: nextUpdatedAt(plan.updatedAt) }));
+  const nextPlanIndex = planIndex.map((item) => item.speakerProfileId === id ? planIndexItem(changedPlans.find((plan) => plan.id === item.id)) : item);
   const writes = [
     { path: paths.profiles, before: profiles, after: nextProfiles },
     { path: paths.plansIndex, before: planIndex, after: nextPlanIndex },
-    ...plans.map((plan) => ({ path: planPath(paths, plan.id), before: plan, after: { ...plan, speakerProfileId: fallback.id, updatedAt: now } })),
+    ...plans.map((plan, index) => ({ path: planPath(paths, plan.id), before: plan, after: changedPlans[index] })),
   ];
   const applied = [];
   try {
@@ -1385,7 +1526,7 @@ async function deleteSpeakerProfileRequest(res, context, id) {
     for (const write of applied.reverse()) await writeJsonAtomic(write.path, write.before).catch(() => {});
     throw error;
   }
-  sendJson(res, 200, { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length });
+  sendJson(res, 200, { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length, profiles: nextProfiles, beforeRevisions });
 }
 
 function planPath(paths, id) {
@@ -1420,9 +1561,10 @@ async function loadPlan(paths, id) {
   return plan;
 }
 
-async function savePlan(paths, plan) {
+async function savePlan(paths, plan, { restore = false } = {}) {
   const path = planPath(paths, plan.id);
   const previous = await exists(path) ? await readJson(path) : null;
+  if (!restore) plan.updatedAt = nextUpdatedAt(previous?.updatedAt);
   const previousIndex = await readJson(paths.plansIndex);
   const nextIndex = previousIndex.filter((item) => item.id !== plan.id);
   nextIndex.push(planIndexItem(plan));
@@ -1435,6 +1577,10 @@ async function savePlan(paths, plan) {
     else await rm(path, { force: true });
     throw error;
   }
+}
+
+function nextUpdatedAt(previous) {
+  return new Date(Math.max(Date.now(), (Date.parse(previous) || 0) + 1)).toISOString();
 }
 
 function planText(value, label, max = PLAN_MAX_TEXT_CHARS, required = false) {
@@ -1555,7 +1701,9 @@ async function getPlanResponse(res, paths, id) {
 
 async function updatePlanRequest(req, res, context, id) {
   const current = await loadPlan(context.paths, id);
-  const plan = normalizePlanInput(await readJsonBody(req), current);
+  const body = await readJsonBody(req);
+  if (Object.hasOwn(body, "expectedUpdatedAt") && body.expectedUpdatedAt !== current.updatedAt) throw conflict("Content plan changed in another tab. Reload the plan before saving your changes.");
+  const plan = normalizePlanInput(body, current);
   await validatePlanReferences(context, plan);
   await savePlan(context.paths, plan);
   sendJson(res, 200, { plan });
@@ -1574,6 +1722,8 @@ async function deletePlannedEpisodeRequest(res, paths, planId, plannedEpisodeId)
 
 async function deletePlanRequest(res, context, id) {
   await loadPlan(context.paths, id);
+  const chats = (await listChatThreads(context.paths)).filter((thread) => thread.kind === "planner" && thread.lastPlanId === id);
+  if ([...context.chatBusy.values()].some((request) => request.planId === id) || chats.some((thread) => context.chatBusy.has(thread.threadId))) throw conflict("Wait for the active assistant request before deleting this content plan.");
   const index = await readJson(context.paths.plansIndex);
   await writeJsonAtomic(context.paths.plansIndex, index.filter((item) => item.id !== id));
   try {
@@ -1582,9 +1732,7 @@ async function deletePlanRequest(res, context, id) {
     await writeJsonAtomic(context.paths.plansIndex, index);
     throw error;
   }
-  for (const thread of await listChatThreads(context.paths)) {
-    if (thread.kind === "planner" && thread.lastPlanId === id) await rm(chatThreadPath(context.paths, thread.threadId), { force: true });
-  }
+  for (const thread of chats) await rm(chatThreadPath(context.paths, thread.threadId), { force: true });
   sendJson(res, 200, { id, deleted: true });
 }
 
@@ -1874,12 +2022,11 @@ function ttsProfileSignature(episodeProfile, speakerProfile) {
       return {
         name: speaker.name,
         voiceId: speaker.voiceId,
-        style: speaker.style,
-        accent: speaker.accent || "",
+        ...(model === "eleven_v4" ? {} : { style: speaker.style, accent: speaker.accent || "" }),
         ttsModelOverride: speaker.ttsModelOverride || "",
         ...(model.startsWith("compat:chatterbox:") ? chatterboxSettings(speaker) : {}),
         ...(model === "mimo-v2.5-tts" ? { mimo: mimoTtsSettings(speaker) } : {}),
-        ...(model.startsWith("eleven") ? { elevenlabs: elevenLabsSettings(speaker) } : {}),
+        ...(model.startsWith("eleven") ? { elevenlabs: elevenLabsSettings(speaker, model) } : {}),
       };
     }),
   });
@@ -1888,9 +2035,8 @@ function ttsProfileSignature(episodeProfile, speakerProfile) {
 function ttsCueCapability(context, model, language) {
   if (model === "mimo-v2.5-tts") return { provider: "mimo", cueMode: "tags", squareTags: true, breaks: false };
   if (isElevenLabsModel(context, model)) {
-    return model === "eleven_v3"
-      ? { provider: "elevenlabs", cueMode: "tags", squareTags: true, breaks: false }
-      : { provider: "elevenlabs", cueMode: "breaks", squareTags: false, breaks: true };
+    const capability = elevenLabsCapabilities(model);
+    return { provider: "elevenlabs", cueMode: capability.squareTags ? "tags" : "breaks", ...capability };
   }
   const parsed = parseCompatibleModelId(model);
   const connection = parsed && compatibleConnection(context, parsed.connectionId);
@@ -1917,7 +2063,7 @@ function transcriptPromptRules(context, speakerProfile, episodeProfile, language
       return `MiMo (${names}, ${group.model}): delivery is a concise natural-language instruction. Spoken text may use sparse custom square-bracket audio/style cues such as [sigh], [pause], [chuckle], or [whisper].`;
     }
     if (group.provider === "elevenlabs" && group.cueMode === "tags") {
-      return `ElevenLabs (${names}, eleven_v3): delivery is a short supported performance direction. Spoken text may use sparse audio tags such as [laughs], [sighs], [whispers], [curious], or [excited]. Do not use SSML break tags; use punctuation for pauses.`;
+      return `ElevenLabs (${names}, ${group.model}): delivery is a short natural-language performance direction. Spoken text may use sparse audio tags such as [laughs], [sighs], [whispers], [curious], or [excited]. Do not use SSML break tags or other SSML markup; use punctuation for pauses.`;
     }
     if (group.provider === "elevenlabs") {
       return `ElevenLabs (${names}, ${group.model}): do not use square-bracket audio tags. For an intentional pause, use sparse <break time="0.5s" /> markup with a duration no longer than 3 seconds.`;
@@ -1975,6 +2121,7 @@ function validateTranscriptCues(context, segments, speakerProfile, language) {
       const speaker = speakerProfile.speakers.find((item) => item.name === turn.speaker);
       const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
       const capability = ttsCueCapability(context, model, language);
+      assertElevenLabsMarkup(model, turn.text);
       const cues = cueNames(turn.text);
       const breaks = [...String(turn.text).matchAll(new RegExp(ELEVEN_BREAK_RE.source, "gi"))];
       const breakMarkup = String(turn.text).match(new RegExp(ELEVEN_BREAK_ANY_RE.source, "gi")) || [];
@@ -2055,6 +2202,7 @@ async function saveTranscriptRequest(req, res, context, id) {
 }
 
 async function enqueueJob(res, context, id, type, options = {}) {
+  const chatgptAccountId = chatGptCatalogAccount(context);
   const episode = await loadEpisode(context.paths, id, true);
   if (isActiveJob(episode.job)) throw conflict("Episode already has an active job.");
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
@@ -2086,6 +2234,7 @@ async function enqueueJob(res, context, id, type, options = {}) {
     id: job.id,
     episodeId: id,
     type,
+    ...(type === "transcript" && [episodeProfile.outlineModel, episodeProfile.transcriptModel].some((model) => builtInConnectionId(context.config, parseCompatibleModelId(model)?.connectionId) === "chatgpt") ? { chatgptAccountId } : {}),
     previousAudioReady: type === "tts" && episode.audioReady === true && await exists(join(episodeDir(context.paths, id), "episode.mp3")),
     autoTts: type === "transcript" && options.autoTts === true,
   });
@@ -2130,6 +2279,7 @@ async function drainQueue(context) {
     }, { status: queued.type === "transcript" ? "generating" : "rendering", lastError: null });
     console.log(`[job:${queued.id}] started ${queued.type}`);
     const runtime = await modelRuntimeSnapshot(context);
+    if (Object.hasOwn(queued, "chatgptAccountId") && queued.chatgptAccountId !== runtime.chatgptAccountId) throw new ChatGptError("chatgpt_account_changed", { status: 409 });
     const result = queued.type === "transcript" ? await runTranscriptJob(context, queued, runtime) : await runTtsJob(context, queued, runtime);
     const episode = await updateJob(context, queued, {
       status: "completed", phase: "complete",
@@ -2269,7 +2419,7 @@ async function runTtsJob(context, queued, runtime) {
     usedKeys.add(key);
     const clipPath = join(clipsDir, `${key}.wav`);
     let cached = true;
-    if (!(await exists(clipPath))) {
+    if (!(await isNormalizedWav(clipPath))) {
       cached = false;
       const audio = await synthesizeTurn(runtime, speakerProfile, speaker, spokenText, turn.delivery, language);
       await writeAudioAsWav(audio, clipPath);
@@ -2302,18 +2452,19 @@ async function runTtsJob(context, queued, runtime) {
 
 function turnClipDescriptor(context, speakerProfile, speaker, turn, language) {
   const model = speaker.ttsModelOverride || speakerProfile.voiceModel;
+  const connection = compatibleConnection(context, parseCompatibleModelId(model)?.connectionId);
   return {
     model,
     provider: ttsProviderFingerprint(context, model),
     voice: speaker.voiceId,
-    style: speaker.style,
+    ...(model === "eleven_v4" ? {} : { style: speaker.style }),
     language: language.id,
-    accent: speakerAccent(speaker, language),
+    ...(model === "eleven_v4" ? {} : { accent: speakerAccent(speaker, language) }),
     cue: turn.delivery,
     text: turn.text,
-    ...(model.startsWith("compat:chatterbox:") ? { chatterbox: chatterboxSettings(speaker) } : {}),
+    ...(connection?.kind === "chatterbox" ? { chatterbox: chatterboxSettings(speaker) } : {}),
     ...(model === "mimo-v2.5-tts" ? { mimo: mimoTtsSettings(speaker) } : {}),
-    ...(model.startsWith("eleven") ? { elevenlabs: elevenLabsSettings(speaker) } : {}),
+    ...(model.startsWith("eleven") ? { elevenlabs: elevenLabsSettings(speaker, model) } : {}),
   };
 }
 
@@ -2418,16 +2569,22 @@ async function callTextModel({ context, model, system, prompt, maxTokens, temper
   await awaitLatestModelCatalog(context);
   const compatible = parseCompatibleModelId(model);
   if (compatible) {
+    const builtInId = builtInConnectionId(context.config, compatible.connectionId);
+    if (builtInId === "chatgpt") {
+      if (!availableModelIds(context).textModels.has(model)) throw badRequest(`Unsupported or inactive ChatGPT model "${model}".`);
+      if (!context.chatgptAccountId) throw new ChatGptError("chatgpt_sign_in_required", { status: 401 });
+      return context.chatgptClient.respond({ accountId: context.chatgptAccountId, model: compatible.modelId, system, prompt, ...(effort ? { effort } : {}) });
+    }
     // ponytail: Responses API only for the built-in openai connection; compatible connections stay on chat/completions
-    if (compatible.connectionId === "openai" && usesResponsesApi(compatible.modelId)) {
+    if (builtInId === "openai" && usesResponsesApi(compatible.modelId)) {
       return callOpenAiResponses(context, model, { system, prompt, maxTokens, effort }, LLM_TIMEOUT_MS);
     }
-    if (compatible.connectionId === "opencode-go") {
+    if (builtInId === "opencode-go") {
       const protocol = openCodeGoProtocol(compatible.modelId);
       if (protocol === "messages") return callOpenCodeGoMessages(context, model, { system, prompt, maxTokens, temperature, topP }, LLM_TIMEOUT_MS);
       if (protocol !== "chat") throw badRequest(`Unsupported OpenCode Go model "${compatible.modelId}". Refresh models or update its protocol mapping.`);
     }
-    const tokenLimit = compatible.connectionId === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens };
+    const tokenLimit = builtInId === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens };
     return callCompatibleChat(context, model, {
       model: compatible.modelId,
       messages: [
@@ -2455,6 +2612,7 @@ async function callTextModel({ context, model, system, prompt, maxTokens, temper
 }
 
 function spokenTextForModel(context, modelId, text, language) {
+  assertElevenLabsMarkup(modelId, text);
   const capability = ttsCueCapability(context, modelId, language);
   let spoken = String(text);
   if (!capability.squareTags) spoken = spoken.replace(TTS_CUE_RE, " ");
@@ -2481,8 +2639,22 @@ function mimoTtsSettings(speaker) {
   };
 }
 
-function elevenLabsSettings(speaker) {
+function elevenLabsCapabilities(model) {
   return {
+    squareTags: ["eleven_v3", "eleven_v4"].includes(model),
+    breaks: !["eleven_v3", "eleven_v4"].includes(model),
+    voiceSettings: model === "eleven_v4" ? ["stability", "similarityBoost"] : ["stability", "similarityBoost", "style", "useSpeakerBoost", "speed"],
+  };
+}
+
+function assertElevenLabsMarkup(model, text) {
+  if (model === "eleven_v4" && /<\/?(?:speak|break|phoneme|prosody|emphasis|say-as|sub|voice|audio|p|s|lang|mark)\b[^>]*>/i.test(String(text))) {
+    throw badRequest("eleven_v4 does not support SSML markup. Remove SSML tags and use audio tags or punctuation for pauses.");
+  }
+}
+
+function elevenLabsSettings(speaker, model) {
+  const settings = {
     stability: speaker.elevenlabsStability ?? ELEVENLABS_DEFAULTS.stability,
     similarityBoost: speaker.elevenlabsSimilarityBoost ?? ELEVENLABS_DEFAULTS.similarityBoost,
     style: speaker.elevenlabsStyle ?? ELEVENLABS_DEFAULTS.style,
@@ -2491,6 +2663,8 @@ function elevenLabsSettings(speaker) {
     seed: speaker.elevenlabsSeed ?? ELEVENLABS_DEFAULTS.seed,
     textNormalization: speaker.elevenlabsTextNormalization || ELEVENLABS_DEFAULTS.textNormalization,
   };
+  const supported = [...elevenLabsCapabilities(model).voiceSettings, "seed", "textNormalization"];
+  return Object.fromEntries(Object.entries(settings).filter(([key]) => supported.includes(key)));
 }
 
 async function synthesizeTurn(context, profile, speaker, text, delivery, language) {
@@ -2505,7 +2679,7 @@ async function synthesizeTurn(context, profile, speaker, text, delivery, languag
     return synthesizeCompatible(context, model, speaker.voiceId, text, delivery, language, accent, speaker.style, chatterboxSettings(speaker));
   }
   if (isElevenLabsModel(context, model)) {
-    return synthesizeElevenLabs(context, model, speaker.voiceId, text, delivery, language, elevenLabsSettings(speaker));
+    return synthesizeElevenLabs(context, model, speaker.voiceId, text, delivery, language, elevenLabsSettings(speaker, model));
   }
   const mimoSettings = mimoTtsSettings(speaker);
   const instruction = [
@@ -2579,38 +2753,85 @@ async function synthesizeCompatible(context, compositeModelId, voiceId, text, de
 async function synthesizeElevenLabs(context, model, voiceId, text, delivery, language, settings) {
   const apiKey = runtimeCredential(context, "ELEVENLABS_API_KEY");
   if (!apiKey) throw badRequest("ELEVENLABS_API_KEY is required in .env.");
-  const spokenText = model === "eleven_v3" && delivery ? `[${oneLine(delivery)}] ${text}` : text;
+  const cue = model === "eleven_v4" ? normalizeDelivery(delivery || "") : oneLine(delivery || "");
+  assertElevenLabsMarkup(model, cue);
+  const prefix = elevenLabsCapabilities(model).squareTags && cue ? `[${cue}] ` : "";
+  const discoveredLimit = context.modelCatalog.providers.elevenlabs.ttsModels.find((item) => item.id === model)?.maximumTextLengthPerRequest;
+  const defaultLimit = ({ eleven_v3: 5_000, eleven_multilingual_v2: 10_000, eleven_flash_v2: 30_000, eleven_turbo_v2: 30_000, eleven_flash_v2_5: 40_000, eleven_turbo_v2_5: 40_000 })[model] || 10_000;
+  const maximum = model === "eleven_v4" ? Math.min(10_000, discoveredLimit || 10_000) : discoveredLimit || defaultLimit;
+  const texts = splitElevenLabsText(text, prefix, maximum, model);
+  const settingNames = { stability: "stability", similarityBoost: "similarity_boost", style: "style", useSpeakerBoost: "use_speaker_boost", speed: "speed" };
   const body = {
-    text: spokenText,
     model_id: model,
     language_code: language.apiCode,
-    voice_settings: {
-      stability: settings.stability,
-      similarity_boost: settings.similarityBoost,
-      style: settings.style,
-      use_speaker_boost: settings.useSpeakerBoost,
-      speed: settings.speed,
-    },
+    voice_settings: Object.fromEntries(elevenLabsCapabilities(model).voiceSettings.map((key) => [settingNames[key], settings[key]])),
     apply_text_normalization: settings.textNormalization,
   };
   if (settings.seed != null) body.seed = settings.seed;
-  return fetchBytes(
-    context.fetchImpl,
-    `${ELEVENLABS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
-      body: JSON.stringify(body),
-    },
-    "ElevenLabs TTS",
-    TTS_TIMEOUT_MS
-  );
+  const chunks = [];
+  let bytes = 0;
+  for (const spokenText of texts) {
+    const audio = await fetchBytes(
+      context.fetchImpl,
+      `${ELEVENLABS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
+        body: JSON.stringify({ text: spokenText, ...body }),
+      },
+      "ElevenLabs TTS",
+      TTS_TIMEOUT_MS
+    );
+    bytes += audio.bytes.length;
+    if (bytes > MAX_AUDIO_RESPONSE_BYTES) throw new Error(`ElevenLabs turn audio exceeds ${MAX_AUDIO_RESPONSE_BYTES} byte limit.`);
+    chunks.push(audio);
+  }
+  return chunks.length === 1 ? chunks[0] : { chunks, contentType: "audio/wav", extension: "wav" };
+}
+
+function splitElevenLabsText(text, prefix, maximum, model) {
+  const budget = maximum - prefix.length;
+  if (budget < 1) throw badRequest(`${model} delivery cue exceeds the ${maximum}-character request limit. Shorten the delivery cue.`);
+  if (text.length > budget && /<\/?(?!break\b)[a-z][a-z0-9:-]*(?:\s[^<>]*)?\s*\/?>/i.test(text)) throw badRequest(`${model} cannot safely split SSML markup within the ${maximum}-character request limit. Shorten the turn or use separate turns.`);
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > budget) {
+    let insideTag = false;
+    let insideMarkup = false;
+    let boundary = 0;
+    let sentenceBoundary = 0;
+    for (let index = 0; index <= budget; index += 1) {
+      const character = remaining[index];
+      if (character === "[") insideTag = true;
+      if (character === "]") insideTag = false;
+      if (character === "<" && /^<break\b[^<>]*\/?>/i.test(remaining.slice(index))) insideMarkup = true;
+      if (character === ">") insideMarkup = false;
+      if (!insideTag && !insideMarkup && /[。！？]/u.test(character) && index + 1 <= budget) {
+        boundary = index + 1;
+        sentenceBoundary = index + 1;
+      }
+      if (character === " " && !insideTag && !insideMarkup) {
+        boundary = index;
+        if (/[.!?。！？…]/u.test(remaining[index - 1] || "")) sentenceBoundary = index;
+      }
+    }
+    const end = sentenceBoundary >= budget / 2 ? sentenceBoundary : boundary;
+    if (!end) throw badRequest(`${model} cannot split this turn within the ${maximum}-character request limit without cutting a word or audio tag. Add a space or shorten the text or delivery cue.`);
+    chunks.push(prefix + remaining.slice(0, end));
+    remaining = remaining.slice(end).trimStart();
+  }
+  if (remaining) chunks.push(prefix + remaining);
+  return chunks;
 }
 
 async function listElevenLabsVoices(res, context) {
+  sendJson(res, 200, await fetchElevenLabsVoices(context));
+}
+
+async function fetchElevenLabsVoices(context, timeoutMs = TTS_TIMEOUT_MS) {
   const apiKey = runtimeCredential(context, "ELEVENLABS_API_KEY");
   if (!apiKey) throw badRequest("ELEVENLABS_API_KEY is required in .env.");
-  const data = await fetchJsonWithBody(context.fetchImpl, ELEVENLABS_VOICES_URL, { headers: { "xi-api-key": apiKey } }, "ElevenLabs voices", TTS_TIMEOUT_MS);
+  const data = await fetchJsonWithBody(context.fetchImpl, ELEVENLABS_VOICES_URL, { headers: { "xi-api-key": apiKey } }, "ElevenLabs voices", timeoutMs);
   const voices = (data?.voices || []).map((voice) => ({
     id: voice.voice_id,
     name: voice.name,
@@ -2621,7 +2842,7 @@ async function listElevenLabsVoices(res, context) {
       accent: language.accent,
     })),
   }));
-  sendJson(res, 200, { voices, hasMore: Boolean(data?.has_more) });
+  return { voices, hasMore: Boolean(data?.has_more) };
 }
 
 async function fetchChatterboxVoices(context, timeoutMs = MODEL_TIMEOUT_MS, useCache = false) {
@@ -3118,6 +3339,23 @@ function assertWav(buffer) {
 }
 
 export async function writeAudioAsWav(audio, outputPath) {
+  if (audio.chunks) {
+    const chunkPaths = audio.chunks.map((_, index) => `${outputPath}.chunk-${index}.wav`);
+    const listPath = `${outputPath}.concat.txt`;
+    const temporaryWav = `${outputPath}.tmp.wav`;
+    try {
+      for (let index = 0; index < audio.chunks.length; index += 1) await writeAudioAsWav(audio.chunks[index], chunkPaths[index]);
+      const list = chunkPaths.map((path) => `file '${resolve(path).replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n";
+      await writeFile(listPath, list, "utf8");
+      await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c:a", "pcm_s16le", temporaryWav]);
+      if (!(await isNormalizedWav(temporaryWav))) throw new Error("Combined TTS chunks are not normalized WAV audio.");
+      if ((await stat(temporaryWav)).size > MAX_AUDIO_RESPONSE_BYTES) throw new Error(`Combined TTS turn exceeds ${MAX_AUDIO_RESPONSE_BYTES} byte limit.`);
+      await rename(temporaryWav, outputPath);
+    } finally {
+      for (const path of [...chunkPaths, listPath, temporaryWav]) await rm(path, { force: true });
+    }
+    return;
+  }
   const temporaryWav = `${outputPath}.tmp.wav`;
   const source = `${outputPath}.source.${audio.extension}`;
   await rm(temporaryWav, { force: true });
@@ -3128,7 +3366,8 @@ export async function writeAudioAsWav(audio, outputPath) {
       "-hide_banner", "-loglevel", "error", "-y", "-i", source,
       "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", temporaryWav,
     ]);
-    assertWav(await readFile(temporaryWav));
+    if (!(await isNormalizedWav(temporaryWav))) throw new Error("TTS returned invalid or empty WAV audio. At least one complete audio frame is required.");
+    if ((await stat(temporaryWav)).size > MAX_AUDIO_RESPONSE_BYTES) throw new Error(`Normalized TTS turn exceeds ${MAX_AUDIO_RESPONSE_BYTES} byte limit.`);
     await rename(temporaryWav, outputPath);
   } catch (error) {
     await rm(temporaryWav, { force: true });
@@ -3400,6 +3639,16 @@ function validateConfigPayload(value, current) {
     activeModels: normalizeCapabilityMap(openaiInput.activeModels ?? currentOpenai.activeModels),
   };
   applyApiKeyPatch(envPatch, "OPENAI_API_KEY", openaiInput, "OpenAI");
+  const chatGptInput = providers.chatgpt || {};
+  const chatgpt = { enabled: Object.hasOwn(chatGptInput, "enabled") ? chatGptInput.enabled === true : current.providers.chatgpt.enabled,
+    activeModels: normalizeTextCapabilityMap(chatGptInput.activeModels ?? current.providers.chatgpt.activeModels) };
+  const decisionInput = body.assistantDecision || {};
+  const decisionProvider = decisionInput.provider ?? current.assistantDecision.provider ?? "typesafe";
+  if (!["typesafe", "openai"].includes(decisionProvider)) throw badRequest("Unsupported assistant decision provider.");
+  const assistantDecision = { enabled: Object.hasOwn(decisionInput, "enabled") ? decisionInput.enabled === true : current.assistantDecision.enabled,
+    provider: decisionProvider, model: decisionProvider === "openai" ? DECISIONS_MODEL : JEV_MODEL };
+  // This field always means the TypeSafe key. The OpenAI card owns OPENAI_API_KEY.
+  applyApiKeyPatch(envPatch, "TYPESAFE_API_KEY", decisionInput, "Jev");
   const openCodeGoInput = providers.opencodeGo && typeof providers.opencodeGo === "object" ? providers.opencodeGo : {};
   const currentOpenCodeGo = current.providers.opencodeGo;
   const opencodeGo = {
@@ -3422,6 +3671,7 @@ function validateConfigPayload(value, current) {
     const existing = currentById.get(item.id);
     const id = typeof item.id === "string" && item.id.trim() ? item.id.trim() : randomUUID();
     validateId(id, "Compatible connection");
+    if (!existing && ["chatgpt", "openai", "opencode-go", "chatterbox"].includes(id)) throw badRequest(`Compatible connection ID "${id}" is reserved for a built-in provider.`);
     const name = String(item.name || "").trim();
     if (!name) throw badRequest("Compatible connection name is required.");
     const connection = {
@@ -3447,8 +3697,9 @@ function validateConfigPayload(value, current) {
 
   return {
     config: {
-      providers: { mimo, elevenlabs, openai, opencodeGo, chatterbox },
+      providers: { mimo, elevenlabs, openai, chatgpt, opencodeGo, chatterbox },
       compatibleConnections,
+      assistantDecision,
     },
     envPatch,
   };
@@ -3536,13 +3787,16 @@ function inactiveModelWarnings(current, config, dependents) {
 
 function modelIsActive(config, modelId, type) {
   const parsed = parseCompatibleModelId(modelId);
+  const builtInId = builtInConnectionId(config, parsed?.connectionId);
   const rawId = parsed?.modelId || modelId;
   const provider = parsed
-    ? parsed.connectionId === "openai"
+    ? builtInId === "openai"
       ? config.providers.openai
-      : parsed.connectionId === "opencode-go"
+      : builtInId === "chatgpt"
+        ? config.providers.chatgpt
+      : builtInId === "opencode-go"
         ? config.providers.opencodeGo
-      : parsed.connectionId === "chatterbox"
+      : builtInId === "chatterbox"
           ? config.providers.chatterbox
           : config.compatibleConnections.find((connection) => connection.id === parsed.connectionId)
     : type === "text" || modelId === "mimo-v2.5-tts"
@@ -3555,6 +3809,13 @@ async function loadModelDependents(paths) {
   const profiles = await readJson(paths.profiles);
   const references = [];
   collectModelReferences(profiles, (kind, name) => `${kind} profile "${name}"`, references);
+  for (const entry of await listPlans(paths)) {
+    const plan = await loadPlan(paths, entry.id);
+    if (plan.planningModel) references.push({ modelId: plan.planningModel, type: "text", owner: `content plan "${plan.name}"` });
+  }
+  for (const thread of await listChatThreads(paths)) {
+    if (thread.lastModel) references.push({ modelId: thread.lastModel, type: "text", owner: `assistant chat "${thread.title}"` });
+  }
   const corrupt = [];
   for (const episode of await listEpisodes(paths)) {
     if (episode.corrupt) {
@@ -3594,7 +3855,7 @@ function disablesCapabilities(current, next) {
   const disabled = (before, after) => before?.enabled !== false && after?.enabled === false
     || Object.entries(before?.activeModels || {}).some(([id, capability]) =>
       capability.text && !after?.activeModels?.[id]?.text || capability.tts && !after?.activeModels?.[id]?.tts);
-  if (["mimo", "elevenlabs", "openai", "opencodeGo", "chatterbox"].some((id) => disabled(current.providers[id], next.providers[id]))) return true;
+  if (["mimo", "elevenlabs", "openai", "chatgpt", "opencodeGo", "chatterbox"].some((id) => disabled(current.providers[id], next.providers[id]))) return true;
   const nextById = new Map(next.compatibleConnections.map((connection) => [connection.id, connection]));
   return current.compatibleConnections.some((connection) => !nextById.has(connection.id) || disabled(connection, nextById.get(connection.id)));
 }
@@ -3902,25 +4163,36 @@ async function sendPlannerChatMessage(req, res, context) {
   const model = String(body.model || "").trim();
   const kbId = String(body.kbId || "").trim();
   const activeContext = normalizeAssistantContext(body.activeContext);
+  const deliveryAction = body.action === "suggestDeliverySetup";
+  if (body.action != null && !deliveryAction) throw badRequest("Unsupported assistant action.");
   if (!planId) throw badRequest("planId is required.");
   if (!text) throw badRequest("Message text is required.");
-  if (!model) throw badRequest("Model is required.");
+  if (!model && !deliveryAction) throw badRequest("Model is required.");
   assertSafeId(planId);
   if (threadId) assertSafeId(threadId);
   if (kbId) assertSafeId(kbId);
-  if (!availableModelIds(runtime).textModels.has(model)) throw badRequest(`Unsupported or inactive text model "${model}".`);
-  const stored = await loadPlan(context.paths, planId);
-  const planDraft = body.planDraft && typeof body.planDraft === "object" ? body.planDraft : {};
-  const plan = normalizePlanInput({ ...stored, ...planDraft }, stored);
-  const workspaceDraft = body.workspaceDraft && typeof body.workspaceDraft === "object" && !Array.isArray(body.workspaceDraft) ? body.workspaceDraft : null;
-  const { profiles } = await validatePlanReferences(runtime, plan);
+  if (!deliveryAction && !availableModelIds(runtime).textModels.has(model)) throw badRequest(`Unsupported or inactive text model "${model}".`);
   const id = threadId || randomUUID();
   if (context.chatBusy.has(id)) throw conflict("A request for this chat is already in progress.");
-  context.chatBusy.set(id, true);
+  const planDraft = body.planDraft && typeof body.planDraft === "object" ? body.planDraft : {};
+  const workspaceDraft = body.workspaceDraft && typeof body.workspaceDraft === "object" && !Array.isArray(body.workspaceDraft) ? body.workspaceDraft : null;
+  if (deliveryAction && (!runtime.config.assistantDecision.enabled || runtime.config.assistantDecision.provider !== "openai" || activeContext.view !== "speakers" || !workspaceDraft)) throw badRequest("Enable OpenAI Decisions, select a saved Hosts profile, then request a delivery setup.");
+  const { stored, plan, profiles, knowledge, kbMeta, savedThread } = await serializeMutation(context, async () => {
+    if (context.chatBusy.has(id)) throw conflict("A request for this chat is already in progress.");
+    const stored = await loadPlan(context.paths, planId);
+    const plan = normalizePlanInput({ ...stored, ...planDraft }, stored);
+    const { profiles } = await validatePlanReferences(runtime, plan);
+    const savedThread = await loadChatThread(context.paths, id);
+    const knowledge = await readJson(context.paths.knowledgeIndex);
+    const kbMeta = kbId ? knowledge.find((item) => item.id === kbId) : null;
+    if (kbId && !kbMeta) throw badRequest("Knowledge base does not exist.");
+    if (threadId && !savedThread) throw notFound("Chat thread not found.");
+    if (savedThread && (savedThread.kind !== "planner" || savedThread.lastPlanId !== planId)) throw conflict("Chat thread belongs to another content plan.");
+    context.chatBusy.set(id, { planId, kbId });
+    return { stored, plan, profiles, knowledge, kbMeta, savedThread };
+  });
   try {
-    let thread = await loadChatThread(context.paths, id);
-    if (threadId && !thread) throw notFound("Chat thread not found.");
-    if (thread && (thread.kind !== "planner" || thread.lastPlanId !== planId)) throw conflict("Chat thread belongs to another content plan.");
+    let thread = savedThread;
     const now = new Date().toISOString();
     if (!thread) thread = { threadId: id, kind: "planner", title: text.replace(/\s+/g, " ").slice(0, 64) || "New chat", kbId, lastPlanId: planId, lastModel: model, messages: [], createdAt: now, updatedAt: now };
     thread.kind = "planner";
@@ -3928,13 +4200,21 @@ async function sendPlannerChatMessage(req, res, context) {
     thread.lastPlanId = planId;
     thread.lastModel = model;
     thread.messages.push({ role: "user", content: text, timestamp: now, context: { planId, planName: plan.name, mode: "planner", ...activeContext } });
-    const knowledge = await readJson(context.paths.knowledgeIndex);
-    const kbMeta = kbId ? knowledge.find((item) => item.id === kbId) : null;
-    if (kbId && !kbMeta) throw badRequest("Knowledge base does not exist.");
+    const reply = async (parsed) => {
+      thread.messages.push({ role: "assistant", content: JSON.stringify(parsed), timestamp: new Date().toISOString(), context: { planId, planName: plan.name, mode: "planner", ...activeContext } });
+      await saveChatThread(context.paths, thread);
+      return sendJson(res, 200, { threadId: id, message: parsed, thread: chatSummary(thread) });
+    };
     const kbContent = kbMeta ? await readFile(join(context.paths.knowledge, `${kbId}.md`), "utf8") : "";
     const focusEpisodeProfile = profiles.episodeProfiles.find((item) => item.id === activeContext.episodeProfileId) || null;
+    const profileTargets = assistantProfileTargets(profiles, plan, runtime.config.assistantDecision.enabled ? activeContext : {});
+    const savedSpeakerProfile = profiles.speakerProfiles.find((item) => item.id === profileTargets.speakerProfileId);
+    const speakerDraft = runtime.config.assistantDecision.enabled && runtime.config.assistantDecision.provider === "openai" && activeContext.view === "speakers" && workspaceDraft
+      ? validateAssistantSpeakerDraft(workspaceDraft, savedSpeakerProfile, profiles, runtime) : null;
+    const candidateProfiles = speakerDraft ? { ...profiles, speakerProfiles: profiles.speakerProfiles.map((profile) => profile.id === speakerDraft.id ? speakerDraft : profile) } : profiles;
     const focusPlannedEpisode = plan.episodes.find((item) => item.id === activeContext.plannedEpisodeId) || null;
     const focusEpisode = activeContext.episodeId ? await loadEpisode(context.paths, activeContext.episodeId, false) : null;
+    if (runtime.config.assistantDecision.enabled && focusEpisode && !plan.episodes.some((item) => item.createdEpisodeId === focusEpisode.id)) throw badRequest("The focused episode does not belong to this podcast.");
     const created = plan.episodes.map((item) => focusEpisode?.id === item.createdEpisodeId ? focusEpisode : null).filter(Boolean);
     const { voiceIds, chatterboxVoices } = await plannerVoiceOptions(runtime, profiles);
     const assistantState = {
@@ -3944,9 +4224,10 @@ async function sendPlannerChatMessage(req, res, context) {
       focusedEpisodeFormat: workspaceDraft && activeContext.view === "transcript" ? workspaceDraft : focusEpisodeProfile,
       focusedPlannedEpisode: focusPlannedEpisode,
       focusedEpisode: workspaceDraft && ["transcript", "tts"].includes(activeContext.view) ? { ...workspaceDraft, transcriptWords: focusEpisode?.transcriptWords || 0, audioReady: Boolean(focusEpisode?.audioReady) } : focusEpisode ? { id: focusEpisode.id, name: focusEpisode.name, episodeProfileId: focusEpisode.episodeProfileId, speakerProfileId: focusEpisode.speakerProfileId || "", knowledgeBaseId: focusEpisode.knowledgeBaseId, additionalInstructions: focusEpisode.additionalInstructions, transcriptPromptGuidance: focusEpisode.transcriptPromptGuidance, transcriptWords: focusEpisode.transcriptWords, audioReady: focusEpisode.audioReady } : null,
-      selectedSpeakerProfile: profiles.speakerProfiles.find((item) => item.id === plan.speakerProfileId) || null,
+      selectedSpeakerProfile: speakerDraft || profiles.speakerProfiles.find((item) => item.id === (runtime.config.assistantDecision.enabled ? profileTargets.speakerProfileId : plan.speakerProfileId)) || null,
       workflow: { episodes: plan.episodes.length, episodesCreated: plan.episodes.filter((item) => item.createdEpisodeId).length, focusedCreatedEpisodes: created.length },
       availableOptions: {
+        plannedEpisodes: plan.episodes.map((item) => ({ id: item.id, title: item.title.slice(0, 500), episodeProfileId: item.episodeProfileId, createdEpisodeId: item.createdEpisodeId })),
         speakerProfiles: profiles.speakerProfiles.map((item) => ({ id: item.id, name: item.name })),
         episodeFormats: profiles.episodeProfiles.map((item) => ({ id: item.id, name: item.name, speakerProfileId: item.speakerProfileId })),
         knowledgeBases: knowledge.map((item) => ({ id: item.id, name: item.name })),
@@ -3959,33 +4240,87 @@ async function sendPlannerChatMessage(req, res, context) {
         actions: ["none", "generatePlan", "createEpisodes", "generateTranscript", "generateTts", "openPlayer"],
       },
     };
-    const prompt = [`PROJECT CONTEXT:\n${JSON.stringify(assistantState)}`, kbContent ? `UNTRUSTED KNOWLEDGE BASE (${kbMeta.name}):\n${kbContent}` : "KNOWLEDGE BASE: None.", `CONVERSATION:\n${thread.messages.slice(-CHAT_CONTEXT_TURNS).map((message) => `[${message.role}] ${message.content}`).join("\n")}`].join("\n\n");
-    const response = await callTextModel({ context: runtime, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt, maxTokens: 8_000, temperature: 0.5, topP: 0.9 });
-    const content = response?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Planner assistant model did not return content.");
+    let initialDecision;
+    let voiceCatalog;
+    const decisionState = { message: text, ...(deliveryAction ? { action: "suggestDeliverySetup" } : {}), context: activeContext, plan: assistantState.plan, speakerProfile: assistantState.selectedSpeakerProfile,
+      episodeFormat: profiles.episodeProfiles.find((item) => item.id === profileTargets.episodeProfileId),
+      focusedEpisode: assistantState.focusedEpisode, workflow: assistantState.workflow,
+      plannedEpisodes: assistantState.availableOptions.plannedEpisodes,
+      recentMessages: thread.messages.slice(-8).map((message) => ({ role: message.role, content: message.content.slice(0, 4_000) })) };
+    const deliveryPins = speakerDraft ? speakerDraft.speakers.map((speaker, index) => JEV_TUNING_FIELDS.filter((key) => !isDeepStrictEqual(speaker[key], existingProposalSpeaker(savedSpeakerProfile.speakers, speaker, index)?.[key]))) : [];
+    const decisionOptions = { context: runtime, plan, profiles: candidateProfiles, profileTargets, focusEpisode, knowledge, text, deliveryAction, deliveryPins };
+    const decisionProvider = runtime.config.assistantDecision.provider;
+    const decide = (state, candidates) => decideAssistantConfiguration({ fetchImpl: runtime.fetchImpl, provider: decisionProvider,
+      apiKey: runtime.credentials[decisionProvider === "openai" ? "OPENAI_API_KEY" : "TYPESAFE_API_KEY"], model: runtime.config.assistantDecision.model, deliverySetup: deliveryAction, state, candidates });
+    if (runtime.config.assistantDecision.enabled) {
+      voiceCatalog = await assistantVoiceCatalog(runtime, profiles);
+      for (const voices of voiceCatalog.values()) for (const voice of voices) voiceIds.add(voice.id);
+      initialDecision = await decide(decisionState, jevCandidates({ ...decisionOptions, voiceCatalog, preliminary: true }));
+      if (initialDecision.status !== "ready") return reply(jevStopResult(initialDecision));
+      if (deliveryAction && (initialDecision.decisions.route !== "speakerProfile" || initialDecision.decisions.profileAction !== "update" || !initialDecision.decisions.deliveryOnly)) {
+        return reply(jevStopResult({ ...initialDecision, status: "needs_clarification", questionsNeeded: [{ id: "delivery setup for the selected existing hosts" }], receipt: { ...initialDecision.receipt, status: "needs_clarification" } }));
+      }
+      if (decisionProvider === "openai" && initialDecision.decisions.route === "speakerProfile" && /(?:stability|speed|temperature|top[\s_-]?p|exaggeration|cfg(?:\s*weight)?|similarity(?:\s*boost)?|seed|(?:elevenlabs)?style)\s*(?:to|=|:|at)?\s*[+-]?\d|\d(?:\.\d+)?\s*(?:stability|speed|temperature|exaggeration)/i.test(text)) {
+        return reply({ ...jevStopResult({ ...initialDecision, status: "needs_clarification", questionsNeeded: [{ id: "the numeric delivery controls in the Hosts form, then request a new setup" }], receipt: { ...initialDecision.receipt, status: "needs_clarification" } }), message: "This request contains numeric delivery settings. Set those values in Hosts first. A trait-based setup must not replace an explicit value." });
+      }
+    }
+    const prompt = [`PROJECT CONTEXT:\n${JSON.stringify(assistantState)}`, kbContent ? `UNTRUSTED KNOWLEDGE BASE (${kbMeta.name}):\n${kbContent}` : "KNOWLEDGE BASE: None.", `CONVERSATION:\n${thread.messages.slice(-CHAT_CONTEXT_TURNS).map((message) => `[${message.role}] ${message.content}`).join("\n")}`,
+      initialDecision ? `AUTHORITATIVE CONFIGURATION ROUTE:\n${JSON.stringify({ ...initialDecision.decisions, profileTargets, speakerCount: initialDecision.selections.speakerCount?.value })}\nFollow this one route and profile action. Use the validated focused profile target. Preserve the requested host names. Generate exactly the selected speakerCount when present. Configuration fields will be enforced separately. Do not invent IDs or numeric tuning.` : ""].filter(Boolean).join("\n\n");
     let parsed;
-    try {
-      parsed = parsePlannerChatResponse(content);
-    } catch (error) {
-      // ponytail: one corrective retry; models occasionally emit broken JSON on long proposals
-      const retry = await callTextModel({ context: runtime, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt: `${prompt}\n\nYOUR PREVIOUS RESPONSE WAS REJECTED (${error.message}). Return the same answer again as strictly valid JSON only, with all inner quotes escaped.`, maxTokens: 8_000, temperature: 0.2, topP: 0.9 });
-      const retryContent = retry?.choices?.[0]?.message?.content;
-      if (!retryContent) throw error;
-      parsed = parsePlannerChatResponse(retryContent);
+    if (deliveryAction) parsed = { message: "Review the delivery setup for the current Hosts draft. Apply saves this draft and the proposed direction. No generation starts.", questions: [], proposal: { speakerProfile: { mode: "update", targetId: savedSpeakerProfile.id, value: speakerDraft } }, nextStep: null, warnings: [] };
+    else {
+      const response = await callTextModel({ context: runtime, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt, maxTokens: 8_000, temperature: 0.5, topP: 0.9 });
+      const content = response?.choices?.[0]?.message?.content;
+      if (!content) throw new Error("Planner assistant model did not return content.");
+      try {
+        parsed = parsePlannerChatResponse(content);
+      } catch (error) {
+        // ponytail: one corrective retry; models occasionally emit broken JSON on long proposals
+        const retry = await callTextModel({ context: runtime, model, effort: plan.planningEffort, system: PLANNER_CHAT_SYSTEM_PROMPT, prompt: `${prompt}\n\nYOUR PREVIOUS RESPONSE WAS REJECTED (${error.message}). Return the same answer again as strictly valid JSON only, with all inner quotes escaped.`, maxTokens: 8_000, temperature: 0.2, topP: 0.9 });
+        const retryContent = retry?.choices?.[0]?.message?.content;
+        if (!retryContent) throw error;
+        parsed = parsePlannerChatResponse(retryContent);
+      }
     }
     const warnings = [];
+    if (initialDecision) {
+      const route = initialDecision.decisions.route;
+      if (initialDecision.decisions.deliveryOnly) parsed.proposal = { speakerProfile: { mode: "update", targetId: savedSpeakerProfile.id, value: structuredClone(speakerDraft || savedSpeakerProfile) } };
+      const raw = parsed.proposal?.[route];
+      const proposed = raw?.value || raw?.changes || raw;
+      if (route === "speakerProfile" && initialDecision.decisions.profileAction === "update" && Array.isArray(proposed?.speakers)) assertProposalSpeakerMapping(assistantState.selectedSpeakerProfile.speakers, proposed.speakers);
+      const result = await decide({ ...decisionState,
+        proposedProse: route === "speakerProfile" ? proposed?.speakers?.map((speaker) => ({ name: speaker.name, backstory: speaker.backstory, personality: speaker.personality, ...(decisionProvider === "openai" ? { style: speaker.style } : {}) })) : undefined,
+        ...(decisionProvider === "openai" && route === "speakerProfile" ? { proposedProfileInstructions: proposed?.instructions, episodeLanguage: plan.language || decisionState.episodeFormat?.language } : {}) },
+        jevCandidates({ ...decisionOptions, voiceCatalog, proposed, initial: initialDecision }));
+      if (result.status !== "ready") return reply(jevStopResult(result));
+      if (route === "plannedEpisodePatches" && (proposed || []).some((patch, index) => result.selections[`episode.${index}.target`]?.value !== patch.id)) {
+        return reply(jevStopResult({ ...result, status: "needs_clarification", questionsNeeded: [{ id: "the planned episode to change in a new proposal" }], receipt: { ...result.receipt, status: "needs_clarification" } }));
+      }
+      parsed = enforceAssistantDecision(parsed, result, profiles, plan, initialDecision, focusEpisode, profileTargets);
+      const targetType = ["speakerProfile", "episodeFormat"].includes(route) ? route : "";
+      const targetProfile = targetType ? (targetType === "speakerProfile" ? profiles.speakerProfiles : profiles.episodeProfiles).find((item) => item.id === parsed.proposal?.[targetType]?.targetId) : null;
+      const receiptSelections = redactedDecisionSelections(result);
+      parsed.decisionReceipt = { ...result.receipt, decisions: [...initialDecision.receipt.decisions.filter((item) => item.id === "speakerCount"), ...result.receipt.decisions], selections: { ...(initialDecision.selections.speakerCount ? { speakerCount: initialDecision.selections.speakerCount } : {}), ...receiptSelections }, route: result.decisions.route, profileAction: result.decisions.profileAction,
+        baselineHash: assistantBaseline(stored, profiles, focusEpisode, profileTargets), profileTargets,
+        ...(speakerDraft && route === "speakerProfile" ? { draftSource: { profileId: savedSpeakerProfile.id, hash: clipCacheKey(workspaceDraft) } } : {}),
+        ...(targetProfile ? { profileTarget: { type: targetType, role: result.decisions.profileAction === "create" ? "source" : "target", id: targetProfile.id, revision: targetProfile.revision ?? 0, hash: clipCacheKey(targetProfile) } } : {}),
+        focusEpisodeId: focusEpisode?.id || "", accountId: !deliveryAction && builtInConnectionId(runtime.config, parseCompatibleModelId(model)?.connectionId) === "chatgpt" ? runtime.chatgptAccountId : null };
+    }
     if (parsed.proposal) parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context: runtime, plan, profiles, focusEpisode, voiceIds }, warnings);
+    if (initialDecision && parsed.proposal) {
+      validateJevProposal(runtime, parsed.proposal, profiles, plan, voiceCatalog);
+      parsed.decisionReceipt.proposalHash = clipCacheKey(parsed.proposal);
+    }
     parsed.warnings = warnings;
     parsed.nextStep = sanitizeAssistantNextStep(parsed.nextStep);
-    thread.messages.push({ role: "assistant", content: JSON.stringify(parsed), timestamp: new Date().toISOString(), context: { planId, planName: plan.name, mode: "planner", ...activeContext } });
-    await saveChatThread(context.paths, thread);
-    sendJson(res, 200, { threadId: id, message: parsed, thread: chatSummary(thread) });
+    return reply(parsed);
   } finally {
     context.chatBusy.delete(id);
   }
 }
 
-function parsePlannerChatResponse(content) {
+function parsePlannerChatResponse(content, allowReceipt = false) {
   let parsed;
   try {
     parsed = parseJsonLoose(content);
@@ -3996,7 +4331,7 @@ function parsePlannerChatResponse(content) {
   if (parsed.questions != null && (!Array.isArray(parsed.questions) || parsed.questions.some((item) => typeof item !== "string"))) throw new Error("Planner assistant questions must be an array of strings.");
   if (parsed.proposal != null && (!parsed.proposal || typeof parsed.proposal !== "object" || Array.isArray(parsed.proposal))) throw new Error("Podcast Assistant proposal must be an object.");
   if (parsed.nextStep != null && (!parsed.nextStep || typeof parsed.nextStep !== "object" || Array.isArray(parsed.nextStep))) throw new Error("Podcast Assistant nextStep must be an object.");
-  return { message: parsed.message.trim(), questions: (parsed.questions || []).slice(0, 3), proposal: parsed.proposal || null, nextStep: parsed.nextStep || null, warnings: Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [] };
+  return { message: parsed.message.trim(), questions: (parsed.questions || []).slice(0, 3), proposal: parsed.proposal || null, nextStep: parsed.nextStep || null, warnings: Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [], ...(allowReceipt && parsed.decisionReceipt ? { decisionReceipt: parsed.decisionReceipt } : {}) };
 }
 
 async function sanitizePlanPatch(patch, current, context, warnings = []) {
@@ -4006,7 +4341,7 @@ async function sanitizePlanPatch(patch, current, context, warnings = []) {
     try {
       const candidate = normalizePlanInput({ ...current, ...safe, [key]: patch[key], episodes: current.episodes }, current);
       await validatePlanReferences(context, candidate);
-      if (key === "planningModel" && candidate.planningModel && !availableModelIds(context).textModels.has(candidate.planningModel)) throw badRequest(`Unsupported or inactive text model "${candidate.planningModel}".`);
+      if (key === "planningModel" && candidate.planningModel && candidate.planningModel !== current.planningModel && !availableModelIds(context).textModels.has(candidate.planningModel)) throw badRequest(`Unsupported or inactive text model "${candidate.planningModel}".`);
       safe[key] = candidate[key];
     } catch (error) {
       if (["knowledgeBaseId", "speakerProfileId", "episodeFormatId", "planningModel"].includes(key)) safe[key] = "";
@@ -4016,9 +4351,9 @@ async function sanitizePlanPatch(patch, current, context, warnings = []) {
   return safe;
 }
 
-function assistantChoice(value, allowed, label, warnings) {
+function assistantChoice(value, allowed, label, warnings, current) {
   if (typeof value !== "string") return undefined;
-  if (!value || allowed.has(value)) return value;
+  if (!value || value === current || allowed.has(value)) return value;
   warnings.push(`${label} "${value}" is unavailable; field was cleared.`);
   return "";
 }
@@ -4041,6 +4376,7 @@ function normalizeAssistantContext(value) {
     view: ["episodes", "speakers", "format", "transcript", "tts", "player", "config"].includes(raw.view) ? raw.view : "episodes",
     transcriptSection: ["script", "prompt"].includes(raw.transcriptSection) ? raw.transcriptSection : "script",
     episodeProfileId: safeId(raw.episodeProfileId),
+    speakerProfileId: safeId(raw.speakerProfileId),
     plannedEpisodeId: safeId(raw.plannedEpisodeId),
     episodeId: safeId(raw.episodeId),
   };
@@ -4079,7 +4415,296 @@ async function plannerVoiceOptions(context, profiles) {
   return { voiceIds, chatterboxVoices };
 }
 
-async function sanitizePlannerProposal(proposal, { context, plan, profiles, focusEpisode, voiceIds }, warnings = []) {
+const JEV_TUNING_FIELDS = ["chatterboxExaggeration", "chatterboxCfgWeight", "chatterboxTemperature", "mimoTemperature", "mimoTopP", "mimoInstructionPreset", "mimoInstructionText", "elevenlabsStability", "elevenlabsSimilarityBoost", "elevenlabsStyle", "elevenlabsSpeed", "elevenlabsUseSpeakerBoost", "elevenlabsSeed", "elevenlabsTextNormalization"];
+
+function validateAssistantSpeakerDraft(raw, saved, profiles, context) {
+  if (!saved || raw.id !== saved.id || !Array.isArray(raw.speakers) || raw.speakers.length < 1 || raw.speakers.length > 4) throw badRequest("Select a saved Hosts profile with 1 to 4 speakers before requesting a setup.");
+  if (profileRevision(raw) !== profileRevision(saved)) throw conflict("The saved Hosts profile changed. Reload it before requesting a setup for this draft.");
+  const draft = structuredClone(saved);
+  for (const key of ["name", "description", "instructions", "voiceModel"]) {
+    if (typeof raw[key] !== "string" || raw[key].length > PLAN_MAX_TEXT_CHARS) throw badRequest(`Hosts draft ${key} is invalid or too long.`);
+    draft[key] = raw[key];
+  }
+  draft.speakers = raw.speakers.map((speaker, index) => {
+    if (!speaker || typeof speaker !== "object" || Array.isArray(speaker)) throw badRequest("Hosts draft speaker is invalid.");
+    const next = structuredClone(existingProposalSpeaker(saved.speakers, speaker, index));
+    for (const key of ["name", "backstory", "personality", "style", "voiceId", "ttsModelOverride", "accent"]) {
+      if (["ttsModelOverride", "accent"].includes(key) && speaker[key] == null) { next[key] = ""; continue; }
+      if (typeof speaker[key] !== "string" || speaker[key].length > PLAN_MAX_TEXT_CHARS) throw badRequest(`Hosts draft ${key} is invalid or too long.`);
+      next[key] = speaker[key];
+    }
+    for (const key of JEV_TUNING_FIELDS) if (Object.hasOwn(speaker, key)) next[key] = speaker[key];
+    return next;
+  });
+  const checked = structuredClone({ ...profiles, speakerProfiles: profiles.speakerProfiles.map((profile) => profile.id === saved.id ? draft : profile) });
+  const models = availableModelIds(context);
+  mergeSavedProfileSelections(models, profiles);
+  validateProfileData(checked, models);
+  return checked.speakerProfiles.find((profile) => profile.id === saved.id);
+}
+
+async function assistantVoiceCatalog(context, profiles, fresh = false) {
+  const voices = new Map();
+  let eleven = [];
+  let chatterbox = [];
+  if (context.modelCatalog.providers.elevenlabs.status === "ready") {
+    try { eleven = (await fetchElevenLabsVoices(context, 5_000)).voices; } catch {}
+  }
+  if (context.modelCatalog.providers.chatterbox.status === "ready") {
+    try { chatterbox = await fetchChatterboxVoices(context, 2_000, !fresh); } catch {}
+  }
+  for (const model of availableModelIds(context).ttsModels) {
+    const parsed = parseCompatibleModelId(model);
+    const provider = model === "mimo-v2.5-tts" ? "mimo" : isElevenLabsModel(context, model) ? "elevenlabs" : parsed && compatibleConnection(context, parsed.connectionId)?.kind || "compatible";
+    const items = provider === "mimo" ? MIMO_VOICES.map((id) => ({ id, name: id }))
+      : provider === "elevenlabs" ? eleven : provider === "chatterbox" ? chatterbox
+        : provider === "openai" ? OPENAI_VOICES.filter((id) => !OPENAI_TTS_NO_INSTRUCTIONS.has(parsed.modelId) || ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"].includes(id)).map((id) => ({ id, name: id }))
+          : profiles.speakerProfiles.flatMap((profile) => profile.speakers.filter((speaker) => (speaker.ttsModelOverride || profile.voiceModel) === model).map((speaker) => ({ id: speaker.voiceId, name: speaker.voiceId })));
+    voices.set(model, [...new Map(items.filter((voice) => voice.id).map((voice) => [voice.id, voice])).values()]);
+  }
+  return voices;
+}
+
+function assistantProfileTargets(profiles, plan, activeContext) {
+  const speakerId = activeContext.view === "speakers" ? activeContext.speakerProfileId : "";
+  const formatId = activeContext.view === "format" ? activeContext.episodeProfileId : "";
+  if (speakerId && !profiles.speakerProfiles.some((item) => item.id === speakerId)) throw badRequest("The selected Hosts profile no longer exists.");
+  if (formatId && !profiles.episodeProfiles.some((item) => item.id === formatId)) throw badRequest("The selected Episode Format no longer exists.");
+  return { speakerProfileId: speakerId || plan.speakerProfileId || profiles.speakerProfiles[0]?.id,
+    episodeProfileId: formatId || plan.episodeFormatId || profiles.episodeProfiles[0]?.id };
+}
+
+function assistantBaseline(plan, profiles, focusEpisode, profileTargets = {}) {
+  return clipCacheKey({ plan, speaker: profiles.speakerProfiles.find((item) => item.id === (profileTargets.speakerProfileId || plan.speakerProfileId)) || profiles.speakerProfiles[0],
+    format: profiles.episodeProfiles.find((item) => item.id === (profileTargets.episodeProfileId || plan.episodeFormatId)) || profiles.episodeProfiles[0], focusEpisode: focusEpisode || null });
+}
+
+function deliveryPresetOptions(model, current = {}, provider = "") {
+  return ["natural", "calm", "expressive"].map((id) => {
+    const value = model.startsWith("eleven") ? { elevenlabsStability: id === "calm" ? 0.8 : id === "expressive" ? 0.3 : 0.5 }
+      : model === "mimo-v2.5-tts" ? { mimoInstructionPreset: id }
+        : provider === "chatterbox" ? { chatterboxExaggeration: id === "calm" ? 0.4 : id === "expressive" ? 1 : 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7 } : {};
+    return { id, description: `${id} delivery using supported ${model} controls`, value: { ...current, ...value } };
+  });
+}
+
+function jevCandidates({ context, plan, profiles, profileTargets, focusEpisode, knowledge, voiceCatalog, text, deliveryAction = false, deliveryPins = [], proposed = null, preliminary = false, initial = null }) {
+  const speakerProfile = profiles.speakerProfiles.find((item) => item.id === profileTargets.speakerProfileId);
+  const format = profiles.episodeProfiles.find((item) => item.id === profileTargets.episodeProfileId);
+  const models = availableModelIds(context);
+  const choices = (items) => items.map((item) => typeof item === "string" ? { id: item, description: item } : { id: item.id, description: item.name || item.id, value: item.value ?? item.id });
+  const hostNames = Array.isArray(proposed?.speakers) ? proposed.speakers.map((speaker) => typeof speaker.name === "string" ? oneLine(speaker.name) : "") : [];
+  const mentions = (items, speakerName = "", allowSharedModel = false) => {
+    const byId = new Map(items.map((item) => [item.id, item]));
+    if (!byId.size) return { value: undefined, excluded: [] };
+    const ids = [...byId.keys()].sort((left, right) => right.length - left.length).map(escapeRegex).join("|");
+    const tokens = new RegExp(`(?<![\\p{L}\\p{N}_:/.-])(${ids})(?![\\p{L}\\p{N}_:/-]|\\.[\\p{L}\\p{N}_-])`, "gu");
+    const positive = new Set();
+    const excluded = new Set();
+    for (const match of text.matchAll(tokens)) {
+      const before = text.slice(0, match.index);
+      const clauseStart = [...before.matchAll(/[!?;\n]|\.(?=\s)/g)].at(-1)?.index;
+      const prefix = before.slice(clauseStart == null ? 0 : clauseStart + 1);
+      if (speakerName) {
+        const names = hostNames.slice().sort((left, right) => right.length - left.length).map(escapeRegex).join("|");
+        const afterId = text.slice(match.index + match[1].length);
+        if (/^\s+(?:for|para)\b/i.test(afterId)) {
+          const assigned = afterId.match(new RegExp(`^\\s+(?:for|para)\\s+(${names})(?![\\p{L}\\p{N}_])`, "u"));
+          if (!assigned) throw badRequest("The host choice names an unknown host. Specify a configured host name.");
+          const afterHost = afterId.slice(assigned[0].length);
+          if (new RegExp(`^\\s*(?:and|y|&|,)\\s+(${names})(?![\\p{L}\\p{N}_])`, "u").test(afterHost)) throw badRequest("The host choice has an ambiguous subject. Specify each host and choice in a separate clause.");
+          if (assigned[1] !== speakerName) continue;
+        } else {
+          const subjects = [...prefix.matchAll(new RegExp(`(?<![\\p{L}\\p{N}_])(${names})(?![\\p{L}\\p{N}_])`, "gu"))];
+          const subject = subjects.at(-1);
+          const previous = subjects.at(-2);
+          const grouped = previous && /^\s*(?:and|y|&|,)\s*$/i.test(prefix.slice(previous.index + previous[1].length, subject.index));
+          if (grouped) throw badRequest("The host choice has an ambiguous subject. Specify each host and choice in a separate clause.");
+          if (!subject) {
+            if (allowSharedModel) continue;
+            throw badRequest("The voice choice has no host. Specify each host and voice in a separate clause.");
+          }
+          if (subject[1] !== speakerName) continue;
+        }
+      }
+      const direction = [...prefix.matchAll(/\b(?:do\s+not\s+(?:use|select|choose|set)?|don't\s+(?:use|select|choose|set)?|avoid(?:\s+using)?|not(?:\s+(?:use|using|select|choose|set))?|no\s+(?:uses|usa|usar|use|quiero)|without|sin|instead\s+of|rather\s+than|use|select|choose|set|usa|usar|elige|selecciona)\b/gi)].at(-1)?.[0] || "";
+      if (/^(?:do\s+not|don't|avoid|not|no|without|sin|instead|rather)\b/i.test(direction)) excluded.add(match[1]);
+      else positive.add(match[1]);
+    }
+    const selected = [...positive].filter((id) => !excluded.has(id));
+    return { value: selected.length === 1 ? byId.get(selected[0]).value ?? selected[0] : undefined, excluded: [...excluded] };
+  };
+  const explicit = (items, speakerName = "", allowSharedModel = false) => mentions(items, speakerName, allowSharedModel).value;
+  const target = (route) => route === "speakerProfile" ? speakerProfile : route === "episodeFormat" ? format : route === "episodePatch" ? focusEpisode : plan;
+  const valueFor = (id, decisions, fields) => {
+    const selected = decisions[id];
+    if (selected && !["keep_current", "not_requested"].includes(selected)) return selected;
+    return fields.find((field) => field.id === id)?.currentValue;
+  };
+  let fields = [];
+  return ({ phase, questionId, route, decisions }) => {
+    if (questionId === "route") return deliveryAction ? choices(["speakerProfile"]) : choices(["planPatch", "speakerProfile", "episodeFormat", ...(plan.episodes.length ? ["plannedEpisodePatches"] : []), ...(focusEpisode ? ["episodePatch"] : []), "nextStep", "question"]);
+    if (questionId === "profileAction") return choices(deliveryAction || decisions.deliveryOnly ? ["update"] : ["create", "update"]);
+    if (questionId === "nextAction") return choices(["none", ...(plan.theme || plan.goal ? ["generatePlan"] : []), ...(plan.episodes.some((item) => !item.createdEpisodeId && (item.episodeProfileId || plan.episodeFormatId)) ? ["createEpisodes"] : []), ...(focusEpisode && !isActiveJob(focusEpisode.job) ? ["generateTranscript"] : []), ...(focusEpisode?.status === "transcript_ready" ? ["generateTts"] : []), ...(focusEpisode?.audioReady ? ["openPlayer"] : [])]);
+    const current = target(route) || {};
+    const selectedLanguage = valueFor("language", decisions, fields) || plan.language || format?.language;
+    const language = context.modelCatalog.languages.find((item) => item.id === selectedLanguage);
+    const ttsChoices = choices([...models.ttsModels].filter((id) => language && !modelLanguageError(context, id, language)));
+    if (phase === "fields") {
+      const add = (id, value, options, extra = {}) => {
+        const named = options ? mentions(options, extra.speakerName || "", id.endsWith(".ttsModelOverride")) : { value: undefined, excluded: [] };
+        const exact = Object.hasOwn(extra, "explicitValue") ? extra.explicitValue : named.value;
+        const field = { id, currentValue: exact ?? value, options, ...extra, excludedIds: [...new Set([...named.excluded, ...(extra.excludedIds || [])])] };
+        if (exact !== undefined && exact !== null) field.explicitValue = exact;
+        else delete field.explicitValue;
+        if (field.excludedIds.some((optionId) => options?.find((option) => option.id === optionId)?.value === field.currentValue || optionId === field.currentValue)) {
+          delete field.currentValue;
+          field.required = true;
+        }
+        fields.push(field);
+      };
+      fields = [];
+      if (preliminary) {
+        if (route === "speakerProfile") {
+          const pin = context.config.assistantDecision.provider === "openai" ? text.match(/\b([1-4])\s*(?:hosts?|speakers?|anfitriones?)\b/i)?.[1] || (/\b(?:solo host|one host|un anfitri[oó]n)\b/i.test(text) ? "1" : "") : "";
+          fields.push({ id: "speakerCount", label: "number of hosts (1 to 4)", path: ["speakers", "length"], required: true,
+            ...(decisions.profileAction === "update" || pin ? { currentValue: pin ? Number(pin) : speakerProfile.speakers.length } : {}), locked: Boolean(decisions.deliveryOnly || pin),
+            options: [1, 2, 3, 4].map((count) => ({ id: String(count), description: `${count} host(s)`, value: count })) });
+        }
+        return fields;
+      }
+      if (["planPatch", "episodeFormat"].includes(route)) {
+        add("language", current.language, choices(context.modelCatalog.languages));
+        for (const key of route === "planPatch" ? ["planningModel"] : ["outlineModel", "transcriptModel"]) add(key, current[key], choices([...models.textModels]));
+        for (const key of route === "planPatch" ? ["planningEffort"] : ["outlineEffort", "transcriptEffort"]) add(key, current[key] || "", [{ id: "default_effort", value: "", description: "Use the model default effort" }, ...choices(["none", "low", "medium", "high", "xhigh", "max"])]);
+        add("speakerProfileId", current.speakerProfileId || "", choices(profiles.speakerProfiles));
+        if (route === "planPatch") {
+          add("episodeFormatId", current.episodeFormatId || "", choices(profiles.episodeProfiles));
+          add("knowledgeBaseId", current.knowledgeBaseId || "", [{ id: "none", value: "", description: "No knowledge base" }, ...choices(knowledge)]);
+          const count = text.match(/\b(\d{1,3})\s*(?:episodes?|episodios?)\b/i);
+          add("episodeCount", count && Number(count[1]) <= 100 ? Number(count[1]) : current.episodeCount, []);
+        }
+        const minutes = text.match(/\b(\d{1,2})\s*(?:minutes?|minutos?|min)\b/i);
+        add("targetMinutes", minutes && Number(minutes[1]) >= 5 && Number(minutes[1]) <= 60 ? Number(minutes[1]) : current.targetMinutes, []);
+      } else if (route === "speakerProfile") {
+        const deliveryOnly = Boolean(initial?.decisions.deliveryOnly);
+        add("voiceModel", current.voiceModel, ttsChoices, { required: true, stage: 1 });
+        const count = proposed?.speakers?.length || 0;
+        if (count < 1 || count > 4 || count !== initial.selections.speakerCount?.value) throw badRequest("The generated host count does not match the selected count. Ask for the host count again.");
+        if (new Set(hostNames).size !== count || hostNames.some((name) => !name || /[:\[\]\r\n]/.test(name))) throw badRequest("The generated host names are invalid or ambiguous. Ask for a new proposal.");
+        for (let index = 0; index < count; index += 1) {
+          const base = existingProposalSpeaker(current.speakers, proposed.speakers[index], index);
+          const prefix = `speakers.${index}`;
+          const speakerName = count > 1 ? hostNames[index] : "";
+          add(`${prefix}.ttsModelOverride`, base.ttsModelOverride || "", [{ id: "profile_default", value: "", description: "Use the profile TTS model" }, ...ttsChoices], { stage: 2, speakerName, explicitValue: count > 1 ? explicit(ttsChoices, speakerName, true) : /\boverride\b/i.test(text) ? explicit(ttsChoices) : undefined });
+          const model = explicit(ttsChoices, speakerName, true) || base.ttsModelOverride || explicit(ttsChoices) || current.voiceModel;
+          const voiceOptions = choices(voiceCatalog.get(model) || []);
+          const namedVoice = mentions(voiceOptions, speakerName);
+          add(`${prefix}.voiceId`, namedVoice.value ?? base.voiceId, null, { required: true, stage: 3, speakerName, excludedIds: namedVoice.excluded, ...(namedVoice.value !== undefined ? { explicitValue: namedVoice.value } : {}) });
+          add(`${prefix}.accent`, base.accent || "", [{ id: "language_default", value: "", description: "Use the language default" }, ...choices([...new Set(context.modelCatalog.languages.map((item) => item.defaultAccent).filter(Boolean))])], { stage: 3 });
+          add(`${prefix}.deliveryPreset`, Object.fromEntries(JEV_TUNING_FIELDS.map((key) => [key, base[key] ?? null])), null,
+            { label: `host ${index + 1} delivery preset and saved tuning (${JEV_TUNING_FIELDS.join(", ")})`, path: ["speakers", String(index)], merge: true, stage: 3,
+              ...(context.config.assistantDecision.provider === "openai" ? { deliveryTraits: { hostIndex: index, style: proposed.speakers[index].style }, forceRequested: deliveryOnly } : {}) });
+        }
+        if (deliveryOnly) for (const field of fields) if (!field.id.endsWith(".deliveryPreset")) field.locked = true;
+      } else if (route === "episodePatch") {
+        for (const [key, options] of [["episodeProfileId", profiles.episodeProfiles], ["speakerProfileId", profiles.speakerProfiles], ["knowledgeBaseId", knowledge]]) add(key, current[key] || "", choices(options));
+      } else if (route === "plannedEpisodePatches") {
+        for (const [index, patch] of (proposed || []).entries()) {
+          const existing = plan.episodes.find((item) => item.id === patch.id);
+          if (!existing) throw badRequest("The planned episode target is unavailable.");
+          add(`episode.${index}.target`, existing.id, choices(plan.episodes.map((item) => ({ id: item.id, name: item.title }))), { path: [String(index), "id"], stage: 0 });
+          add(`episode.${index}.episodeProfileId`, existing.episodeProfileId || "", choices(profiles.episodeProfiles), { path: [String(index), "changes", "episodeProfileId"] });
+        }
+      }
+      return fields;
+    }
+    const field = fields.find((item) => item.id === questionId);
+    const locked = (options) => {
+      const excluded = new Set([...(field?.excludedIds || []), ...mentions(options, field?.speakerName || "", questionId?.endsWith(".ttsModelOverride")).excluded]);
+      return options.filter((option) => !excluded.has(option.id) && (!field || !Object.hasOwn(field, "explicitValue") || (option.value ?? option.id) === field.explicitValue));
+    };
+    if (questionId?.endsWith(".voiceId") || questionId?.endsWith(".deliveryPreset")) {
+      const prefix = questionId.slice(0, questionId.lastIndexOf("."));
+      const override = valueFor(`${prefix}.ttsModelOverride`, decisions, fields);
+      const model = override === "profile_default" ? valueFor("voiceModel", decisions, fields) : override || valueFor("voiceModel", decisions, fields);
+      const index = Number(prefix.split(".")[1]);
+      const base = existingProposalSpeaker(speakerProfile.speakers, proposed.speakers[index], index);
+      const provider = compatibleConnection(context, parseCompatibleModelId(model)?.connectionId)?.kind;
+      const presets = deliveryPresetOptions(model || "", field.currentValue, provider).map((option) => ({ ...option, value: { ...option.value, ...Object.fromEntries((deliveryPins[speakerProfile.speakers.indexOf(base)] || []).map((key) => [key, field.currentValue[key]])) } }));
+      return locked(questionId.endsWith(".voiceId") ? choices(voiceCatalog.get(model) || []) : presets);
+    }
+    if (questionId === "voiceModel" || questionId?.endsWith(".ttsModelOverride")) return locked(questionId === "voiceModel" ? ttsChoices : [{ id: "profile_default", value: "", description: "Use the profile TTS model" }, ...ttsChoices]);
+    return field?.options ? locked(field.options) : undefined;
+  };
+}
+
+function enforceAssistantDecision(parsed, result, profiles, plan, initial, focusEpisode, profileTargets) {
+  const route = result.decisions.route;
+  if (route !== initial.decisions.route || result.decisions.profileAction !== initial.decisions.profileAction || result.decisions.deliveryOnly !== initial.decisions.deliveryOnly) throw badRequest("The configuration decisions changed. Ask again before applying a proposal.");
+  if (["question", "keep_current", "not_requested"].includes(route) || ["keep_current", "not_requested"].includes(result.decisions.profileAction)) return { ...parsed, proposal: null, nextStep: null };
+  if (route === "nextStep") {
+    const action = result.decisions.nextAction;
+    const target = { generatePlan: "chat", createEpisodes: "episodes", generateTranscript: "transcript", generateTts: "tts", openPlayer: "player" }[action] || "chat";
+    const episodeAction = ["generateTranscript", "generateTts", "openPlayer"].includes(action);
+    if (episodeAction && !focusEpisode?.id) throw badRequest("Select the episode for this action, then ask for a new step.");
+    return { ...parsed, proposal: null, nextStep: action && !["none", "keep_current", "not_requested"].includes(action) ? { target, action, targetIds: episodeAction ? [focusEpisode.id] : [], reason: parsed.message } : null };
+  }
+  if (!parsed.proposal?.[route]) throw badRequest("The text model did not follow the selected proposal type. Ask again.");
+  const raw = parsed.proposal[route];
+  const value = enforceJevSelections(Array.isArray(raw) ? { rows: raw } : raw.value || raw.changes || raw, Array.isArray(raw) ? { ...result, selections: Object.fromEntries(Object.entries(result.selections).map(([id, selection]) => [id, { ...selection, path: ["rows", ...selection.path] }])) } : result);
+  let proposal;
+  if (["speakerProfile", "episodeFormat"].includes(route)) {
+    const target = (route === "speakerProfile" ? profiles.speakerProfiles : profiles.episodeProfiles).find((item) => item.id === (route === "speakerProfile" ? profileTargets.speakerProfileId : profileTargets.episodeProfileId));
+    proposal = { [route]: { mode: result.decisions.profileAction, targetId: target.id, value } };
+  } else proposal = { [route]: Array.isArray(raw) ? value.rows : raw.changes ? { ...raw, ...(route === "episodePatch" ? { episodeId: focusEpisode.id } : {}), changes: value } : value };
+  return { ...parsed, proposal, nextStep: null };
+}
+
+function redactedDecisionSelections(result) {
+  return Object.fromEntries(Object.entries(result.selections || {}).map(([id, selection]) => {
+    if (result.receipt?.provider !== "openai" || !id.endsWith(".deliveryPreset") || !selection.value) return [id, selection];
+    const { style, mimoInstructionText, ...value } = selection.value;
+    return [id, { ...selection, value }];
+  }));
+}
+
+function jevStopResult(result) {
+  const name = result.receipt?.provider === "openai" ? "OpenAI Decisions" : "Jev";
+  return { message: result.status === "unavailable" ? result.error?.message || `${name} is unavailable. Configuration was not selected.` : `${name} needs more information before it can select a configuration.`,
+    questions: (result.questionsNeeded?.length ? result.questionsNeeded : [{ id: "request" }]).slice(0, 3).map((item) => `Please specify ${item.id.replace(/\./g, " ")}.`),
+    proposal: null, nextStep: null, warnings: ["No configuration change was proposed. Try again or disable configuration decisions to use the text assistant."], decisionReceipt: { ...result.receipt, selections: redactedDecisionSelections(result) } };
+}
+
+function validateJevProposal(context, proposal, profiles, plan, voiceCatalog) {
+  const hosts = proposal?.speakerProfile;
+  if (hosts) {
+    const previous = profiles.speakerProfiles.find((item) => item.id === hosts.targetId);
+    const format = profiles.episodeProfiles.find((item) => item.id === plan.episodeFormatId);
+    const language = resolveLanguage(context, plan.language || format?.language);
+    for (const [index, speaker] of hosts.value.speakers.entries()) {
+      const model = speaker.ttsModelOverride || hosts.value.voiceModel;
+      const old = previous && existingProposalSpeaker(previous.speakers, speaker, index);
+      const unchanged = hosts.mode === "update" && old && (old.ttsModelOverride || previous.voiceModel) === model && old.voiceId === speaker.voiceId;
+      if (unchanged) continue;
+      const error = modelLanguageError(context, model, language);
+      if (error) throw conflict(`${speaker.name}: ${error}`);
+      if (!(voiceCatalog.get(model) || []).some((voice) => voice.id === speaker.voiceId)) throw conflict(`${speaker.name}: voice "${speaker.voiceId}" is not available for model "${model}". Ask for a new configuration.`);
+    }
+  }
+  for (const key of ["episodeFormat", "planPatch"]) {
+    const value = proposal?.[key]?.value || proposal?.[key];
+    if (!value) continue;
+    for (const field of ["planningModel", "outlineModel", "transcriptModel"]) {
+      const id = value[field];
+      const previous = key === "planPatch" ? plan : profiles.episodeProfiles.find((item) => item.id === proposal.episodeFormat.targetId);
+      const unchanged = key === "planPatch" || proposal.episodeFormat.mode === "update" ? previous?.[field] === id : false;
+      if (id && !unchanged && !availableModelIds(context).textModels.has(id)) throw conflict(`Text model "${id}" is no longer active. Ask for a new configuration.`);
+    }
+  }
+}
+
+async function sanitizePlannerProposal(proposal, { context, plan, profiles, focusEpisode, voiceIds, profileSources = {} }, warnings = []) {
   if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) throw badRequest("Podcast Assistant proposal must be an object.");
   const types = ["planPatch", "speakerProfile", "episodeFormat", "plannedEpisodePatches", "episodePatch"].filter((key) => proposal[key] != null);
   if (types.length !== 1) throw badRequest("Podcast Assistant must propose exactly one change type.");
@@ -4088,8 +4713,9 @@ async function sanitizePlannerProposal(proposal, { context, plan, profiles, focu
   if (type === "speakerProfile") {
     const raw = proposal.speakerProfile;
     const mode = raw?.mode === "create" ? "create" : "update";
-    const target = profiles.speakerProfiles.find((item) => item.id === raw?.targetId) || profiles.speakerProfiles.find((item) => item.id === plan.speakerProfileId) || profiles.speakerProfiles[0];
+    const target = profiles.speakerProfiles.find((item) => item.id === (mode === "create" ? profileSources.speakerProfile || raw?.targetId : raw?.targetId)) || profiles.speakerProfiles.find((item) => item.id === plan.speakerProfileId) || profiles.speakerProfiles[0];
     if (!target) throw badRequest("Speaker Profile target does not exist.");
+    if (mode === "update" && Array.isArray(raw?.value?.speakers)) assertProposalSpeakerMapping(target.speakers, raw.value.speakers);
     const voices = voiceIds || new Set([...MIMO_VOICES, ...OPENAI_VOICES, ...profiles.speakerProfiles.flatMap((item) => item.speakers.map((speaker) => speaker.voiceId))]);
     const value = sanitizeProposalSpeaker(raw?.value || {}, target, voices, availableModelIds(context).ttsModels, warnings);
     delete value.id;
@@ -4099,7 +4725,7 @@ async function sanitizePlannerProposal(proposal, { context, plan, profiles, focu
   if (type === "episodeFormat") {
     const raw = proposal.episodeFormat;
     const mode = raw?.mode === "create" ? "create" : "update";
-    const target = profiles.episodeProfiles.find((item) => item.id === raw?.targetId) || profiles.episodeProfiles.find((item) => item.id === plan.episodeFormatId) || profiles.episodeProfiles[0];
+    const target = profiles.episodeProfiles.find((item) => item.id === (mode === "create" ? profileSources.episodeFormat || raw?.targetId : raw?.targetId)) || profiles.episodeProfiles.find((item) => item.id === plan.episodeFormatId) || profiles.episodeProfiles[0];
     if (!target) throw badRequest("Episode Format target does not exist.");
     const value = sanitizeProposalEpisode(raw?.value || {}, target, {
       models: availableModelIds(context),
@@ -4170,17 +4796,55 @@ async function applyPlannerChatProposal(req, res, context) {
   assertSafeId(threadId);
   if (!Number.isInteger(messageIndex) || messageIndex < 0) throw badRequest("messageIndex is invalid.");
   if (context.chatBusy.has(threadId)) throw conflict("Wait for the active assistant request to finish.");
+  context.chatBusy.set(threadId, {});
+  try {
   const thread = await loadChatThread(context.paths, threadId);
   if (!thread || thread.kind !== "planner") throw notFound("Podcast Assistant chat not found.");
+  context.chatBusy.set(threadId, { planId: thread.lastPlanId, kbId: thread.kbId });
   const message = thread.messages[messageIndex];
   if (message?.role !== "assistant") throw badRequest("Selected message is not an assistant proposal.");
   if (message.appliedAt) throw conflict("Proposal already applied.");
-  const parsed = parsePlannerChatResponse(message.content);
+  const parsed = parsePlannerChatResponse(message.content, true);
   if (!parsed.proposal) throw badRequest("Selected message has no proposal.");
   const plan = await loadPlan(context.paths, thread.lastPlanId);
   const currentProfiles = await readJson(context.paths.profiles);
+  let decisionVoiceCatalog;
+  const profileSources = {};
+  if (parsed.decisionReceipt) {
+    const receipt = parsed.decisionReceipt;
+    if (receipt.draftSource && (!body.workspaceDraft || clipCacheKey(body.workspaceDraft) !== receipt.draftSource.hash)) throw conflict("The Hosts draft changed. Request a new delivery setup before Apply.");
+    if (receipt.profileTarget) {
+      const target = (receipt.profileTarget.type === "speakerProfile" ? currentProfiles.speakerProfiles : currentProfiles.episodeProfiles).find((item) => item.id === receipt.profileTarget.id);
+      if (!target) throw conflict("The selected profile no longer exists. Ask for a new proposal.");
+      if ((target.revision ?? 0) !== receipt.profileTarget.revision || clipCacheKey(target) !== receipt.profileTarget.hash) throw conflict("The selected profile changed. Ask for a new proposal.");
+      const profileProposal = parsed.proposal[receipt.profileTarget.type];
+      if (profileProposal?.mode === "create") {
+        if (receipt.profileAction !== "create" || profileProposal.targetId && profileProposal.targetId !== target.id) throw conflict("The configuration proposal uses a different source profile.");
+        profileSources[receipt.profileTarget.type] = target.id;
+      } else if (profileProposal?.targetId !== target.id) throw conflict("The configuration proposal targets a different profile.");
+    }
+    const focused = receipt.focusEpisodeId ? await loadEpisode(context.paths, receipt.focusEpisodeId, false) : null;
+    if (receipt.status !== "ready" || receipt.proposalHash !== clipCacheKey(parsed.proposal)
+      || receipt.baselineHash !== assistantBaseline(plan, currentProfiles, focused, receipt.profileTargets)) throw conflict("This configuration proposal is stale. Ask the assistant for a new proposal.");
+    if (parsed.proposal.speakerProfile?.mode === "update" && receipt.profileTargets && parsed.proposal.speakerProfile.targetId !== receipt.profileTargets.speakerProfileId
+      || parsed.proposal.episodeFormat?.mode === "update" && receipt.profileTargets && parsed.proposal.episodeFormat.targetId !== receipt.profileTargets.episodeProfileId) throw conflict("The configuration proposal targets a different profile.");
+    if (parsed.proposal.episodePatch && (receipt.focusEpisodeId !== parsed.proposal.episodePatch.episodeId || !plan.episodes.some((item) => item.createdEpisodeId === receipt.focusEpisodeId))) throw conflict("The configuration proposal targets another podcast episode.");
+    if (receipt.accountId && chatGptCatalogAccount(context) !== receipt.accountId) throw conflict("The ChatGPT account changed. Ask for a new proposal.");
+    await awaitLatestModelCatalog(context);
+    for (const [id, selection] of Object.entries(receipt.selections || {})) {
+      if (["keep_current", "not_requested"].includes(selection.choice)) continue;
+      const value = selection.value;
+      if ((id === "voiceModel" || id.endsWith(".ttsModelOverride")) && value && !availableModelIds(context).ttsModels.has(value)) throw conflict(`TTS model "${value}" is no longer active. Ask for a new configuration.`);
+      if (["planningModel", "outlineModel", "transcriptModel"].includes(id) && value && !availableModelIds(context).textModels.has(value)) throw conflict(`Text model "${value}" is no longer active. Ask for a new configuration.`);
+    }
+    decisionVoiceCatalog = await assistantVoiceCatalog(context, currentProfiles, true);
+    validateJevProposal(context, parsed.proposal, currentProfiles, plan, decisionVoiceCatalog);
+  }
   const warnings = [...parsed.warnings];
-  parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context, plan, profiles: currentProfiles, focusEpisode: null, voiceIds: (await plannerVoiceOptions(context, currentProfiles)).voiceIds }, warnings);
+  const applyVoices = (await plannerVoiceOptions(context, currentProfiles)).voiceIds;
+  if (decisionVoiceCatalog) for (const voices of decisionVoiceCatalog.values()) for (const voice of voices) applyVoices.add(voice.id);
+  parsed.proposal = await sanitizePlannerProposal(parsed.proposal, { context, plan, profiles: currentProfiles, profileSources, focusEpisode: null, voiceIds: applyVoices }, warnings);
+  if (parsed.decisionReceipt && parsed.decisionReceipt.proposalHash !== clipCacheKey(parsed.proposal)) throw conflict("The proposal no longer matches its configuration decisions. Ask for a new proposal.");
   const result = { appliedType: "", appliedId: "", plan, profiles: null, episode: null, warnings, nextStep: parsed.nextStep };
   const rollbacks = [];
 
@@ -4189,7 +4853,7 @@ async function applyPlannerChatProposal(req, res, context) {
     result.plan = normalizePlanInput({ ...plan, ...parsed.proposal.planPatch, episodes: plan.episodes }, plan);
     await validatePlanReferences(context, result.plan);
     await savePlan(context.paths, result.plan);
-    rollbacks.push(() => savePlan(context.paths, plan));
+    rollbacks.push(() => savePlan(context.paths, plan, { restore: true }));
     result.appliedType = "plan";
     } else if (parsed.proposal.speakerProfile || parsed.proposal.episodeFormat) {
     const nextProfiles = structuredClone(currentProfiles);
@@ -4254,7 +4918,7 @@ async function applyPlannerChatProposal(req, res, context) {
     rollbacks.push(() => writeJsonAtomic(context.paths.profiles, currentProfiles));
     if (result.plan.updatedAt !== plan.updatedAt || result.plan.speakerProfileId !== plan.speakerProfileId || result.plan.episodeFormatId !== plan.episodeFormatId) {
       await savePlan(context.paths, result.plan);
-      rollbacks.push(() => savePlan(context.paths, plan));
+      rollbacks.push(() => savePlan(context.paths, plan, { restore: true }));
     }
     result.profiles = nextProfiles;
     const relevantEpisodeProfiles = new Set([result.plan.episodeFormatId, ...result.plan.episodes.map((item) => item.episodeProfileId)].filter(Boolean));
@@ -4292,7 +4956,7 @@ async function applyPlannerChatProposal(req, res, context) {
     next.updatedAt = new Date().toISOString();
     await validatePlanReferences(context, next);
     await savePlan(context.paths, next);
-    rollbacks.push(() => savePlan(context.paths, plan));
+    rollbacks.push(() => savePlan(context.paths, plan, { restore: true }));
     result.plan = next;
   } else if (parsed.proposal.episodePatch) {
     const proposal = parsed.proposal.episodePatch;
@@ -4319,6 +4983,9 @@ async function applyPlannerChatProposal(req, res, context) {
     throw error;
   }
   sendJson(res, 200, result);
+  } finally {
+    context.chatBusy.delete(threadId);
+  }
 }
 
 async function deleteChatThread(req, res, context) {
@@ -4334,20 +5001,40 @@ async function deleteChatThread(req, res, context) {
 
 function repairProposalSpeakerNames(speakers, currentSpeakers) {
   const names = speakers.map((speaker) => typeof speaker?.name === "string" ? oneLine(speaker.name) : "");
-  const counts = names.reduce((result, name) => result.set(name.toLowerCase(), (result.get(name.toLowerCase()) || 0) + 1), new Map());
+  const counts = names.reduce((result, name) => result.set(name, (result.get(name) || 0) + 1), new Map());
   const currentNames = currentSpeakers.map((speaker) => oneLine(speaker.name));
   const used = new Set();
   return speakers.map((speaker, index) => {
     const currentName = currentNames[index] || "";
     let name = names[index];
-    const key = name.toLowerCase();
-    if (!name || counts.get(key) > 1 || (/^speaker\s+\d+$/i.test(name) && currentName && !/^speaker\s+\d+$/i.test(currentName))) name = currentName;
-    if (!name || used.has(name.toLowerCase())) name = currentNames.find((candidate) => candidate && !used.has(candidate.toLowerCase())) || `Speaker ${index + 1}`;
+    if (!name || counts.get(name) > 1 || (/^speaker\s+\d+$/i.test(name) && currentName && !/^speaker\s+\d+$/i.test(currentName))) name = currentName;
+    if (!name || used.has(name)) name = currentNames.find((candidate) => candidate && !used.has(candidate)) || `Speaker ${index + 1}`;
     let fallbackNumber = index + 1;
-    while (used.has(name.toLowerCase())) name = `Speaker ${fallbackNumber++}`;
-    used.add(name.toLowerCase());
+    while (used.has(name)) name = `Speaker ${fallbackNumber++}`;
+    used.add(name);
     return { ...speaker, name };
   });
+}
+
+function existingProposalSpeaker(speakers, proposed, index) {
+  const name = typeof proposed?.name === "string" ? oneLine(proposed.name) : "";
+  const exact = speakers.find((speaker) => name && oneLine(speaker.name) === name);
+  if (exact) return exact;
+  const matches = speakers.filter((speaker) => name && oneLine(speaker.name).toLowerCase() === name.toLowerCase());
+  return (matches.length === 1 ? matches[0] : null) || speakers[index] || speakers[0];
+}
+
+function assertProposalSpeakerMapping(current, proposed) {
+  const names = proposed.map((speaker) => oneLine(speaker?.name || ""));
+  const adding = proposed.length > current.length && current.every((speaker) => names.includes(oneLine(speaker.name)));
+  const used = new Set();
+  for (const [index, speaker] of proposed.entries()) {
+    const base = existingProposalSpeaker(current, speaker, index);
+    const matchingName = oneLine(base?.name || "").toLowerCase() === names[index].toLowerCase();
+    if (!matchingName && (adding || index >= current.length)) continue;
+    if (used.has(base)) throw badRequest("The host renames reuse an existing name and have an ambiguous source. Rename one host at a time, or use distinct new names, then request a new proposal.");
+    used.add(base);
+  }
 }
 
 function sanitizeProposalSpeaker(proposal, current, voiceIds, ttsModels, warnings = []) {
@@ -4355,18 +5042,18 @@ function sanitizeProposalSpeaker(proposal, current, voiceIds, ttsModels, warning
   for (const key of ["name", "description", "instructions"]) {
     if (typeof proposal[key] === "string") safe[key] = proposal[key];
   }
-  const voiceModel = assistantChoice(proposal.voiceModel, ttsModels, "Default TTS model", warnings);
+  const voiceModel = assistantChoice(proposal.voiceModel, ttsModels, "Default TTS model", warnings, current.voiceModel);
   if (voiceModel !== undefined) safe.voiceModel = voiceModel;
   if (Array.isArray(proposal.speakers)) {
     safe.speakers = proposal.speakers.map((sp, i) => {
-      const base = current.speakers[i] || current.speakers[0];
+      const base = existingProposalSpeaker(current.speakers, sp, i);
       const merged = { ...base };
       for (const field of ["name", "backstory", "personality", "style", "accent"]) {
         if (typeof sp[field] === "string") merged[field] = sp[field];
       }
       const voiceId = assistantChoice(sp.voiceId, voiceIds, `${merged.name || `Speaker ${i + 1}`} voice`, warnings);
       if (voiceId !== undefined) merged.voiceId = voiceId;
-      const override = assistantChoice(sp.ttsModelOverride, ttsModels, `${merged.name || `Speaker ${i + 1}`} TTS model`, warnings);
+      const override = assistantChoice(sp.ttsModelOverride, ttsModels, `${merged.name || `Speaker ${i + 1}`} TTS model`, warnings, base.ttsModelOverride);
       if (override !== undefined) merged.ttsModelOverride = override;
       const numericFields = {
         chatterboxExaggeration: [0.25, 2], chatterboxCfgWeight: [0, 1], chatterboxTemperature: [0.05, 5],
@@ -4404,7 +5091,7 @@ export function sanitizeProposalEpisode(proposal, current, options = {}) {
   if (safe.targetMinutes != null) safe.numSegments = derivedNumSegments(safe.targetMinutes);
   delete safe.defaultBriefing;
   for (const key of ["outlineModel", "transcriptModel"]) {
-    if (typeof proposal[key] === "string") safe[key] = models ? assistantChoice(proposal[key], models.textModels, key === "outlineModel" ? "Outline model" : "Transcript model", warnings) : proposal[key];
+    if (typeof proposal[key] === "string") safe[key] = models ? assistantChoice(proposal[key], models.textModels, key === "outlineModel" ? "Outline model" : "Transcript model", warnings, current[key]) : proposal[key];
   }
   for (const key of ["outlineEffort", "transcriptEffort"]) {
     if (typeof proposal[key] === "string") safe[key] = normalizeEffort(proposal[key]);

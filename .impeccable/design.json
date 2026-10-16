@@ -1,100 +1,176 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-11T21:43:38Z",
+  "generatedAt": "2026-10-10T05:44:47.589Z",
   "title": "Design System: pod-god",
   "extensions": {
     "colorMeta": {
-      "studio-black": {
+      "bg": {
         "role": "neutral",
-        "displayName": "Studio Black",
-        "canonical": "#000000",
-        "tonalRamp": ["#000000", "#111111", "#292929", "#474747", "#696969", "#919191", "#BFBFBF", "#F2F2F2"]
+        "displayName": "Graphite Canvas",
+        "canonical": "#1E1E1D",
+        "tonalRamp": ["oklch(15.00% 0.00188 106.54)", "oklch(26.43% 0.00188 106.54)", "oklch(37.86% 0.00188 106.54)", "oklch(49.29% 0.00188 106.54)", "oklch(60.71% 0.00188 106.54)", "oklch(72.14% 0.00188 106.54)", "oklch(83.57% 0.00188 106.54)", "oklch(95.00% 0.00188 106.54)"]
       },
-      "rail-black": {
+      "surface": {
         "role": "neutral",
-        "displayName": "Rail Black",
-        "canonical": "#080808",
-        "tonalRamp": ["#080808", "#181818", "#303030", "#4D4D4D", "#6F6F6F", "#969696", "#C2C2C2", "#F3F3F3"]
+        "displayName": "Graphite Surface",
+        "canonical": "#282725",
+        "tonalRamp": ["oklch(15.00% 0.00392 84.58)", "oklch(26.43% 0.00392 84.58)", "oklch(37.86% 0.00392 84.58)", "oklch(49.29% 0.00392 84.58)", "oklch(60.71% 0.00392 84.58)", "oklch(72.14% 0.00392 84.58)", "oklch(83.57% 0.00392 84.58)", "oklch(95.00% 0.00392 84.58)"]
       },
-      "canvas-black": {
+      "field": {
         "role": "neutral",
-        "displayName": "Canvas Black",
-        "canonical": "#0C0C0C",
-        "tonalRamp": ["#0C0C0C", "#1C1C1C", "#343434", "#515151", "#737373", "#999999", "#C5C5C5", "#F4F4F4"]
+        "displayName": "Inset Graphite",
+        "canonical": "#191918",
+        "tonalRamp": ["oklch(15.00% 0.00193 106.56)", "oklch(26.43% 0.00193 106.56)", "oklch(37.86% 0.00193 106.56)", "oklch(49.29% 0.00193 106.56)", "oklch(60.71% 0.00193 106.56)", "oklch(72.14% 0.00193 106.56)", "oklch(83.57% 0.00193 106.56)", "oklch(95.00% 0.00193 106.56)"]
       },
-      "control-black": {
+      "interaction": {
         "role": "neutral",
-        "displayName": "Control Black",
-        "canonical": "#161616",
-        "tonalRamp": ["#161616", "#252525", "#3C3C3C", "#595959", "#7A7A7A", "#A0A0A0", "#CACACA", "#F5F5F5"]
+        "displayName": "Warm Interaction",
+        "canonical": "#37332A",
+        "tonalRamp": ["oklch(15.00% 0.01639 86.89)", "oklch(26.43% 0.01639 86.89)", "oklch(37.86% 0.01639 86.89)", "oklch(49.29% 0.01639 86.89)", "oklch(60.71% 0.01639 86.89)", "oklch(72.14% 0.01639 86.89)", "oklch(83.57% 0.01639 86.89)", "oklch(95.00% 0.01639 86.89)"]
       },
-      "warm-white": {
+      "text": {
         "role": "neutral",
-        "displayName": "Warm White",
-        "canonical": "#FFFFFF",
-        "tonalRamp": ["#242424", "#414141", "#606060", "#818181", "#A3A3A3", "#C6C6C6", "#E2E2E2", "#FFFFFF"]
+        "displayName": "Warm Content",
+        "canonical": "#E6E2D8",
+        "tonalRamp": ["oklch(15.00% 0.01411 88.69)", "oklch(26.43% 0.01411 88.69)", "oklch(37.86% 0.01411 88.69)", "oklch(49.29% 0.01411 88.69)", "oklch(60.71% 0.01411 88.69)", "oklch(72.14% 0.01411 88.69)", "oklch(83.57% 0.01411 88.69)", "oklch(95.00% 0.01411 88.69)"]
       },
-      "quiet-gray": {
+      "muted": {
         "role": "neutral",
-        "displayName": "Quiet Gray",
-        "canonical": "#9A9A9A",
-        "tonalRamp": ["#202020", "#373737", "#515151", "#6E6E6E", "#8E8E8E", "#AFAFAF", "#D1D1D1", "#F2F2F2"]
+        "displayName": "Quiet Text",
+        "canonical": "#B6AFA1",
+        "tonalRamp": ["oklch(15.00% 0.02117 84.59)", "oklch(26.43% 0.02117 84.59)", "oklch(37.86% 0.02117 84.59)", "oklch(49.29% 0.02117 84.59)", "oklch(60.71% 0.02117 84.59)", "oklch(72.14% 0.02117 84.59)", "oklch(83.57% 0.02117 84.59)", "oklch(95.00% 0.02117 84.59)"]
       },
-      "disabled-gray": {
+      "disabled": {
         "role": "neutral",
-        "displayName": "Disabled Gray",
-        "canonical": "#565656",
-        "tonalRamp": ["#181818", "#2B2B2B", "#424242", "#5E5E5E", "#7E7E7E", "#A2A2A2", "#CBCBCB", "#F2F2F2"]
+        "displayName": "Disabled Text",
+        "canonical": "#B6AFA1",
+        "tonalRamp": ["oklch(15.00% 0.02117 84.59)", "oklch(26.43% 0.02117 84.59)", "oklch(37.86% 0.02117 84.59)", "oklch(49.29% 0.02117 84.59)", "oklch(60.71% 0.02117 84.59)", "oklch(72.14% 0.02117 84.59)", "oklch(83.57% 0.02117 84.59)", "oklch(95.00% 0.02117 84.59)"]
       },
-      "signal-amber": {
+      "border": {
+        "role": "neutral",
+        "displayName": "Decorative Seam",
+        "canonical": "#444036",
+        "tonalRamp": ["oklch(15.00% 0.01740 88.80)", "oklch(26.43% 0.01740 88.80)", "oklch(37.86% 0.01740 88.80)", "oklch(49.29% 0.01740 88.80)", "oklch(60.71% 0.01740 88.80)", "oklch(72.14% 0.01740 88.80)", "oklch(83.57% 0.01740 88.80)", "oklch(95.00% 0.01740 88.80)"]
+      },
+      "control": {
+        "role": "neutral",
+        "displayName": "Control Edge",
+        "canonical": "#8E8470",
+        "tonalRamp": ["oklch(15.00% 0.03147 84.56)", "oklch(26.43% 0.03147 84.56)", "oklch(37.86% 0.03147 84.56)", "oklch(49.29% 0.03147 84.56)", "oklch(60.71% 0.03147 84.56)", "oklch(72.14% 0.03147 84.56)", "oklch(83.57% 0.03147 84.56)", "oklch(95.00% 0.03147 84.56)"]
+      },
+      "reference": {
         "role": "primary",
-        "displayName": "Signal Amber",
-        "canonical": "#FFB900",
-        "tonalRamp": ["#2B1D00", "#493200", "#694900", "#8C6300", "#B17F00", "#D99D00", "#FFBE24", "#FFE9B0"]
+        "displayName": "Honey Reference",
+        "canonical": "#CBAA60",
+        "tonalRamp": ["oklch(15.00% 0.10086 85.92)", "oklch(26.43% 0.10086 85.92)", "oklch(37.86% 0.10086 85.92)", "oklch(49.29% 0.10086 85.92)", "oklch(60.71% 0.10086 85.92)", "oklch(72.14% 0.10086 85.92)", "oklch(83.57% 0.10086 85.92)", "oklch(95.00% 0.10086 85.92)"]
       },
-      "complete-green": {
-        "role": "secondary",
-        "displayName": "Complete Green",
-        "canonical": "#35C46A",
-        "tonalRamp": ["#072A13", "#0B4620", "#12632F", "#1B8240", "#25A353", "#35C46A", "#75DE9A", "#CEF6DC"]
+      "accent": {
+        "role": "primary",
+        "displayName": "Honey Action",
+        "canonical": "#CBAA60",
+        "tonalRamp": ["oklch(15.00% 0.10086 85.92)", "oklch(26.43% 0.10086 85.92)", "oklch(37.86% 0.10086 85.92)", "oklch(49.29% 0.10086 85.92)", "oklch(60.71% 0.10086 85.92)", "oklch(72.14% 0.10086 85.92)", "oklch(83.57% 0.10086 85.92)", "oklch(95.00% 0.10086 85.92)"]
       },
-      "failure-red": {
-        "role": "secondary",
-        "displayName": "Failure Red",
-        "canonical": "#EF5B5B",
-        "tonalRamp": ["#350909", "#5A1111", "#7F1C1C", "#A52B2B", "#CA4040", "#EF5B5B", "#F79090", "#FFD7D7"]
+      "error": {
+        "role": "primary",
+        "displayName": "Honey Error",
+        "canonical": "#CBAA60",
+        "tonalRamp": ["oklch(15.00% 0.10086 85.92)", "oklch(26.43% 0.10086 85.92)", "oklch(37.86% 0.10086 85.92)", "oklch(49.29% 0.10086 85.92)", "oklch(60.71% 0.10086 85.92)", "oklch(72.14% 0.10086 85.92)", "oklch(83.57% 0.10086 85.92)", "oklch(95.00% 0.10086 85.92)"]
       },
-      "quiet-seam": {
+      "success": {
+        "role": "primary",
+        "displayName": "Honey Success",
+        "canonical": "#CBAA60",
+        "tonalRamp": ["oklch(15.00% 0.10086 85.92)", "oklch(26.43% 0.10086 85.92)", "oklch(37.86% 0.10086 85.92)", "oklch(49.29% 0.10086 85.92)", "oklch(60.71% 0.10086 85.92)", "oklch(72.14% 0.10086 85.92)", "oklch(83.57% 0.10086 85.92)", "oklch(95.00% 0.10086 85.92)"]
+      },
+      "selection": {
+        "role": "primary",
+        "displayName": "Character Selection",
+        "canonical": "#CBAA60",
+        "tonalRamp": ["oklch(15.00% 0.10086 85.92)", "oklch(26.43% 0.10086 85.92)", "oklch(37.86% 0.10086 85.92)", "oklch(49.29% 0.10086 85.92)", "oklch(60.71% 0.10086 85.92)", "oklch(72.14% 0.10086 85.92)", "oklch(83.57% 0.10086 85.92)", "oklch(95.00% 0.10086 85.92)"]
+      },
+      "selection-ink": {
         "role": "neutral",
-        "displayName": "Quiet Seam",
-        "canonical": "#242424",
-        "tonalRamp": ["#111111", "#242424", "#3A3A3A", "#555555", "#747474", "#969696", "#BEBEBE", "#EEEEEE"]
+        "displayName": "Selection Ink",
+        "canonical": "#191918",
+        "tonalRamp": ["oklch(15.00% 0.00193 106.56)", "oklch(26.43% 0.00193 106.56)", "oklch(37.86% 0.00193 106.56)", "oklch(49.29% 0.00193 106.56)", "oklch(60.71% 0.00193 106.56)", "oklch(72.14% 0.00193 106.56)", "oklch(83.57% 0.00193 106.56)", "oklch(95.00% 0.00193 106.56)"]
       },
-      "strong-seam": {
+      "action-ink": {
         "role": "neutral",
-        "displayName": "Strong Seam",
-        "canonical": "#414141",
-        "tonalRamp": ["#161616", "#2A2A2A", "#414141", "#5C5C5C", "#7B7B7B", "#9D9D9D", "#C5C5C5", "#F0F0F0"]
+        "displayName": "Action Ink",
+        "canonical": "#191918",
+        "tonalRamp": ["oklch(15.00% 0.00193 106.56)", "oklch(26.43% 0.00193 106.56)", "oklch(37.86% 0.00193 106.56)", "oklch(49.29% 0.00193 106.56)", "oklch(60.71% 0.00193 106.56)", "oklch(72.14% 0.00193 106.56)", "oklch(83.57% 0.00193 106.56)", "oklch(95.00% 0.00193 106.56)"]
       }
     },
     "typographyMeta": {
-      "display": { "displayName": "Conversation Display", "purpose": "Conversation leads and rare completion moments." },
-      "title": { "displayName": "Surface Title", "purpose": "Drawer and production-view headings." },
-      "body": { "displayName": "Interface Body", "purpose": "Controls, guidance, and conversation content." },
-      "label": { "displayName": "Instrument Label", "purpose": "Status, eyebrows, and compact operational metadata." }
+      "display": {
+        "displayName": "Conversation Display",
+        "purpose": "Existing conversation leads and completion moments."
+      },
+      "title": {
+        "displayName": "Surface Title",
+        "purpose": "Drawer and production-view headings."
+      },
+      "body": {
+        "displayName": "Interface Body",
+        "purpose": "Controls, guidance, and conversation content."
+      },
+      "label": {
+        "displayName": "Instrument Label",
+        "purpose": "Status and compact operational metadata."
+      }
     },
     "shadows": [
-      { "name": "overlay", "value": "-24px 0 60px rgba(0, 0, 0, .72)", "purpose": "Separate a temporary side overlay from the workspace." },
-      { "name": "transient-notice", "value": "0 8px 28px rgba(0, 0, 0, .55)", "purpose": "Lift a toast above active content." }
+      {
+        "name": "overlay",
+        "value": "-24px 0 60px color-mix(in srgb, var(--field) 72%, transparent)",
+        "purpose": "Separate the temporary activity overlay from the workspace."
+      },
+      {
+        "name": "transient-notice",
+        "value": "0 8px 28px color-mix(in srgb, var(--field) 72%, transparent)",
+        "purpose": "Separate a toast from active content."
+      }
     ],
     "motion": [
-      { "name": "drawer-enter", "value": ".2s cubic-bezier(.16, 1, .3, 1)", "purpose": "Explain a contextual drawer entering from the right." },
-      { "name": "control-transition", "value": ".18s ease", "purpose": "Short fold and disclosure state changes." },
-      { "name": "reduced-motion", "value": ".01ms", "purpose": "Effectively instant animation when reduced motion is requested." }
+      {
+        "name": "control-feedback",
+        "value": "120ms cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Neutral hover fill and one-pixel press feedback; primary fill and ink change immediately."
+      },
+      {
+        "name": "control-change",
+        "value": "180ms cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Existing fold and disclosure state changes."
+      },
+      {
+        "name": "menu-enter",
+        "value": "180ms cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Existing toast and mobile progress-track entrances."
+      },
+      {
+        "name": "panel-enter",
+        "value": "240ms cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Existing contextual drawer and activity entrances."
+      },
+      {
+        "name": "reduced-motion",
+        "value": ".01ms",
+        "purpose": "Existing effectively instant animation and transition behavior."
+      }
     ],
     "breakpoints": [
-      { "name": "stacked-workspace", "value": "1024px" },
-      { "name": "mobile-modes", "value": "820px" }
+      {
+        "name": "fixed-drawer",
+        "value": "1200px"
+      },
+      {
+        "name": "stacked-workspace",
+        "value": "1024px"
+      },
+      {
+        "name": "mobile-modes",
+        "value": "820px"
+      }
     ]
   },
   "components": [
@@ -102,77 +178,115 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The single next or committing action in a local context.",
+      "description": "Small gold action with dark ink and an immediate dark hover state.",
       "html": "<button class=\"ds-btn-primary\">CONTINUE</button>",
-      "css": ".ds-btn-primary { min-height: 40px; padding: 6px 16px; color: var(--text-on-accent, #000); background: var(--accent, #FFB900); border: 1px solid var(--accent, #FFB900); border-radius: 2px; font: 700 14px/1.45 system-ui, sans-serif; cursor: pointer; } .ds-btn-primary:hover { background: #CC9500; border-color: #CC9500; } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #FFB900); outline-offset: 2px; }"
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 2px; font: 700 15px/1.45 system-ui, sans-serif; letter-spacing: -.01em; cursor: pointer; min-height: 40px; padding: 6px 16px; color: var(--action-ink, #191918); background: var(--accent, #CBAA60); border: 1px solid var(--accent, #CBAA60); transition: transform var(--motion-fast, 120ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)); } .ds-btn-primary:hover:not(:disabled) { color: var(--text, #E6E2D8); background: var(--interaction, #37332A); border-color: var(--accent, #CBAA60); } .ds-btn-primary:active:not(:disabled) { transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #CBAA60); outline-offset: 2px; } .ds-btn-primary:disabled { color: var(--disabled, #B6AFA1); background: var(--surface, #282725); border-color: var(--border, #444036); opacity: 1; cursor: not-allowed; transition: none; } @media (prefers-reduced-motion: reduce) { .ds-btn-primary { transition-duration: .01ms; } }"
     },
     {
       "name": "Neutral Button",
       "kind": "button",
       "refersTo": "button-neutral",
-      "description": "A tactile secondary action on a control-black face.",
+      "description": "Dark secondary action with a clear control edge.",
       "html": "<button class=\"ds-btn-neutral\">EDIT</button>",
-      "css": ".ds-btn-neutral { min-height: 38px; padding: 6px 11px; color: var(--text, #FFF); background: var(--surface-3, #161616); border: 1px solid var(--line-strong, #414141); border-radius: 2px; font: 700 14px/1.45 system-ui, sans-serif; cursor: pointer; } .ds-btn-neutral:hover { color: #000; background: var(--accent, #FFB900); border-color: var(--accent, #FFB900); } .ds-btn-neutral:focus-visible { outline: 2px solid var(--accent, #FFB900); outline-offset: 2px; }"
+      "css": ".ds-btn-neutral { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 2px; font: 700 15px/1.45 system-ui, sans-serif; letter-spacing: -.01em; cursor: pointer; min-height: 38px; padding: 6px 11px; color: var(--text, #E6E2D8); background: var(--surface, #282725); border: 1px solid var(--control, #8E8470); transition: background-color var(--motion-fast, 120ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)), transform var(--motion-fast, 120ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)); } .ds-btn-neutral:hover:not(:disabled) { color: var(--text, #E6E2D8); background: var(--interaction, #37332A); border-color: var(--control, #8E8470); } .ds-btn-neutral:active:not(:disabled) { transform: translateY(1px); } .ds-btn-neutral:focus-visible { outline: 2px solid var(--accent, #CBAA60); outline-offset: 2px; } .ds-btn-neutral:disabled { color: var(--disabled, #B6AFA1); background: var(--surface, #282725); border-color: var(--border, #444036); opacity: 1; cursor: not-allowed; transition: none; } @media (prefers-reduced-motion: reduce) { .ds-btn-neutral { transition-duration: .01ms; } }"
     },
     {
       "name": "Danger Button",
       "kind": "button",
       "refersTo": "button-danger",
-      "description": "A destructive action held in a dark red face until hover.",
+      "description": "Destructive action with a label and dashed gold edge, not a red fill.",
       "html": "<button class=\"ds-btn-danger\">DELETE</button>",
-      "css": ".ds-btn-danger { min-height: 38px; padding: 6px 11px; color: #FFF; background: #220B0B; border: 1px solid #8F3434; border-radius: 2px; font: 700 14px/1.45 system-ui, sans-serif; cursor: pointer; } .ds-btn-danger:hover { background: #7A1F1F; border-color: #B53C3C; } .ds-btn-danger:focus-visible { outline: 2px solid var(--accent, #FFB900); outline-offset: 2px; }"
+      "css": ".ds-btn-danger { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 2px; font: 700 15px/1.45 system-ui, sans-serif; letter-spacing: -.01em; cursor: pointer; min-height: 38px; padding: 6px 11px; color: var(--text, #E6E2D8); background: var(--surface, #282725); border: 1px dashed var(--error, #CBAA60); transition: background-color var(--motion-fast, 120ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)), transform var(--motion-fast, 120ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)); } .ds-btn-danger:hover:not(:disabled) { color: var(--text, #E6E2D8); background: var(--interaction, #37332A); border-color: var(--error, #CBAA60); } .ds-btn-danger:active:not(:disabled) { transform: translateY(1px); } .ds-btn-danger:focus-visible { outline: 2px solid var(--accent, #CBAA60); outline-offset: 2px; } .ds-btn-danger:disabled { color: var(--disabled, #B6AFA1); background: var(--surface, #282725); border-color: var(--border, #444036); opacity: 1; cursor: not-allowed; transition: none; } @media (prefers-reduced-motion: reduce) { .ds-btn-danger { transition-duration: .01ms; } }"
     },
     {
       "name": "Text Field",
       "kind": "input",
       "refersTo": "field",
-      "description": "An inset dark field with a strong seam and visible amber focus.",
-      "html": "<label class=\"ds-field-label\">EPISODE NAME<input class=\"ds-field\" value=\"A Different Beast\"></label>",
-      "css": ".ds-field-label { display: grid; gap: 4px; color: var(--muted, #9A9A9A); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; } .ds-field { min-height: 38px; padding: 6px 9px; color: var(--text, #FFF); background: var(--surface-1, #080808); border: 1px solid var(--line-strong, #414141); border-radius: 2px; font: 14px/1.45 system-ui, sans-serif; } .ds-field:focus-visible { outline: 2px solid var(--accent, #FFB900); outline-offset: 2px; }"
+      "description": "Inset field with full-opacity placeholder text and a separate focus outline.",
+      "html": "<label class=\"ds-field-label\">Episode name<input class=\"ds-field\" placeholder=\"Episode name\"></label>",
+      "css": ".ds-field-label { display: grid; gap: 4px; color: var(--text, #E6E2D8); font: 650 15px/1.45 system-ui, sans-serif; letter-spacing: -.01em; } .ds-field { width: 100%; min-height: 38px; padding: 6px 9px; color: var(--text, #E6E2D8); background: var(--field, #191918); border: 1px solid var(--control, #8E8470); border-radius: 2px; font: 15px/1.45 system-ui, sans-serif; } .ds-field::placeholder { color: var(--muted, #B6AFA1); opacity: 1; } .ds-field[readonly] { color: var(--text, #E6E2D8); } .ds-field[aria-invalid=\"true\"] { border-color: var(--error, #CBAA60); border-style: dashed; } .ds-field:focus-visible { outline: 2px solid var(--accent, #CBAA60); outline-offset: 2px; } .ds-field:disabled { color: var(--disabled, #B6AFA1); background: var(--surface, #282725); border-color: var(--border, #444036); opacity: 1; cursor: not-allowed; transition: none; } .ds-field::selection { color: var(--selection-ink, #191918); background: var(--selection, #CBAA60); }"
     },
     {
       "name": "Mode Navigation Item",
       "kind": "nav",
-      "description": "A quiet icon-and-label mode control with a scarce amber selected state.",
+      "description": "Icon-and-label mode with a dark selected fill and gold edge.",
       "html": "<button class=\"ds-mode active\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M22 17a2 2 0 0 1-2 2H7l-5 3V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z\"/></svg><span>Chat</span></button>",
-      "css": ".ds-mode { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-width: 96px; min-height: 62px; padding: 8px 5px; color: var(--muted, #9A9A9A); background: transparent; border: 1px solid transparent; border-radius: 2px; font: 700 10px/1.2 system-ui, sans-serif; } .ds-mode svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2; } .ds-mode:hover { color: var(--text, #FFF); background: #151515; border-color: var(--line-strong, #414141); } .ds-mode.active { color: var(--accent, #FFB900); background: #15120A; border-color: #4D3900; } .ds-mode:focus-visible { outline: 2px solid var(--accent, #FFB900); outline-offset: 2px; }"
+      "css": ".ds-mode { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-width: 96px; min-height: 62px; padding: 8px 5px; color: var(--muted, #B6AFA1); background: transparent; border: 1px solid transparent; border-radius: 2px; font: 700 10px/1.45 system-ui, sans-serif; letter-spacing: .02em; cursor: pointer; transition: background-color var(--motion-fast, 120ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)), transform var(--motion-fast, 120ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)); } .ds-mode svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-mode.active { color: var(--text, #E6E2D8); background: var(--interaction, #37332A); border-color: var(--accent, #CBAA60); } .ds-mode:hover:not(:disabled) { color: var(--text, #E6E2D8); background: var(--interaction, #37332A); border-color: var(--control, #8E8470); } .ds-mode:active:not(:disabled) { transform: translateY(1px); } .ds-mode:focus-visible { outline: 2px solid var(--accent, #CBAA60); outline-offset: 2px; } .ds-mode:disabled { color: var(--disabled, #B6AFA1); background: var(--surface, #282725); border-color: var(--border, #444036); opacity: 1; cursor: not-allowed; transition: none; } @media (prefers-reduced-motion: reduce) { .ds-mode { transition-duration: .01ms; } }"
     },
     {
       "name": "Ready Status",
       "kind": "chip",
-      "description": "A compact operational status using mono type and semantic green.",
-      "html": "<span class=\"ds-status\"><span aria-hidden=\"true\"></span>READY</span>",
-      "css": ".ds-status { display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px; color: var(--success, #35C46A); background: var(--surface-1, #080808); border: 1px solid var(--success, #35C46A); border-radius: 2px; font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .08em; } .ds-status span { width: 7px; height: 7px; border-radius: 50%; background: var(--success, #35C46A); }"
+      "description": "Ready text and a checkmark retain meaning with the shared gold state color.",
+      "html": "<span class=\"ds-status\">Ready</span>",
+      "css": ".ds-status { display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px; color: var(--success, #CBAA60); background: var(--surface, #282725); border: 1px solid var(--success, #CBAA60); border-radius: 2px; font: 12px/1.45 system-ui, sans-serif; letter-spacing: -.01em; } .ds-status::before { content: \"\"; width: 9px; height: 5px; border: solid currentColor; border-width: 0 0 2px 2px; transform: rotate(-45deg); }"
+    },
+    {
+      "name": "Connection Disclosure",
+      "kind": "card",
+      "description": "Native disclosure on a flat dark surface with a control edge.",
+      "html": "<details class=\"ds-connection\"><summary><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"/></svg>Provider details</summary><div class=\"ds-connection-body\">Connection settings</div></details>",
+      "css": ".ds-connection { margin-top: 8px; color: var(--text, #E6E2D8); background: var(--surface, #282725); border: 1px solid var(--control, #8E8470); font: 15px/1.45 system-ui, sans-serif; letter-spacing: -.01em; } .ds-connection > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; list-style: none; cursor: pointer; } .ds-connection > summary::-webkit-details-marker { display: none; } .ds-connection > summary svg { width: 20px; height: 20px; fill: none; stroke: var(--accent, #CBAA60); stroke-width: 2; transition: transform var(--motion-control, 180ms) var(--motion-ease, cubic-bezier(.16, 1, .3, 1)); } .ds-connection[open] > summary svg { transform: rotate(90deg); } .ds-connection > summary:hover { background: var(--interaction, #37332A); } .ds-connection > summary:focus-visible { outline: 2px solid var(--accent, #CBAA60); outline-offset: 2px; } .ds-connection-body { padding: 0 12px 12px; } @media (prefers-reduced-motion: reduce) { .ds-connection > summary svg { transition-duration: .01ms; } }"
     }
   ],
   "narrative": {
     "northStar": "Conversation is the Studio",
-    "overview": "pod-god feels like a precise production instrument rather than a generic dashboard. Matte near-black planes join into one workspace; warm white type carries the content; amber, green, and red behave like scarce hardware signals. The hierarchy is confident and spacious around the conversation, then compact and exact inside production controls.\n\nInteraction keeps the creator oriented. Conversation remains the primary canvas, production tools appear contextually, progress is explicit, and advanced infrastructure stays behind disclosure until needed. Motion is brief and functional: it explains a drawer, fold, loading state, or next action, and respects reduced-motion preferences.",
+    "overview": "pod-god uses the user-selected Honey Graphite profile. Dark graphite surfaces form one workspace. Warm content text and small honey-gold cues retain the existing conversation-led hierarchy. Production controls stay compact.\n\nConversation remains the primary work surface. Production tools open in context, progress is explicit, and advanced controls stay behind disclosure. The theme changes owned UI colors, not layout, fonts, data, or actions. Existing motion owners and reduced-motion behavior remain in place.\n\nSource: [Honey Graphite Style Guide](https://github.com/Jamir-boop/amber-black/blob/main/style-guides/honey-graphite.md), option 02, with source color targets dated 2026-10-09. Its written token specification is normative; the generated reference image is approximate. This record reflects the implementation in `public/index.html`. The existing `public/icon.png`, authored content, and browser-owned audio controls are not recolored.",
     "keyCharacteristics": [
-      "Matte, joined planes with quiet seams instead of floating card stacks.",
-      "One dominant amber action or current-state signal per context.",
-      "Large humanist conversation type paired with compact uppercase mono status labels.",
-      "Low-radius tactile controls, native disclosure, and visible keyboard focus.",
-      "Green means completed or ready; red means failed or destructive."
+      "Dark graphite surfaces with quiet decorative seams and clear control edges.",
+      "Small honey-gold actions, references, focus outlines, and state markers.",
+      "Existing system sans content and compact mono status labels.",
+      "Low-radius controls, native disclosure, and visible keyboard focus.",
+      "Words, icon shapes, and boundary patterns identify status; gold alone does not mean success."
     ],
     "rules": [
-      { "name": "Signal Rarity", "body": "Amber identifies the next action or current state; it does not decorate containers.", "section": "colors" },
-      { "name": "Semantic Status", "body": "Green is completion, red is failure or destruction, and neither color substitutes for general emphasis.", "section": "colors" },
-      { "name": "Two-Voice", "body": "Human-facing content uses the system sans; operational state uses mono. Do not introduce a decorative third voice.", "section": "typography" },
-      { "name": "One-Work-Surface", "body": "On narrow screens, show the selected work surface at full useful width; do not squeeze chat and production side by side.", "section": "layout" },
-      { "name": "Flat-by-Default", "body": "If a seam or tonal step can explain the hierarchy, do not add a shadow.", "section": "elevation" },
-      { "name": "Instrument Edge", "body": "Low radii make controls feel machined and precise; large soft cards do not belong in this world.", "section": "shapes" }
+      {
+        "name": "Signal Rarity",
+        "body": "Keep resting surfaces dark and neutral. Use gold in small actions, references, focus outlines, and state markers.",
+        "section": "colors"
+      },
+      {
+        "name": "Semantic Status",
+        "body": "Gold alone does not identify a result. Keep state words and icons; use dashed error edges and dotted warning edges where implemented.",
+        "section": "colors"
+      },
+      {
+        "name": "Boundary Ownership",
+        "body": "Decorative seams use `border`; required control edges use `control`. Keyboard focus has a separate offset gold outline, and error edges remain visible.",
+        "section": "colors"
+      },
+      {
+        "name": "Two-Voice",
+        "body": "Human-facing content uses the system sans; operational state uses mono. Do not introduce a decorative third voice.",
+        "section": "typography"
+      },
+      {
+        "name": "One-Work-Surface",
+        "body": "On narrow screens, show the selected work surface at full useful width; do not squeeze chat and production side by side.",
+        "section": "layout"
+      },
+      {
+        "name": "Flat-by-Default",
+        "body": "If a seam or tonal step can explain the hierarchy, do not add a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "Instrument Edge",
+        "body": "Low radii make controls feel machined and precise; large soft cards do not belong in this world.",
+        "section": "shapes"
+      }
     ],
     "dos": [
       "Do let conversation lead and reveal production controls in context.",
-      "Do use neutral seams and tonal black steps to organize dense work.",
-      "Do reserve amber for the current state, visible focus, and the next meaningful action.",
-      "Do preserve semantic status colors, keyboard operation, native disclosure, and reduced-motion behavior.",
+      "Do use graphite surfaces, decorative seams, and clear control edges to organize dense work.",
+      "Do keep gold cues small and identify status with words, icons, and edge patterns.",
+      "Do preserve keyboard operation, native disclosure, readable disabled text, and reduced-motion behavior.",
       "Do keep generated changes, progress, and completion states explicit and reviewable."
     ],
     "donts": [
       "Don't turn every section into a rounded floating card.",
       "Don't outline every container in amber or use glow as decoration.",
+      "Don't add other accent hues, a light fallback, blanket filters, or forced SVG paint.",
+      "Don't recolor artwork, authored content, or browser-owned audio controls.",
       "Don't invent waveform, progress, collaboration, or publishing data.",
       "Don't hide advanced control permanently; disclose it when relevant.",
       "Don't use motion without a state change to explain."

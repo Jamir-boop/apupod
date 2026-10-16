@@ -6,6 +6,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { runInNewContext, Script } from "node:vm";
 import test from "node:test";
 import {
   clipCacheKey,
@@ -381,6 +382,174 @@ test("ElevenLabs voices and preview use server-side key", { concurrency: false }
     seed: 123,
   });
   assert.doesNotMatch(JSON.stringify(voices), /test-eleven-key/);
+});
+
+test("Eleven v4 discovers capabilities, preserves tags, splits turns, and reuses only effective settings", { concurrency: false }, async (t) => {
+  const oldKey = process.env.ELEVENLABS_API_KEY;
+  process.env.ELEVENLABS_API_KEY = "test-v4-key";
+  t.after(() => {
+    if (oldKey === undefined) delete process.env.ELEVENLABS_API_KEY;
+    else process.env.ELEVENLABS_API_KEY = oldKey;
+  });
+  const requests = [];
+  let maximum = 10_000;
+  let advertiseV4 = true;
+  let failRequest = 0;
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith("/v1/models")) return Response.json([
+      { model_id: "eleven_v4", name: "Eleven v4", can_do_text_to_speech: true, can_use_style: false, can_use_speaker_boost: false, maximum_text_length_per_request: maximum, languages: [{ language_id: "spa", name: "Spanish" }, { language_id: "eng", name: "English" }] },
+      { model_id: "eleven_v4_turbo", name: "Eleven v4 Turbo", can_do_text_to_speech: true },
+      { model_id: "eleven_v3", name: "Eleven v3", can_do_text_to_speech: true },
+    ].filter((model) => advertiseV4 || model.model_id !== "eleven_v4"));
+    if (String(url).includes("/text-to-speech/")) {
+      requests.push(JSON.parse(options.body));
+      assert.equal(options.headers["xi-api-key"], "test-v4-key");
+      if (failRequest === requests.length) return Response.json({ detail: "mock chunk failure" }, { status: 500 });
+      return new Response(silentWav(44_100, 2), { headers: { "Content-Type": "audio/wav" } });
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  const { baseUrl, rootDir } = await startTestServer(t, "podcast-v4-", { fetchImpl });
+  const initial = await (await fetch(`${baseUrl}/api/state`)).json();
+  const oldProfile = structuredClone(initial.profiles.speakerProfiles[0]);
+  const config = initial.config;
+  config.providers.elevenlabs.activeModels = { eleven_v4: { tts: true }, eleven_v4_turbo: { tts: true }, eleven_v3: { tts: true } };
+  let response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
+  const configured = await response.json();
+  assert.equal(response.status, 200, configured.error);
+  const catalog = configured.modelCatalog.providers.elevenlabs;
+  assert.deepEqual(catalog.ttsModels.map((model) => model.id), ["eleven_v4", "eleven_v3"]);
+  const v4 = catalog.ttsModels[0];
+  assert.equal(v4.maximumTextLengthPerRequest, 10_000);
+  assert.equal(v4.canUseStyle, false);
+  assert.equal(v4.canUseSpeakerBoost, false);
+  assert.deepEqual(v4.ttsCapabilities.voiceSettings, ["stability", "similarityBoost"]);
+  assert.deepEqual(v4.languages.map((language) => language.id), ["es", "en"]);
+  assert.match(catalog.discoveredModels.find((model) => model.id === "eleven_v4_turbo").unsupportedReason, /realtime dialogue API/);
+  const unchanged = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles.speakerProfiles[0];
+  assert.deepEqual(unchanged, oldProfile, "discovery must not migrate existing profiles");
+
+  const profiles = initial.profiles;
+  const profile = profiles.speakerProfiles[0];
+  profile.voiceModel = "eleven_v4";
+  profile.speakers = [{ ...profile.speakers[0], voiceId: "voice-v4", elevenlabsStability: 0.6, elevenlabsSimilarityBoost: 0.8, elevenlabsStyle: 0.4, elevenlabsSpeed: 1.1, elevenlabsUseSpeakerBoost: false, elevenlabsSeed: 9, elevenlabsTextNormalization: "off" }];
+  async function saveProfiles() {
+    const saved = await fetch(`${baseUrl}/api/profiles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profiles) });
+    assert.equal(saved.status, 200, await saved.clone().text());
+    await syncProfiles(saved, profiles);
+  }
+  await saveProfiles();
+  response = await fetch(`${baseUrl}/api/transcript-prompt/resolve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episodeProfileId: profiles.episodeProfiles[0].id }) });
+  const prompt = await response.json();
+  assert.match(prompt.lockedPrompt, /eleven_v4/);
+  assert.doesNotMatch(prompt.lockedPrompt, /eleven_v3/);
+  assert.equal(prompt.capabilities[0].cueMode, "tags");
+  const previewBody = { episodeProfileId: profiles.episodeProfiles[0].id, speakerProfileId: profile.id, speakerIndex: 0, text: "[laughs] Hola.", cue: "warm and calm" };
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(previewBody) });
+  assert.equal(response.status, 200, await response.clone().text());
+  const preview = Buffer.from(await response.arrayBuffer());
+  assert.equal(preview.readUInt16LE(22), 1);
+  assert.equal(preview.readUInt32LE(24), 24_000);
+  assert.equal(preview.readUInt16LE(34), 16);
+  assert.deepEqual(requests.at(-1), { text: "[warm and calm] [laughs] Hola.", model_id: "eleven_v4", language_code: "es", voice_settings: { stability: 0.6, similarity_boost: 0.8 }, apply_text_normalization: "off", seed: 9 });
+  const beforeSsml = requests.length;
+  for (const text of ['Hola <break time="0.5s" />.', '<prosody rate="slow">Hola.</prosody>']) {
+    response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...previewBody, text }) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /does not support SSML/);
+  }
+  assert.equal(requests.length, beforeSsml);
+
+  response = await fetch(`${baseUrl}/api/episodes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "V4 chunks", episodeProfileId: profiles.episodeProfiles[0].id }) });
+  const episode = await response.json();
+  const spoken = `[whispers] ${"Una frase clara. ".repeat(680).trim()} [laughs] Fin.`;
+  const transcript = `## Segmento 1\n${profile.speakers[0].name} [calm]: ${spoken}`;
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/transcript`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
+  assert.equal(response.status, 200, await response.clone().text());
+  async function render() {
+    const queued = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, { method: "POST" });
+    assert.equal(queued.status, 202, await queued.clone().text());
+    const { job } = await queued.json();
+    return waitFor(async () => {
+      const jobs = (await (await fetch(`${baseUrl}/api/jobs`)).json()).jobs;
+      return jobs.find((item) => item.id === job.id && ["completed", "failed"].includes(item.status));
+    }, 30_000);
+  }
+  const beforeRender = requests.length;
+  assert.equal((await render()).status, "completed");
+  const turnRequests = requests.slice(beforeRender);
+  assert.equal(turnRequests.length, 2);
+  assert.ok(turnRequests.every((body) => body.text.length <= 10_000 && body.text.startsWith("[calm] ")));
+  assert.equal(turnRequests.map((body) => body.text.slice("[calm] ".length)).join(" "), spoken);
+  const clipsDir = join(rootDir, "data", "episodes", episode.id, "clips");
+  const clips = (await readdir(clipsDir)).filter((name) => /^[a-f0-9]{64}\.wav$/.test(name));
+  assert.equal(clips.length, 1, "split audio must become one cached turn before pauses");
+  assert.ok((await readdir(clipsDir)).every((name) => !/chunk|source|concat|tmp/.test(name)));
+  const normalized = await readFile(join(clipsDir, clips[0]));
+  assert.equal(normalized.readUInt16LE(22), 1);
+  assert.equal(normalized.readUInt32LE(24), 24_000);
+  const { stdout } = await execFileAsync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", join(clipsDir, clips[0])]);
+  assert.ok(Math.abs(Number(stdout.trim()) - 0.02) < 0.005, "chunk combination must not insert inter-turn pauses");
+
+  profiles.speakerProfiles[0].speakers[0].elevenlabsStyle = 0.9;
+  profiles.speakerProfiles[0].speakers[0].elevenlabsSpeed = 0.8;
+  profiles.speakerProfiles[0].speakers[0].elevenlabsUseSpeakerBoost = true;
+  profiles.speakerProfiles[0].speakers[0].accent = "British";
+  profiles.speakerProfiles[0].speakers[0].style = "An ignored TTS voice direction.";
+  await saveProfiles();
+  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/profiles`, { method: "PUT" });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).episode.audioReady, true);
+  const cachedCount = requests.length;
+  assert.equal((await render()).status, "completed");
+  assert.equal(requests.length, cachedCount, "ignored settings must not invalidate v4 cache");
+
+  profiles.speakerProfiles[0].speakers[0].elevenlabsStability = 0.7;
+  await saveProfiles();
+  await fetch(`${baseUrl}/api/episodes/${episode.id}/profiles`, { method: "PUT" });
+  assert.equal((await render()).status, "completed");
+  assert.equal(requests.length, cachedCount + 2, "supported settings must invalidate cache");
+  const audioPath = join(rootDir, "data", "episodes", episode.id, "episode.mp3");
+  const previousAudio = await readFile(audioPath);
+  for (const name of (await readdir(clipsDir)).filter((name) => /^[a-f0-9]{64}\.wav$/.test(name))) await rm(join(clipsDir, name));
+  failRequest = requests.length + 2;
+  const failed = await render();
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error, /mock chunk failure/);
+  assert.deepEqual(await readFile(audioPath), previousAudio);
+  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).audioReady, true);
+  assert.ok((await readdir(clipsDir)).every((name) => !/chunk|source|concat|tmp/.test(name)));
+  failRequest = 0;
+
+  maximum = 60;
+  response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
+  assert.equal(response.status, 200);
+  const smallerStart = requests.length;
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...previewBody, text: "[whispers] Uno dos tres cuatro. Cinco seis siete ocho. Nueve diez once doce.", cue: "calm" }) });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.ok(requests.slice(smallerStart).length > 1);
+  assert.ok(requests.slice(smallerStart).every((body) => body.text.length <= maximum));
+  const cjkStart = requests.length;
+  const cjkText = "你好。".repeat(30);
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...previewBody, text: cjkText, cue: "calm" }) });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.ok(requests.slice(cjkStart).every((body) => body.text.length <= maximum));
+  assert.equal(requests.slice(cjkStart).map((body) => body.text.slice("[calm] ".length)).join(""), cjkText);
+  const unsafeStart = requests.length;
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...previewBody, text: "a".repeat(80), cue: "calm" }) });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /cannot split.*60-character.*without cutting a word or audio tag/);
+  assert.equal(requests.length, unsafeStart);
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...previewBody, text: `[${"a".repeat(80)}] Hola.`, cue: "calm" }) });
+  assert.equal(response.status, 400);
+  assert.equal(requests.length, unsafeStart);
+  advertiseV4 = false;
+  response = await fetch(`${baseUrl}/api/config`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${baseUrl}/api/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(previewBody) });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /eleven_v4.*not active/);
+  assert.equal(requests.length, unsafeStart, "unavailable v4 must not use another active model");
 });
 
 test("local API seeds data and saves knowledge plus episode", async (t) => {
@@ -2861,6 +3030,49 @@ test("index.html stays CSP-safe: no inline style or event-handler attributes", a
   assert.doesNotMatch(html, /javascript:/);
   assert.equal(html.match(/<script/g).length, 1);
   assert.equal(html.match(/<style/g).length, 1);
+});
+
+test("v4 controls preserve hidden legacy settings and select only active v4 for new profiles", async () => {
+  const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
+  const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+  new Script(script);
+  const source = (name) => script.match(new RegExp(`    function ${name}\\([^]*?\\n    }`))[0];
+  const fields = runInNewContext(`(${source("providerTtsFields")})`, {
+    ttsProvider: () => "elevenlabs", option: () => "", escapeHtml: (value) => String(value),
+  });
+  const v4Fields = fields({}, "eleven_v4");
+  assert.match(v4Fields, /data-field="elevenlabsStability"/);
+  assert.match(v4Fields, /data-field="elevenlabsSimilarityBoost"/);
+  assert.doesNotMatch(v4Fields, /data-field="elevenlabs(?:Style|Speed|UseSpeakerBoost)"/);
+  assert.match(v4Fields, /not SSML/);
+  assert.match(fields({}, "eleven_v3"), /data-field="elevenlabsSpeed"/, "legacy model controls must remain available");
+
+  const speaker = { name: "Host", voiceId: "voice", backstory: "Story", personality: "Calm", style: "Natural", accent: "", ttsModelOverride: "", elevenlabsStyle: 0.6, elevenlabsSpeed: 1.1, elevenlabsUseSpeakerBoost: false, elevenlabsSeed: 42, elevenlabsTextNormalization: "off" };
+  const profile = { id: "host-profile", name: "Hosts", voiceModel: "eleven_v4", speakers: [speaker] };
+  const values = { spName: "Hosts", spDescription: "", spVoiceModel: "eleven_v4", spInstructions: "" };
+  const card = { querySelector(selector) {
+    const field = selector.match(/data-field="([^"]+)"/)[1];
+    return ["name", "voiceId", "backstory", "personality", "style", "accent", "ttsModelOverride"].includes(field) ? { value: speaker[field] } : null;
+  } };
+  const context = {
+    state: { profiles: { speakerProfiles: [profile] } }, activeSpeakerProfileId: profile.id,
+    $: (id) => ({ value: values[id] }), document: { querySelectorAll: () => [card] },
+    optionalNumberField: (_, __, fallback) => fallback ?? null,
+  };
+  runInNewContext(`(${source("syncSpeakerForm")})()`, context);
+  const synced = profile.speakers[0];
+  for (const field of ["elevenlabsStyle", "elevenlabsSpeed", "elevenlabsUseSpeakerBoost", "elevenlabsSeed", "elevenlabsTextNormalization"]) assert.equal(synced[field], speaker[field]);
+
+  for (const models of [[{ id: "eleven_v3" }, { id: "eleven_v4" }], [{ id: "eleven_v3" }], []]) {
+    const createContext = {
+      state: { profiles: { speakerProfiles: [profile] } }, activeSpeakerProfileId: profile.id,
+      syncSpeakerForm() {}, discoveredModels: () => models, defaultVoiceId: () => "voice", renderProfileOptions() {},
+      crypto: { randomUUID: () => "new-profile" }, structuredClone,
+    };
+    runInNewContext(`(${source("addSpeakerProfile")})(false)`, createContext);
+    assert.equal(createContext.state.profiles.speakerProfiles[1].voiceModel, models.some((model) => model.id === "eleven_v4") ? "eleven_v4" : models[0]?.id || "");
+    assert.equal(profile.voiceModel, "eleven_v4");
+  }
 });
 
 test("index.html guards every long job behind the shared button lock", async () => {

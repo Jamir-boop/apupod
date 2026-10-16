@@ -1,32 +1,48 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="honey-graphite">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pod-god</title>
   <link rel="icon" type="image/png" href="/icon.png">
   <style>
-    :root {
+    [data-theme="honey-graphite"] {
       color-scheme: dark;
-      --surface-0: #000000;
-      --surface-1: #050505;
-      --surface-2: #080808;
-      --surface-3: #101010;
-      --text: #FFFFFF;
-      --muted: #A0A0A0;
-      --disabled: #555555;
-      --accent: #FFB900;
-      --accent-hover: #CC9500;
-      --accent-subtle: #15120A;
-      --accent-subtle-border: #4D3900;
-      --success: #35C46A;
-      --danger: #EF5B5B;
-      --danger-border: #8F3434;
-      --danger-surface: #220B0B;
-      --danger-hover: #B53C3C;
-      --text-on-accent: #000000;
-      --line: #332500;
-      --line-strong: #664A00;
+      --bg: #1E1E1D;
+      --surface: #282725;
+      --field: #191918;
+      --interaction: #37332A;
+      --text: #E6E2D8;
+      --muted: #B6AFA1;
+      --disabled: #B6AFA1;
+      --border: #444036;
+      --control: #8E8470;
+      --reference: #CBAA60;
+      --accent: #CBAA60;
+      --error: #CBAA60;
+      --success: #CBAA60;
+      --selection: #CBAA60;
+      --selection-ink: #191918;
+      --action-ink: #191918;
+      --surface-0: var(--bg);
+      --surface-1: var(--surface);
+      --surface-2: var(--surface);
+      --surface-3: var(--interaction);
+      --accent-subtle: var(--interaction);
+      --accent-subtle-border: var(--accent);
+      --danger: var(--error);
+      --danger-border: var(--error);
+      --danger-surface: var(--surface);
+      --text-on-accent: var(--action-ink);
+      --line: var(--border);
+      --line-strong: var(--control);
+      --overlay: color-mix(in srgb, var(--field) 78%, transparent);
+      --shadow: color-mix(in srgb, var(--field) 72%, transparent);
+      --motion-fast: 120ms;
+      --motion-control: 180ms;
+      --motion-menu: 180ms;
+      --motion-panel: 240ms;
+      --motion-ease: cubic-bezier(.16, 1, .3, 1);
     }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -37,29 +53,35 @@
     ::-webkit-scrollbar-track { background: transparent; }
     html, body { height: 100%; }
     body { margin: 0; overflow: hidden; background: var(--surface-0); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
-    ::selection { color: #000000; background: var(--accent); }
+    ::selection { color: var(--selection-ink); background: var(--selection); }
+    a, a:visited { color: var(--reference); }
+    a:hover { text-decoration-thickness: 2px; }
     button, input, select, textarea { font: inherit; }
-    button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 11px; color: var(--text); background: var(--surface-3); cursor: pointer; font-weight: 700; transition: color .12s ease, background-color .12s ease, border-color .12s ease, transform .12s ease; }
+    button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 11px; color: var(--text); background: var(--surface); cursor: pointer; font-weight: 700; transition: background-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease); }
     .icon { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     .icon-btn { padding: 6px; line-height: 0; }
     .label-icon { display: inline-flex; align-items: center; gap: 6px; }
-    button:hover:not(:disabled), button.active { color: #000000; background: var(--accent); border-color: var(--accent); }
+    button:hover:not(:disabled), button.active:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--control); }
+    button.active:not(:disabled) { border-color: var(--accent); }
     button:active:not(:disabled) { transform: translateY(1px); }
-    button.primary { color: #000000; background: var(--accent); border-color: var(--accent); }
-    button.primary:hover:not(:disabled) { color: var(--text-on-accent); background: var(--accent-hover); border-color: var(--accent-hover); }
-    button.primary:disabled { color: var(--disabled); background: var(--surface-3); border-color: var(--line); }
-    button.danger { color: var(--text); border-color: var(--danger-border); background: var(--danger-surface); }
-    button.danger:hover:not(:disabled) { color: #FFFFFF; background: var(--danger-border); border-color: var(--danger-hover); }
+    button.primary { color: var(--action-ink); background: var(--accent); border-color: var(--accent); transition: transform var(--motion-fast) var(--motion-ease); }
+    button.primary:hover:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--accent); }
+    button.danger { color: var(--text); border-color: var(--danger-border); border-style: dashed; background: var(--danger-surface); }
+    button.danger:hover:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--error); }
     button:disabled { color: var(--disabled); border-color: var(--line); cursor: not-allowed; }
-    input, select, textarea { width: 100%; color: var(--text); background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 9px; }
-    input[type="checkbox"] { appearance: none; width: 18px; height: 18px; flex: 0 0 18px; justify-self: start; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface-0); cursor: pointer; transition: background-color .15s ease, border-color .15s ease; }
+    input, select, textarea { width: 100%; color: var(--text); background: var(--field); border: 1px solid var(--line-strong); border-radius: 2px; padding: 6px 9px; }
+    input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+    input[readonly], textarea[readonly] { color: var(--text); }
+    input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--error); border-style: dashed; }
+    input[type="checkbox"] { appearance: none; width: 18px; height: 18px; min-height: 18px; flex: 0 0 18px; justify-self: start; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--field); cursor: pointer; transition: background-color var(--motion-fast) var(--motion-ease); }
     input[type="checkbox"]::after { content: ""; display: block; width: 9px; height: 5px; margin: 4px 3px; border: solid var(--text-on-accent); border-width: 0 0 2px 2px; opacity: 0; transform: rotate(-45deg); }
     input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); }
     input[type="checkbox"]:checked::after { opacity: 1; }
     input[type="checkbox"]:indeterminate { border-color: var(--accent); background: var(--accent); }
     input[type="checkbox"]:indeterminate::after { width: 10px; height: 0; margin: 7px 3px; border-width: 0 0 2px; opacity: 1; transform: none; }
-    input[type="checkbox"]:disabled { border-color: var(--line); background: var(--surface-3); cursor: not-allowed; opacity: .65; }
-    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    input[type="checkbox"]:disabled { border-color: var(--line); background: var(--surface); cursor: not-allowed; }
+    input[type="checkbox"]:disabled::after { border-color: var(--disabled); }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     textarea { min-height: 70px; resize: vertical; line-height: 1.45; }
     #additionalInstructions { min-height: 120px; }
     #transcriptLockedPrompt { min-height: 160px; }
@@ -68,13 +90,13 @@
     .push-right { margin-left: auto; }
     .align-end { align-self: end; }
     textarea.transcript { flex: 1 1 auto; min-height: 220px; font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; resize: none; }
-    label { display: grid; gap: 4px; color: var(--muted); font-weight: 650; }
+    label { display: grid; gap: 4px; color: var(--text); font-weight: 650; }
     h1, h2, h3 { margin: 0 0 8px; line-height: 1.2; }
     h1 { font-size: 18px; }
     h2 { font-size: 18px; }
     h3 { font-size: 14px; }
     p { margin: 8px 0; }
-    code { color: var(--accent); background: var(--surface-1); border: 1px solid var(--line); padding: 1px 5px; border-radius: 2px; }
+    code { color: var(--reference); background: var(--field); border: 1px solid var(--line); padding: 1px 5px; border-radius: 2px; }
     .muted, small { color: var(--muted); }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
@@ -106,15 +128,15 @@
     .model-refresh-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: center; margin: 10px 0 12px; }
     .model-refresh-row .model-status { margin: 0; }
     .profile-pill, .model-pill, .modality-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 9px; overflow-wrap: anywhere; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: var(--surface-1); font-size: 12px; }
-    .profile-pill.active, .model-pill.used, .modality-pill.active { color: #000; background: var(--accent); border-color: var(--accent); }
+    .profile-pill.active, .model-pill.used, .modality-pill.active { color: var(--text); background: var(--interaction); border-color: var(--accent); font-weight: 700; }
     .model-pill.tts { color: var(--accent); }
-    .model-pill.tts.used { color: #000; }
+    .model-pill.tts.used { color: var(--text); }
     .status-pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px; border: 1px solid var(--disabled); border-radius: 999px; color: var(--muted); background: var(--surface-1); font-size: 12px; }
     .status-pill::before { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--disabled); content: ""; }
     .status-pill.ready { color: var(--success); border-color: var(--success); }
-    .status-pill.ready::before { background: var(--success); }
-    .status-pill.error { color: var(--danger); border-color: var(--danger); }
-    .status-pill.error::before { background: var(--danger); }
+    .status-pill.ready::before { width: 9px; height: 5px; border: solid currentColor; border-width: 0 0 2px 2px; border-radius: 0; background: transparent; transform: rotate(-45deg); }
+    .status-pill.error { color: var(--danger); border-color: var(--danger); border-style: dashed; }
+    .status-pill.error::before { border-radius: 0; background: var(--danger); }
     .status-pill.loading { color: var(--accent); border-color: var(--accent); }
     .status-pill.loading::before { background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
     @keyframes pulse { to { opacity: .25; } }
@@ -125,17 +147,18 @@
     .internal-nav-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .internal-sidebar { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
     .internal-sidebar button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .internal-sidebar button.active { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
+    .internal-sidebar button.active:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--accent); }
     .bulk-check { display: flex; align-items: center; gap: 7px; }
     .speaker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .badge { display: inline-block; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--muted); font-size: 12px; }
     .warning { color: var(--accent); }
+    .error { color: var(--error); }
+    .warning .icon, .error .icon { vertical-align: middle; }
     .separator { border-top: 1px solid var(--line); margin: 12px 0; }
     .speaker-summary { display: grid; gap: 8px; margin-top: 12px; }
     .speaker-summary > div { padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 2px; }
     .provider-card { border: 1px solid var(--line); background: var(--surface-1); }
     .provider-card + .provider-card { margin-top: 8px; }
-    .provider-card[data-configured="false"] { opacity: .82; }
     .provider-card > .provider-head { padding: 10px 12px 2px; }
     .provider-card > .provider-head > div { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
     .provider-card > .provider-head h3 { margin: 0; }
@@ -147,7 +170,7 @@
     .connection-row > summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; list-style: none; cursor: pointer; }
     .connection-row > summary::-webkit-details-marker { display: none; }
     /* ponytail: keep the glyph chevron — it already rotates on [open]; an SVG here would need a data-URI mask for zero visual gain */
-    .connection-row > summary::before { content: "›"; flex: 0 0 auto; color: var(--accent); font-size: 20px; line-height: 1; transition: transform .15s ease; }
+    .connection-row > summary::before { content: "›"; flex: 0 0 auto; color: var(--accent); font-size: 20px; line-height: 1; transition: transform var(--motion-control) var(--motion-ease); }
     .connection-row[open] > summary::before { transform: rotate(90deg); }
     .connection-row > summary .connection-head { flex: 1; min-width: 0; }
     .connection-row > summary:hover { background: var(--surface-3); }
@@ -162,7 +185,7 @@
     .connection-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .config-status { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
     dialog { width: min(720px, calc(100% - 32px)); max-height: 86vh; padding: 0; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); }
-    dialog::backdrop { background: rgba(0, 0, 0, .78); }
+    dialog::backdrop { background: var(--overlay); }
     .dialog-body { display: grid; gap: 10px; padding: 14px; }
     .model-list { display: grid; gap: 6px; max-height: 45vh; overflow-y: auto; }
     .model-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 130px; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--line); }
@@ -172,18 +195,18 @@
     .rightbar-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
     .rightbar-header h2 { margin: 0; color: var(--accent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
     .rightbar-header button { padding: 5px 9px; font-size: 12px; }
-    .rightbar-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: #FFFFFF; background: var(--danger); font-size: 11px; text-align: center; }
+    .rightbar-badge { display: inline-block; min-width: 18px; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: var(--text); background: var(--interaction); font-size: 11px; text-align: center; }
     .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); }
     body.player-active .toasts { bottom: 72px; }
-    .toast { display: flex; align-items: flex-start; justify-content: flex-start; gap: 8px; padding: 10px 12px; overflow-wrap: anywhere; text-align: left; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, .55); font-size: 13px; font-weight: 400; animation: toastIn .22s cubic-bezier(.16, 1, .3, 1) both; }
-    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } }
+    .toast { display: flex; align-items: flex-start; justify-content: flex-start; gap: 8px; padding: 10px 12px; overflow-wrap: anywhere; text-align: left; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: 0 8px 28px var(--shadow); font-size: 13px; font-weight: 400; animation: toastIn var(--motion-menu) var(--motion-ease) both; }
+    @keyframes toastIn { from { transform: translateY(6px); } }
     .toast[data-type="ok"] .icon { color: var(--success); }
     .toast[data-type="warning"] .icon { color: var(--accent); }
     .toast[data-type="error"] .icon { color: var(--danger); }
     .toast:hover:not(:disabled) { color: var(--text); background: var(--surface-3); border-color: var(--accent); }
     .toast[data-type="ok"] { border-color: var(--success); }
-    .toast[data-type="warning"] { border-color: var(--accent); }
-    .toast[data-type="error"] { border-color: var(--danger); }
+    .toast[data-type="warning"] { border-color: var(--accent); border-style: dotted; }
+    .toast[data-type="error"] { border-color: var(--danger); border-style: dashed; }
     .activity-heading { margin: 12px 0 7px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
     .notification-settings { display: grid; gap: 7px; padding: 9px; border: 1px solid var(--line); background: var(--surface-0); }
     .notification-settings .bulk-check { color: var(--text); font-size: 12px; }
@@ -191,21 +214,25 @@
     .notice-list, .activity-list { display: grid; grid-auto-rows: max-content; align-content: start; min-width: 0; max-width: 100%; min-height: 0; gap: 7px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
     .notice-list { flex: 0 1 35%; min-height: 80px; margin-bottom: 12px; }
     .activity-list { flex: 1 1 auto; min-height: 80px; }
-    .notice-item, .job-item { min-width: 0; max-width: 100%; overflow: hidden; border: 1px solid var(--line); background: var(--surface-0); font-size: 12px; }
+    .notice-item, .job-item { min-width: 0; max-width: 100%; border: 1px solid var(--line-strong); background: var(--surface); font-size: 12px; }
     button.job-item { width: 100%; padding: 6px 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
     .activity-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; min-width: 0; }
     .activity-summary > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .activity-summary time { color: var(--muted); font-size: 11px; }
     .notice-item[data-type="ok"] { border-color: var(--success); }
-    .notice-item[data-type="warning"] { border-color: var(--accent); }
-    .notice-item[data-type="error"] { border-color: var(--danger); }
+    .notice-item[data-type="warning"] { border-color: var(--accent); border-style: dotted; }
+    .notice-item[data-type="error"] { border-color: var(--danger); border-style: dashed; }
     .notice-item summary, .job-item summary { display: block; padding: 6px 8px; overflow: hidden; color: var(--text); line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .notice-item summary:focus-visible, .job-item summary:focus-visible { outline-offset: -4px; }
     .notice-item summary::-webkit-details-marker, .job-item summary::-webkit-details-marker { display: none; }
     .notice-item summary::marker, .job-item summary::marker { content: ""; }
     .notice-item[open] summary, .job-item[open] summary { border-bottom: 1px solid var(--line); }
     .notice-detail, .job-detail { padding: 8px; overflow-wrap: anywhere; line-height: 1.4; white-space: pre-wrap; }
     .job-detail strong { display: block; color: var(--text); overflow-wrap: anywhere; }
     .job-item[data-status="running"], .job-item[data-status="queued"] { border-color: var(--accent); }
+    .job-item[data-status="completed"] { border-color: var(--success); }
+    .job-item[data-status="failed"], .job-item[data-status="interrupted"] { border-color: var(--error); border-style: dashed; }
+    .notice-item summary:hover, .job-item summary:hover { background: var(--interaction); }
     .loading-line { display: flex; align-items: center; gap: 9px; margin-top: 12px; color: var(--accent); }
     .spinner { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid var(--disabled); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -217,9 +244,9 @@
     .episode-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: 12px; }
     .episode-chip .icon { width: 13px; height: 13px; }
     .episode-chip.done { color: var(--success); border-color: var(--success); }
-    .episode-chip.running { color: var(--accent); border-color: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+    .episode-chip.running { color: var(--accent); border-color: var(--accent); }
     .episode-row-actions { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
-    .episode-row-actions label { font-size: 12px; color: var(--muted); display: grid; gap: 4px; min-width: 220px; }
+    .episode-row-actions label { font-size: 12px; color: var(--text); display: grid; gap: 4px; min-width: 220px; }
     .episode-row-actions .actions { margin: 0 0 0 auto; }
     .episode-primary { display: flex; align-items: center; gap: 8px; margin-left: auto; }
     .episode-more, .player-more, .speaker-advanced, .format-advanced { margin: 0; }
@@ -239,8 +266,8 @@
     .player-row strong, .player-bottom-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .player-row-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
     .player-row-actions button, .player-row-actions a { padding: 6px 9px; }
-    .player-row-actions a { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--text); background: var(--surface-3); }
-    .player-row-actions a:hover { color: #000000; background: var(--accent); border-color: var(--accent); }
+    .player-row-actions a { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--text); background: var(--surface); }
+    .player-row-actions a:hover { color: var(--text); background: var(--interaction); border-color: var(--control); }
     #view-player .player-row { grid-template-columns: minmax(0, 1fr); }
     #view-player .player-row strong { display: block; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
     #view-player .player-row-actions { justify-content: flex-start; }
@@ -254,7 +281,7 @@
     .player-controls label { width: 120px; }
     #view-player .player-controls .icon-btn { width: 44px; height: 44px; }
     #view-player .player-controls [data-player-action="toggle"] { width: 52px; height: 52px; }
-    .player-bottom { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto 76px; gap: 7px; align-items: center; min-height: 56px; padding: 8px 12px 5px; border-top: 1px solid var(--line-strong); background: var(--surface-2); box-shadow: 0 -10px 30px rgba(0, 0, 0, .55); }
+    .player-bottom { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto 76px; gap: 7px; align-items: center; min-height: 56px; padding: 8px 12px 5px; border-top: 1px solid var(--line-strong); background: var(--surface-2); box-shadow: 0 -10px 30px var(--shadow); }
     .player-bottom-meta { display: flex; min-width: 0; align-items: center; gap: 8px; }
     .player-bottom-title { min-width: 0; flex: 1; padding: 5px 8px; text-align: left; border-color: transparent; background: transparent; font-size: 13px; }
     .player-bottom-title:hover:not(:disabled) { color: var(--text); border-color: transparent; background: transparent; }
@@ -263,11 +290,11 @@
     .player-bottom-seek:disabled { cursor: default; }
     .player-bottom-seek::-webkit-slider-runnable-track { height: 3px; background: transparent; }
     .player-bottom-seek::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4.5px; appearance: none; border: 0; border-radius: 50%; background: var(--accent); opacity: 0; }
-    .player-bottom:hover .player-bottom-seek::-webkit-slider-thumb, .player-bottom-seek:focus-visible::-webkit-slider-thumb { opacity: 1; }
+    .player-bottom:hover .player-bottom-seek:not(:disabled)::-webkit-slider-thumb, .player-bottom-seek:focus-visible::-webkit-slider-thumb { opacity: 1; }
     .player-bottom-seek::-moz-range-track { height: 3px; background: var(--disabled); }
     .player-bottom-seek::-moz-range-progress { height: 3px; background: var(--accent); }
     .player-bottom-seek::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent); opacity: 0; }
-    .player-bottom:hover .player-bottom-seek::-moz-range-thumb, .player-bottom-seek:focus-visible::-moz-range-thumb { opacity: 1; }
+    .player-bottom:hover .player-bottom-seek:not(:disabled)::-moz-range-thumb, .player-bottom-seek:focus-visible::-moz-range-thumb { opacity: 1; }
     .player-bottom button { padding: 6px 10px; font-size: 13px; }
     .player-bottom select { padding: 6px; font-size: 13px; }
     .chat-pane { position: static; height: 100%; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
@@ -284,35 +311,35 @@
     .chat-history-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
     .chat-history-list { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
     .chat-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px; border: 1px solid var(--line); background: var(--surface-1); }
-    .chat-history-row.active { border-color: var(--accent); }
+    .chat-history-row.active { color: var(--text); background: var(--interaction); border-color: var(--accent); }
     .chat-history-open { display: grid; gap: 2px; min-width: 0; justify-items: start; text-align: left; border-color: transparent; background: transparent; }
     .chat-history-open > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .chat-history-meta { color: var(--muted); font-size: 12px; font-weight: 400; }
     .chat-history-open:hover:not(:disabled) .chat-history-meta { color: inherit; }
-    .chat-controls-panel { display: grid; gap: 8px; padding: 0 12px 8px; max-height: 200px; overflow: hidden; border-bottom: 1px solid var(--line); transition: opacity .18s ease, transform .18s ease, border-bottom-color .18s ease; }
+    .chat-controls-panel { display: grid; gap: 8px; padding: 0 12px 8px; max-height: 200px; overflow: hidden; border-bottom: 1px solid var(--line); transition: opacity var(--motion-control) var(--motion-ease), transform var(--motion-control) var(--motion-ease); }
     .chat-controls-panel.closed { max-height: 0; opacity: 0; transform: translateY(-12px); padding: 0 12px; border-bottom-color: transparent; pointer-events: none; }
     .chat-controls-panel label { font-size: 12px; }
     .chat-controls-panel select { font-size: 12px; padding: 6px 8px; }
     .chat-controls-panel button { font-size: 12px; padding: 6px 12px; }
     .chat-pills { display: flex; gap: 6px; flex: 1; min-width: 0; align-items: center; }
-    .chat-input-actions .chat-pill { font-size: 11px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-1); color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
-    .chat-input-actions .chat-pill:hover { border-color: var(--accent); }
+    .chat-input-actions .chat-pill { font-size: 11px; padding: 3px 10px; border: 1px solid var(--control); border-radius: 999px; background: var(--surface-1); color: var(--text); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+    .chat-input-actions .chat-pill:hover:not(:disabled) { background: var(--interaction); border-color: var(--control); }
     #chatControlsToggle { border: solid 1px transparent; }
     #chatControlsToggle[aria-expanded="true"] { border: solid 1px var(--accent); }
     .chat-messages { flex: 1; overflow-y: auto; padding: 10px 12px; display: grid; gap: 10px; min-height: 0; align-content: start; }
     .chat-msg { padding: 8px 11px; border-radius: 2px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
-    .chat-msg.user { background: var(--surface-3); border: 1px solid var(--line); }
-    .chat-msg.assistant { background: var(--surface-3); border: 1px solid var(--line-strong); }
+    .chat-msg.user { background: var(--surface); border: 1px solid var(--line); }
+    .chat-msg.assistant { background: var(--surface); border: 1px solid var(--line); }
     .chat-msg.system { background: transparent; color: var(--muted); font-size: 12px; text-align: center; padding: 4px 0; }
     .chat-msg p { margin: 4px 0; }
     .chat-msg p:first-child { margin-top: 0; }
     .chat-msg p:last-child { margin-bottom: 0; }
-    .chat-messages > :last-child { animation: messageIn .24s cubic-bezier(.16, 1, .3, 1) both; }
-    @keyframes messageIn { from { opacity: 0; transform: translateY(6px); } }
+    .chat-messages > :last-child { animation: messageIn var(--motion-panel) var(--motion-ease) both; }
+    @keyframes messageIn { from { transform: translateY(6px); } }
     .chat-questions { margin-top: 8px; padding: 8px 11px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 2px; font-size: 12px; }
     .chat-questions ol { margin: 4px 0 0; padding-left: 18px; }
     .chat-questions li { margin: 3px 0; }
-    .chat-proposal { margin-top: 8px; padding: 8px 11px; background: #1A1500; border: 1px solid var(--line-strong); border-radius: 2px; font-size: 12px; }
+    .chat-proposal { margin-top: 8px; padding: 8px 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 2px; font-size: 12px; }
     .chat-proposal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
     .chat-proposal-header strong { color: var(--accent); }
     .chat-proposal-diff { font-size: 11px; color: var(--muted); max-height: 120px; overflow-y: auto; }
@@ -328,18 +355,17 @@
     .assistant-util { display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: calc(100% - 24px); margin: 6px 12px; padding: 5px 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted); background: transparent; border-color: transparent; }
     .assistant-chat-toggle { display: none; }
     #assistantChatClose { display: none; }
-    .assistant-util.active { color: #000000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
-    .assistant-workflow button:hover:not(:disabled) { color: var(--text-on-accent); background: var(--accent); border-color: var(--accent); }
+    .assistant-util.active:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--accent); box-shadow: none; }
+    .assistant-workflow button:hover:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--control); }
     .assistant-next { display: grid; gap: 6px; margin: 8px 12px; padding: 10px; border: 1px solid var(--accent); background: var(--surface-1); }
     .assistant-next-title { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
     .assistant-next-text { font-size: 12px; }
-    @keyframes ctaPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 185, 0, 0); } 50% { box-shadow: 0 0 0 6px rgba(255, 185, 0, .45); } }
-    .cta-pulse { animation: ctaPulse .9s ease-in-out 3; }
+    .cta-pulse { outline: 2px solid var(--accent); outline-offset: 2px; }
     #podcastAssistant { position: relative; }
     #podcastAssistant.nav-only .assistant-chat { display: none; }
     .chat-fold-toggle { position: absolute; top: 0; bottom: 0; left: calc(280px - 8px); width: 16px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; z-index: 5; border-radius: 0; }
-    .chat-fold-toggle:hover { color: var(--accent); background: var(--surface-1); }
-    .chat-fold-toggle .icon { transition: transform .18s ease; }
+    .chat-fold-toggle:hover:not(:disabled) { color: var(--text); background: var(--interaction); }
+    .chat-fold-toggle .icon { transition: transform var(--motion-control) var(--motion-ease); }
     #podcastAssistant.nav-only .chat-fold-toggle { left: calc(100% - 16px); }
     #podcastAssistant.nav-only .chat-fold-toggle .icon { transform: rotate(180deg); }
     .assistant-impact { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--accent); }
@@ -361,7 +387,7 @@
     }
     @media (max-width: 820px) {
       .app { display: grid; grid-template-columns: minmax(0, 1fr); }
-      .rightbar { position: fixed; top: 0; right: 0; z-index: 65; width: min(340px, 92vw); height: 100%; box-shadow: -12px 0 30px rgba(0, 0, 0, .5); }
+      .rightbar { position: fixed; top: 0; right: 0; z-index: 65; width: min(340px, 92vw); height: 100%; box-shadow: -12px 0 30px var(--shadow); }
       main { padding: 10px 12px; }
       main.assistant-active { padding: 0; }
       .grid, .grid.three { grid-template-columns: 1fr; }
@@ -376,17 +402,8 @@
       .player-bottom button { padding-inline: 9px; }
     }
 
-    /* Approved direction: Focus Canvas + Tool Drawer */
-    :root {
-      --surface-1: #080808;
-      --surface-2: #0C0C0C;
-      --surface-3: #161616;
-      --muted: #9A9A9A;
-      --disabled: #565656;
-      --line: #242424;
-      --line-strong: #414141;
-    }
-    body { background: #000; font-size: 15px; letter-spacing: -.01em; }
+    /* Honey Graphite preserves the approved Focus Canvas + Tool Drawer composition. */
+    body { background: var(--bg); font-size: 15px; letter-spacing: -.01em; }
     body.player-active .app { height: calc(100% - 72px); }
     .app { grid-template-columns: minmax(0, 1fr); }
     main { width: 100%; max-width: none; margin: 0; padding: 0; }
@@ -410,7 +427,7 @@
       grid-template-columns: minmax(220px, .62fr) minmax(0, 1.8fr) minmax(104px, .28fr);
       align-items: stretch;
       min-width: 0;
-      background: #080808;
+      background: var(--surface);
       border-bottom: 1px solid var(--line);
     }
     .workspace-brand { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 10px 18px; border-right: 1px solid var(--line); }
@@ -431,15 +448,16 @@
     .workspace-progress li:not(:last-child)::after { position: absolute; z-index: 0; top: 27px; left: 50%; width: 100%; height: 1px; background: var(--line-strong); content: ""; }
     .workspace-progress li[data-state="done"]:not(:last-child)::after { background: var(--success); }
     .workspace-progress button { position: relative; z-index: 1; display: grid; grid-template-rows: 12px auto; align-content: center; justify-items: center; gap: 5px; width: 100%; min-width: 0; min-height: 100%; padding: 6px 3px; color: var(--muted); background: transparent; border: 0; border-radius: 0; font: 650 9px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; }
-    .workspace-progress .tape-dot { width: 7px; height: 7px; align-self: center; background: #080808; border: 1px solid currentColor; border-radius: 50%; }
+    .workspace-progress .tape-dot { width: 7px; height: 7px; align-self: center; background: var(--surface); border: 1px solid currentColor; border-radius: 50%; }
     .workspace-progress .tape-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .workspace-progress li[data-state="done"] button { color: var(--success); }
-    .workspace-progress li[data-state="done"] .tape-dot { background: var(--success); border-color: var(--success); }
+    .workspace-progress li[data-state="done"] .tape-dot { width: 11px; height: 11px; background: transparent; border: 0; }
     .workspace-progress li[data-state="current"] button { color: var(--accent); }
     .workspace-progress li[data-state="current"] .tape-dot { width: 11px; height: 11px; background: var(--accent); border-color: var(--accent); outline: 3px solid var(--line); }
     .workspace-progress li[data-state="pending"] button { color: var(--disabled); }
-    .workspace-progress button.active,
-    .workspace-progress button:hover:not(:disabled) { color: var(--text); background: #111; }
+    .workspace-progress button.active:not(:disabled),
+    .workspace-progress button:hover:not(:disabled) { color: var(--text); background: var(--interaction); }
+    .workspace-progress button.active:not(:disabled) .tape-label { text-decoration: underline; text-underline-offset: 3px; }
 
     #podcastAssistant {
       grid-column: 1;
@@ -447,10 +465,10 @@
       grid-template-columns: 112px minmax(0, 1fr);
       border: 0;
       border-radius: 0;
-      background: #0A0A0A;
+      background: var(--bg);
     }
     #podcastAssistant.nav-only { grid-template-columns: 112px; }
-    .assistant-sidebar { display: flex; flex-direction: column; overflow: hidden; background: #070707; border-right: 1px solid var(--line); }
+    .assistant-sidebar { display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border-right: 1px solid var(--line); }
     .assistant-sidebar .chat-pane-header { min-height: 64px; justify-content: center; padding: 12px 8px; }
     .assistant-sidebar .chat-pane-header h3 { font-size: 12px; }
     .assistant-workflow { display: flex; flex: 1; flex-direction: column; gap: 4px; padding: 12px 8px; border: 0; }
@@ -471,8 +489,8 @@
       letter-spacing: .02em;
     }
     .assistant-util .icon { width: 21px; height: 21px; }
-    .assistant-util.active { color: var(--accent); background: var(--accent-subtle); border-color: var(--accent-subtle-border); }
-    .assistant-workflow button:hover:not(:disabled) { color: var(--text); background: #151515; border-color: var(--line-strong); }
+    .assistant-util.active:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--accent); }
+    .assistant-workflow button:hover:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--control); }
     .assistant-next { display: none; }
     .assistant-chat .assistant-next {
       display: grid;
@@ -482,7 +500,7 @@
       max-width: 820px;
       margin: 0 clamp(28px, 7vw, 96px) 8px;
       padding: 11px 12px 11px 14px;
-      background: #111;
+      background: var(--surface);
       border: 1px solid var(--line-strong);
       border-left: 2px solid var(--accent);
     }
@@ -506,31 +524,32 @@
       border: 0;
       border-radius: 0;
     }
-    .properties-fold-toggle:hover:not(:disabled) { color: var(--accent); background: var(--surface-1); }
-    .properties-fold-toggle .icon { transform: rotate(180deg); transition: transform .18s ease; }
+    .properties-fold-toggle:hover:not(:disabled) { color: var(--text); background: var(--interaction); }
+    .properties-fold-toggle .icon { transform: rotate(180deg); transition: transform var(--motion-control) var(--motion-ease); }
     main.assistant-active.nav-only .properties-fold-toggle { left: calc(112px - 8px); }
     main.assistant-active.nav-only .properties-fold-toggle .icon { transform: none; }
     main.assistant-active.chat-focus .properties-fold-toggle { display: none; }
 
-    .assistant-chat { background: #0B0B0B; }
-    .assistant-chat > .chat-pane-header { min-height: 56px; padding: 8px clamp(20px, 4vw, 56px); background: #090909; }
+    .assistant-chat { background: var(--bg); }
+    .assistant-chat > .chat-pane-header { min-height: 56px; padding: 8px clamp(20px, 4vw, 56px); background: var(--surface); }
     .chat-history-toggle { max-width: 420px; color: var(--muted); background: transparent; border-color: transparent; }
-    .chat-history-toggle:hover:not(:disabled) { color: var(--text); background: var(--surface-3); border-color: var(--line); }
+    .chat-history-toggle:hover:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--control); }
     .chat-lead { padding: clamp(30px, 5vh, 64px) clamp(28px, 7vw, 96px) 14px; }
     .chat-lead h2 { max-width: 720px; margin: 8px 0 10px; font-size: clamp(34px, 3.2vw, 48px); font-weight: 720; letter-spacing: -.045em; }
     .chat-lead p { max-width: 620px; margin: 0; color: var(--muted); font-size: 14px; }
     .chat-messages { gap: 16px; padding: 18px clamp(28px, 7vw, 96px); }
     .chat-msg { max-width: 820px; padding: 0; font-size: 14px; line-height: 1.6; }
-    .chat-msg.user { width: min(86%, 760px); margin-left: auto; padding: 14px 16px; background: #151515; border-color: var(--line-strong); }
+    .chat-msg.user { width: min(86%, 760px); margin-left: auto; padding: 14px 16px; background: var(--surface); border-color: var(--line); }
     .chat-msg.assistant { background: transparent; border: 0; }
     .chat-msg.system { max-width: 620px; margin-inline: auto; padding: 8px 0; }
     .chat-questions,
-    .chat-proposal { margin-top: 12px; padding: 14px 16px; background: #0F0F0F; border-color: var(--line-strong); }
+    .chat-proposal { margin-top: 12px; padding: 14px 16px; background: var(--surface); border-color: var(--line); }
     .chat-proposal { border-left: 2px solid var(--accent); }
-    .chat-input-row { gap: 10px; margin: 0 clamp(20px, 5vw, 72px) 18px; padding: 12px; background: #111; border: 1px solid var(--line-strong); border-radius: 3px; }
+    .chat-input-row { gap: 10px; margin: 0 clamp(20px, 5vw, 72px) 18px; padding: 12px; background: var(--field); border: 1px solid var(--line-strong); border-radius: 3px; }
     .chat-input-row textarea { min-height: 68px; padding: 4px; background: transparent; border: 0; }
+    .chat-input-row textarea[aria-invalid="true"] { border: 1px dashed var(--error); }
     .chat-input-row textarea:focus-visible { outline-offset: 8px; }
-    .chat-controls-panel { margin: -12px -12px 4px; padding: 12px; background: #0A0A0A; }
+    .chat-controls-panel { margin: -12px -12px 4px; padding: 12px; background: var(--surface); }
     .chat-controls-panel.closed { padding-inline: 12px; }
     .chat-input-actions .chat-pill { border-radius: 2px; }
     #plannerChatSend { width: 44px; min-height: 40px; }
@@ -540,24 +559,24 @@
       grid-row: 2;
       min-width: 0;
       padding: 0;
-      background: #0D0D0D;
+      background: var(--surface);
       border-left: 1px solid var(--line-strong);
-      animation: drawerIn .2s cubic-bezier(.16, 1, .3, 1) both;
+      animation: drawerIn var(--motion-panel) var(--motion-ease) both;
     }
-    @keyframes drawerIn { from { opacity: .9; clip-path: inset(0 0 0 18px); transform: translateX(12px); } }
-    .view > .view-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-height: 88px; margin: 0; padding: 22px 24px 16px; background: #0B0B0B; border-bottom: 1px solid var(--line); }
+    @keyframes drawerIn { from { clip-path: inset(0 0 0 18px); transform: translateX(12px); } }
+    .view > .view-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-height: 88px; margin: 0; padding: 22px 24px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
     .view > .view-header > .actions { margin: 0; }
     .view-header h2 { font-size: 22px; letter-spacing: -.025em; }
     .view-header p { max-width: 620px; margin-top: 5px; font-size: 12px; }
     .view-header .drawer-artifact { overflow: hidden; color: var(--accent); font: 650 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
     .drawer-close { flex: 0 0 auto; }
-    .view > .subnav { gap: 0; margin: 0; padding: 0 24px; background: #0B0B0B; border-bottom: 1px solid var(--line); }
+    .view > .subnav { gap: 0; margin: 0; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--line); }
     .subnav > button { min-height: 42px; padding-inline: 14px; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; }
-    .subnav > button.active,
-    .subnav > button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
-    .subnav > button:hover:not(:disabled),
-    .subnav > button.active,
-    .subnav > button[aria-selected="true"] { color: var(--accent); background: transparent; border-color: transparent; border-bottom-color: var(--accent); transform: none; }
+    .subnav > button.active:not(:disabled),
+    .subnav > button[aria-selected="true"]:not(:disabled) { color: var(--text); background: var(--interaction); border-bottom-color: var(--accent); }
+    .subnav > button:hover:not(:disabled) { color: var(--text); background: var(--interaction); border-color: transparent; transform: none; }
+    .subnav > button.active:not(:disabled):hover,
+    .subnav > button[aria-selected="true"]:not(:disabled):hover { border-bottom-color: var(--accent); }
     .view-body { gap: 20px; padding: 22px 24px 36px; scrollbar-gutter: auto; }
     .panel { padding: 0; background: transparent; border: 0; }
     .panel + .panel { padding-top: 22px; border-top: 1px solid var(--line); }
@@ -567,15 +586,16 @@
     .connection-row,
     .provider-card,
     .player-row,
-    #episodeSettings { background: #101010; border-color: var(--line); }
+    #episodeSettings { background: var(--surface); border-color: var(--line); }
+    .connection-row { border-color: var(--control); }
     button,
     input,
     select,
     textarea { min-height: 38px; }
-    button { border-color: var(--line-strong); background: #151515; }
+    button { border-color: var(--line-strong); background: var(--surface); }
     input,
     select,
-    textarea { background: #090909; border-color: var(--line-strong); }
+    textarea { background: var(--field); border-color: var(--line-strong); }
     button.primary { min-height: 40px; padding-inline: 16px; }
     .speaker-advanced, .format-advanced { grid-column: 1 / -1; padding: 10px 0 0; border-top: 1px solid var(--line); }
     main.assistant-active.nav-only .workspace-header { grid-template-columns: 112px minmax(0, 1fr) minmax(104px, .28fr); }
@@ -586,18 +606,19 @@
     .model-pill,
     .modality-pill { border-radius: 2px; }
 
-    .rightbar { position: fixed; inset: 0 0 0 auto; z-index: 90; width: min(390px, 94vw); padding: 22px 18px; background: #080808; border-left-color: var(--line-strong); box-shadow: -24px 0 60px rgba(0, 0, 0, .72); }
-    .rightbar:not([hidden]) { animation: activityIn .26s cubic-bezier(.16, 1, .3, 1) both; }
-    @keyframes activityIn { from { opacity: .84; clip-path: inset(0 0 0 24px); transform: translateX(18px); } }
+    .rightbar { position: fixed; inset: 0 0 0 auto; z-index: 90; width: min(390px, 94vw); padding: 22px 18px; background: var(--surface); border-left-color: var(--line-strong); box-shadow: -24px 0 60px var(--shadow); }
+    .rightbar:not([hidden]) { animation: activityIn var(--motion-panel) var(--motion-ease) both; }
+    @keyframes activityIn { from { clip-path: inset(0 0 0 24px); transform: translateX(16px); } }
     .rightbar-header { min-height: 44px; }
     .rightbar-header h2 { color: var(--text); font-size: 16px; }
-    .player-bottom { left: 112px; right: clamp(420px, 34vw, 560px); min-height: 72px; padding: 10px 16px 7px; background: #0B0B0B; border-color: var(--line-strong); box-shadow: none; }
+    .player-bottom { left: 112px; right: clamp(420px, 34vw, 560px); min-height: 72px; padding: 10px 16px 7px; background: var(--surface); border-color: var(--line); box-shadow: none; }
     body.chat-focus .player-bottom,
     body.production-focus .player-bottom { right: 0; }
     main.assistant-active.nav-only #view-player .player-layout { grid-template-columns: minmax(0, 1.3fr) minmax(300px, .7fr); }
     main.assistant-active.nav-only #view-player .player-layout > .panel + .panel { padding-top: 0; border-top: 0; }
-    .player-bottom [data-player-action="toggle"] { width: 46px; height: 46px; color: #000; background: var(--accent); border-color: var(--accent); }
-    .player-bottom [data-player-action="toggle"]:disabled { color: var(--disabled); background: #151515; border-color: var(--line); opacity: 1; }
+    .player-bottom [data-player-action="toggle"] { width: 46px; height: 46px; color: var(--action-ink); background: var(--accent); border-color: var(--accent); transition: transform var(--motion-fast) var(--motion-ease); }
+    .player-bottom [data-player-action="toggle"]:hover:not(:disabled) { color: var(--text); background: var(--interaction); }
+    .player-bottom [data-player-action="toggle"]:disabled { color: var(--disabled); background: var(--surface); border-color: var(--line); opacity: 1; }
     .player-bottom [data-player-action="toggle"] .icon { width: 20px; height: 20px; }
     .player-bottom-seek { top: -2px; min-height: 0; height: 5px; background: linear-gradient(to right, var(--accent) 0 var(--player-progress, 0%), var(--line-strong) var(--player-progress, 0%) 100%); }
     .connection-row > summary { display: list-item; list-style: disclosure-closed inside; }
@@ -633,7 +654,7 @@
       .assistant-chat-toggle { flex: 0 0 auto; flex-direction: row; width: auto; min-height: 40px; padding: 7px 10px; font-size: 11px; }
       .assistant-util .icon { width: 17px; height: 17px; }
       .assistant-chat { display: none; }
-      #podcastAssistant.chat-open .assistant-chat { display: flex; position: fixed; inset: 0; z-index: 70; background: #0B0B0B; }
+      #podcastAssistant.chat-open .assistant-chat { display: flex; position: fixed; inset: 0; z-index: 70; background: var(--bg); }
       #podcastAssistant.chat-open .assistant-next { display: grid; }
       #podcastAssistant.chat-open .chat-pane-header { display: flex; }
       .chat-fold-toggle { display: none; }
@@ -659,14 +680,14 @@
       .workspace-counter-toggle > span { display: grid; min-width: 0; }
       .workspace-counter-toggle small { color: var(--muted); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
       .workspace-counter-toggle strong { overflow: hidden; color: var(--accent); font: 720 12px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-      .workspace-counter-toggle:hover:not(:disabled) { color: var(--text); background: #111; border-color: var(--line-strong); }
-      .workspace-counter-toggle .icon { transition: transform .18s ease; }
+      .workspace-counter-toggle:hover:not(:disabled) { color: var(--text); background: var(--interaction); border-color: var(--line-strong); }
+      .workspace-counter-toggle .icon { transition: transform var(--motion-control) var(--motion-ease); }
       .workspace-counter-toggle[aria-expanded="true"] .icon { transform: rotate(180deg); }
-      .workspace-progress { position: absolute; top: 58px; right: 0; left: 0; z-index: 2; height: 58px; padding-inline: 5px; background: #080808; border-block: 1px solid var(--line-strong); box-shadow: 0 16px 32px rgba(0, 0, 0, .72); animation: tapeDrop .2s cubic-bezier(.16, 1, .3, 1) both; }
+      .workspace-progress { position: absolute; top: 58px; right: 0; left: 0; z-index: 2; height: 58px; padding-inline: 5px; background: var(--surface); border-block: 1px solid var(--line-strong); box-shadow: 0 16px 32px var(--shadow); animation: tapeDrop var(--motion-menu) var(--motion-ease) both; }
       .workspace-progress li:not(:last-child)::after { top: 26px; }
       .workspace-progress button { min-height: 56px; font-size: 10px; }
-      @keyframes tapeDrop { from { opacity: .9; clip-path: inset(0 0 100% 0); transform: translateY(-6px); } }
-      .assistant-sidebar { position: fixed; right: 0; bottom: 0; left: 0; z-index: 60; background: #080808; border-top: 1px solid var(--line-strong); border-bottom: 0; }
+      @keyframes tapeDrop { from { clip-path: inset(0 0 100% 0); transform: translateY(-6px); } }
+      .assistant-sidebar { position: fixed; right: 0; bottom: 0; left: 0; z-index: 60; background: var(--surface); border-top: 1px solid var(--line-strong); border-bottom: 0; }
       body.player-active .assistant-sidebar { bottom: 72px; }
       .assistant-workflow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; padding: 4px 6px; overflow: visible; }
       .assistant-util,
@@ -693,12 +714,14 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
+    button:disabled, button:is(.active, .primary, .danger, .chat-pill, .assistant-util):disabled, input:disabled, select:disabled, textarea:disabled, option:disabled { color: var(--disabled); background: var(--surface); border-color: var(--border); opacity: 1; transition: none; }
+    input[type="range"]:disabled { background: var(--border); }
   </style>
 </head>
 <body>
   <!--
   THESIS: Conversation is the studio; production tools appear beside it instead of replacing it, refusing the dashboard-first maze.
-  OWN-WORLD: Matte black joined planes, quiet neutral seams, warm white type, amber action/current state, green success, red failure, and tactile low-radius controls.
+  OWN-WORLD: User-pinned Honey Graphite: graphite canvas, neutral panels, inset fields, warm text, small honey actions and focus, status words and shapes, and tactile low-radius controls.
   STORY: The creator describes the show, sees real production progress, opens one relevant editor, and continues toward finished audio without losing the conversation.
   FIRST VIEWPORT: A slim mode rail and dominant chat fill the left; a 420–560px contextual production drawer fills the right; stage progress runs above and transport stays below chat.
   FORM: Focus Canvas + Tool Drawer, the approved third composition; seed key: standing-exit:category-standard.
@@ -802,6 +825,7 @@
           </div>
           <div id="plannerChatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"><div class="chat-msg system">Tell me what you want to create. I will ask focused questions and guide each production step.</div></div>
           <div id="plannerChatBusy" class="chat-busy" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="plannerChatBusyText">Thinking…</span></div>
+          <p id="chatGptPlanUsage" class="muted" hidden>Using ChatGPT plan · <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage usage</a></p>
           <div class="chat-input-row"><div id="chatControlsPanel" class="chat-controls-panel closed" hidden><label data-help="Model used for this conversation and for planning episodes.">Model<select id="plannerChatModel"></select></label><label id="plannerChatEffortLabel" data-help="Reasoning effort for Responses API models." hidden>Effort<select id="plannerChatEffort"></select></label><label data-help="Optional source material the assistant may read in full.">Knowledge base<select id="plannerChatKb"><option value="">None</option></select></label><button id="uploadKnowledge" type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload .md</button><input id="knowledgeFile" type="file" accept=".md,text/markdown,text/plain" hidden></div><textarea id="plannerChatInput" aria-label="Message to podcast assistant" placeholder="Describe the podcast, source, audience, or current problem."></textarea><div class="chat-input-actions"><span class="chat-pills"><button type="button" class="chat-pill" id="chatPillModel" title="Model">—</button><button type="button" class="chat-pill" id="chatPillEffort" title="Reasoning effort" hidden>effort</button><button type="button" class="chat-pill" id="chatPillKb" title="Knowledge base">None</button></span><button id="chatControlsToggle" type="button" class="icon-btn" title="Chat settings" aria-expanded="false" aria-label="Chat settings"><svg class="icon" aria-hidden="true"><use href="#i-sliders-horizontal"/></svg></button><button id="plannerChatSend" class="primary icon-btn" title="Send message" aria-label="Send message"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button></div></div>
         </div>
       </div>
@@ -840,6 +864,8 @@
             <label class="full">Description<textarea id="spDescription"></textarea></label>
             <label>Default TTS model<select id="spVoiceModel"></select></label>
             <label class="full">Profile rules<textarea id="spInstructions"></textarea></label>
+            <div class="full actions"><button id="suggestDeliverySetup" type="button">Suggest delivery setup</button></div>
+            <p class="muted full">Uses the current Hosts draft with OpenAI Decisions. Enable it in Model Connections. API use is billed separately from ChatGPT. Review the traits and direction, then press Apply to save. Voice, model, accent, and language stay unchanged.</p>
           </div>
           <div class="internal-nav-layout">
             <div class="internal-nav-row">
@@ -1072,6 +1098,10 @@
     let jobsState = { activeJobId: null, jobs: [] };
     let currentEpisode = null;
     let configState = null;
+    let chatGptConnection = { accounts: [], activeAccountId: null, pending: null, lastSignIn: { status: "idle" } };
+    let chatGptPollTimer = null;
+    let chatGptPollCount = 0;
+    let chatGptAuthorizeUrl = "";
     let activeSpeakerProfileId = viewSelections.speakerProfileId || "";
     let activeEpisodeProfileId = viewSelections.episodeProfileId || "";
     let formatFormId = "";
@@ -1080,6 +1110,7 @@
     let chatterboxVoices = [];
     let chatterboxVoicesLoaded = false;
     const voiceRequests = {};
+    const uiRequests = { state: 0, episode: 0, prompt: 0, planLoad: 0, chat: 0, chatSelection: 0 };
     let configDirty = false;
     let profilesDirty = false;
     let episodeDraftDirty = false;
@@ -1240,7 +1271,7 @@
     function renderNotifications() {
       $("notificationFeed").innerHTML = notifications.length ? notifications.map((item) => {
         const label = item.type === "ok" ? "saved" : item.type === "warning" ? "warning" : item.type === "error" ? "error" : "notice";
-        return `<details class="notice-item" data-type="${escapeHtml(item.type)}"><summary>[${label} - ${escapeHtml(item.message)}]</summary><div class="notice-detail">${escapeHtml(item.message)}<br><span class="muted">${escapeHtml(new Date(item.at).toLocaleTimeString())}</span></div></details>`;
+        return `<details class="notice-item" data-type="${escapeHtml(item.type)}"><summary>${icon(TOAST_ICONS[item.type] || "circle-dot")}[${label} - ${escapeHtml(item.message)}]</summary><div class="notice-detail">${escapeHtml(item.message)}<br><span class="muted">${escapeHtml(new Date(item.at).toLocaleTimeString())}</span></div></details>`;
       }).join("") : '<span class="muted">No notifications</span>';
       const unread = notifications.filter((item) => !item.read).length;
       $("rightbarBadge").hidden = unread === 0;
@@ -1284,10 +1315,11 @@
     }
 
     const TOAST_ICONS = { ok: "circle-check", warning: "triangle-alert", error: "circle-x" };
+    const TOAST_LABELS = { ok: "Success", warning: "Warning", error: "Error" };
 
     function renderToasts() {
       $("toasts").innerHTML = (toastOverflow ? `<button type="button" class="toast toast-more">${icon("chevron-up")}+${toastOverflow} more notification${toastOverflow === 1 ? "" : "s"}</button>` : "")
-        + toastEntries.map((item) => `<button type="button" class="toast" data-type="${escapeHtml(item.type)}">${icon(TOAST_ICONS[item.type] || "circle-dot")}<span>${escapeHtml(item.message)}</span></button>`).join("");
+        + toastEntries.map((item) => `<button type="button" class="toast" data-type="${escapeHtml(item.type)}">${icon(TOAST_ICONS[item.type] || "circle-dot")}<span>${TOAST_LABELS[item.type] ? `<strong>${TOAST_LABELS[item.type]}:</strong> ` : ""}${escapeHtml(item.message)}</span></button>`).join("");
     }
 
     async function api(path, options = {}) {
@@ -1299,6 +1331,13 @@
       const value = type.includes("application/json") ? await response.json() : await response.text();
       if (!response.ok) throw new Error(value?.error || value || `${response.status} ${response.statusText}`);
       return value;
+    }
+
+    async function saveEditor(key, action) {
+      const pending = (uiRequests[key] || Promise.resolve()).catch(() => {}).then(action);
+      uiRequests[key] = pending;
+      try { return await pending; }
+      finally { if (uiRequests[key] === pending) delete uiRequests[key]; }
     }
 
     function escapeHtml(value) {
@@ -1319,11 +1358,11 @@
         ? (providers.compatible || []).flatMap((provider) => provider.textModels || [])
         : (providers.compatible || []).flatMap((provider) => provider.ttsModels || []);
       const items = kind === "text"
-        ? [...(providers.mimo?.textModels || []), ...(providers.openai?.textModels || []), ...(providers.opencodeGo?.textModels || []), ...(providers.chatterbox?.textModels || []), ...compatibleItems]
+        ? [...(providers.mimo?.textModels || []), ...(providers.openai?.textModels || []), ...(providers.chatgpt?.textModels || []), ...(providers.opencodeGo?.textModels || []), ...(providers.chatterbox?.textModels || []), ...compatibleItems]
         : [...(providers.mimo?.ttsModels || []), ...(providers.elevenlabs?.ttsModels || []), ...(providers.openai?.ttsModels || []), ...(providers.chatterbox?.ttsModels || []), ...compatibleItems];
       return [...new Map(items.map((model) => [model.id, {
         ...model,
-        label: ["compatible", "openai", "opencodeGo", "chatterbox"].includes(model.provider)
+        label: ["compatible", "openai", "chatgpt", "opencodeGo", "chatterbox"].includes(model.provider)
           ? `${model.connectionName} - ${model.name || model.rawId || model.id}`
           : `${model.provider === "elevenlabs" ? "ElevenLabs" : "MiMo"} - ${model.name || model.id}${model.requiresAlphaAccess ? " - alpha access" : ""}`,
       }])).values()];
@@ -1362,6 +1401,8 @@
       const model = discoveredModels("tts").find((item) => item.id === modelId);
       if (modelId === "mimo-v2.5-tts" && model) return ["en", "zh"].includes(language.apiCode) ? "" : `MiMo preset TTS does not support ${language.name}; choose ElevenLabs.`;
       if (!model) {
+        const unsupported = modelCatalog.providers?.elevenlabs?.discoveredModels?.find((item) => item.id === modelId && item.supported === false);
+        if (unsupported) return unsupported.unsupportedReason;
         const parsed = String(modelId).match(/^compat:([^:]+):(.+)$/);
         const provider = modelId === "mimo-v2.5-tts" ? modelCatalog.providers?.mimo
           : String(modelId).startsWith("eleven") ? modelCatalog.providers?.elevenlabs
@@ -1432,18 +1473,36 @@
         view,
         transcriptSection: view === "transcript" ? activeTranscriptSection : "",
         episodeProfileId: activeEpisodeProfileId,
+        speakerProfileId: view === "speakers" ? activeSpeakerProfileId : "",
         episodeId: currentEpisode?.id || "",
       };
     }
 
     function assistantWorkspaceDraft() {
       const view = activeViewName();
+      if (view === "speakers") return assistantSpeakerDraft(activeSpeakerProfileId);
       if (view === "transcript") return {
         id: currentEpisode?.id || "", name: $("episodeName").value, episodeProfileId: $("buildEpisodeProfile").value, speakerProfileId: $("episodeHosts").value, knowledgeBaseId: $("buildKnowledge").value,
         additionalInstructions: $("additionalInstructions").value, transcriptPromptGuidance: $("transcriptPromptGuidance").value,
       };
       if (view === "tts") return { episodeId: currentEpisode?.id || "" };
       return null;
+    }
+
+    function assistantSpeakerDraft(profileId) {
+      syncSpeakerForm();
+      return structuredClone(state.profiles.speakerProfiles.find((profile) => profile.id === profileId));
+    }
+
+    async function assistantDraftHash(value) {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value)));
+      return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
+
+    function mergeAppliedHostsDraft(local, saved, sourceId, appliedId) {
+      return { ...saved, episodeProfiles: local.episodeProfiles,
+        speakerProfiles: [...saved.speakerProfiles.map((profile) => [sourceId, appliedId].includes(profile.id) ? profile : local.speakerProfiles.find((item) => item.id === profile.id) || profile),
+          ...local.speakerProfiles.filter((profile) => !saved.speakerProfiles.some((item) => item.id === profile.id))] };
     }
 
     function planEpisodeRows() {
@@ -1491,7 +1550,7 @@
       ];
       const currentIndex = steps.findIndex((step) => !step.done);
       const stepState = (step, index) => step.done ? "done" : index === currentIndex ? "current" : "pending";
-      $("workspaceProgress").innerHTML = steps.map((step, index) => `<li data-state="${stepState(step, index)}"><button type="button"${step.target === view ? ' class="active"' : ""} aria-pressed="${step.target === view}"${index === currentIndex ? ' aria-current="step"' : ""} data-assistant-target="${step.target}"><span class="tape-dot" aria-hidden="true"></span><span class="tape-label">${escapeHtml(step.short)}</span></button></li>`).join("");
+      $("workspaceProgress").innerHTML = steps.map((step, index) => `<li data-state="${stepState(step, index)}"><button type="button"${step.target === view ? ' class="active"' : ""} aria-pressed="${step.target === view}"${index === currentIndex ? ' aria-current="step"' : ""} aria-label="${escapeHtml(step.label)}: ${stepState(step, index)}" data-assistant-target="${step.target}">${step.done ? icon("check", "tape-dot") : '<span class="tape-dot" aria-hidden="true"></span>'}<span class="tape-label">${escapeHtml(step.short)}</span></button></li>`).join("");
       const stageIndex = currentIndex === -1 ? steps.length - 1 : currentIndex;
       const stageName = currentIndex === -1 ? "Podcast ready" : steps[stageIndex].label;
       const stageCounter = `${String(stageIndex + 1).padStart(2, "0")} / ${String(steps.length).padStart(2, "0")}`;
@@ -1531,6 +1590,7 @@
         ["MiMo", modelCatalog.providers?.mimo],
         ["ElevenLabs", modelCatalog.providers?.elevenlabs],
         ["OpenAI", modelCatalog.providers?.openai],
+        ["ChatGPT plan", modelCatalog.providers?.chatgpt],
         ["OpenCode Go", modelCatalog.providers?.opencodeGo],
         ["Chatterbox", modelCatalog.providers?.chatterbox],
         ...((modelCatalog.providers?.compatible || []).map((provider) => [provider.name, provider])),
@@ -1604,7 +1664,7 @@
         const timestamp = job.finishedAt || job.updatedAt || job.queuedAt;
         const time = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
         const summary = `<span class="activity-summary"><span>${escapeHtml(job.status)}</span><span>${escapeHtml(artifact)}</span><time>${escapeHtml(time)}</time></span>`;
-        if (job.type === "tts" && job.status === "completed") return `<button type="button" class="job-item" data-job-player="${escapeHtml(job.episodeId)}" title="Open rendered MP3 in Player">${summary}</button>`;
+        if (job.type === "tts" && job.status === "completed") return `<button type="button" class="job-item" data-status="completed" data-job-player="${escapeHtml(job.episodeId)}" title="Open rendered MP3 in Player">${summary}</button>`;
         return `<details class="job-item" data-job-id="${escapeHtml(job.id)}" data-status="${escapeHtml(job.status)}"${openJobs.has(job.id) ? " open" : ""}>
           <summary>${summary}</summary>
           <div class="job-detail"><strong>${escapeHtml(job.episodeName || job.episodeId)}</strong><span class="muted">${escapeHtml(job.type.toUpperCase())} · ${escapeHtml(job.status)}</span><br><span>${escapeHtml(job.message || job.phase)}</span></div>
@@ -1697,7 +1757,7 @@
         jobsState = await api("/api/jobs");
         $("retryJobs").hidden = true;
       } catch (error) {
-        $("serverActivity").innerHTML = '<span class="warning">Could not load jobs.</span>';
+        $("serverActivity").innerHTML = `<span class="error">${icon("circle-x")} Error: Could not load jobs.</span>`;
         $("retryJobs").hidden = false;
         throw error;
       }
@@ -1730,20 +1790,29 @@
     }
 
     async function refreshState(preferredEpisodeId = currentEpisode?.id) {
+      const request = ++uiRequests.state;
+      const episodeRequest = uiRequests.episode;
+      let nextState;
+      let connection;
+      try {
+        [nextState, connection] = await Promise.all([api("/api/state"), api("/api/chatgpt/status")]);
+        if (request !== uiRequests.state) return;
+        $("retryState").hidden = true;
+      } catch (error) {
+        if (request !== uiRequests.state) return;
+        $("retryState").hidden = false;
+        throw error;
+      }
       if (profilesDirty) { syncSpeakerForm(); syncFormatForm(); }
       if (configDirty) syncConfigForm();
       const pendingProfiles = profilesDirty ? state?.profiles : null;
       const pendingConfig = configState;
-      const pendingDraft = episodeDraftDirty || transcriptDirty || transcriptPromptDirty ? captureEpisodeDraft() : null;
-      try {
-        state = await api("/api/state");
-        $("retryState").hidden = true;
-      } catch (error) {
-        $("retryState").hidden = false;
-        throw error;
-      }
+      const pendingDraft = hasUnsavedEpisodeChanges() ? captureEpisodeDraft() : null;
+      state = nextState;
       if (pendingProfiles) state.profiles = pendingProfiles;
       configState = configDirty ? pendingConfig : structuredClone(state.config || { providers: { mimo: {}, elevenlabs: {}, openai: {}, chatterbox: {} }, compatibleConnections: [] });
+      chatGptConnection = connection;
+      if (chatGptConnection.modelCatalog) modelCatalog = chatGptConnection.modelCatalog;
       renderProfileOptions();
       renderBuildOptions();
       renderFormatView();
@@ -1751,14 +1820,22 @@
       renderEpisodeList();
       renderConfigView();
       renderPlayer();
-      if (preferredEpisodeId && state.episodes.some((episode) => episode.id === preferredEpisodeId && !episode.corrupt)) {
-        await selectEpisode(preferredEpisodeId, pendingDraft);
+      if (episodeRequest !== uiRequests.episode) {
+        if (pendingDraft) restoreEpisodeDraft(pendingDraft);
+      }
+      else if (preferredEpisodeId && state.episodes.some((episode) => episode.id === preferredEpisodeId && !episode.corrupt)) {
+        await selectEpisode(preferredEpisodeId, pendingDraft, request);
       }
       else {
         resetEpisodeForm(Boolean(pendingDraft));
         if (pendingDraft) restoreEpisodeDraft(pendingDraft);
       }
+      if (request !== uiRequests.state) return;
       renderJobIndicators();
+      if (chatGptConnection.pending && !chatGptPollTimer) {
+        chatGptPollCount = 0;
+        chatGptPollTimer = setTimeout(() => refreshChatGptStatus().catch((error) => notify(error.message, "error")), 2_000);
+      }
     }
 
     function renderProfileOptions() {
@@ -1772,10 +1849,14 @@
       updateSaveButtons();
     }
 
-    function renderBuildOptions() {
-      $("buildEpisodeProfile").innerHTML = state.profiles.episodeProfiles.map((item) => option(item.id, item.name)).join("");
-      $("buildKnowledge").innerHTML = option("", "None — use LLM knowledge")
-        + state.knowledgeBases.map((item) => option(item.id, `${item.name} (${item.characters.toLocaleString()} chars)`)).join("");
+    function renderBuildOptions(loadedEpisode = null) {
+      const formatId = loadedEpisode?.episodeProfileId ?? $("buildEpisodeProfile").value;
+      const knowledgeId = loadedEpisode?.knowledgeBaseId ?? $("buildKnowledge").value;
+      $("buildEpisodeProfile").innerHTML = state.profiles.episodeProfiles.map((item) => option(item.id, item.name, item.id === formatId)).join("")
+        + (formatId && !state.profiles.episodeProfiles.some((item) => item.id === formatId) ? option(formatId, `${formatId} · unavailable`, true, true) : "");
+      $("buildKnowledge").innerHTML = option("", "None — use LLM knowledge", !knowledgeId)
+        + state.knowledgeBases.map((item) => option(item.id, `${item.name} (${item.characters.toLocaleString()} chars)`, item.id === knowledgeId)).join("")
+        + (knowledgeId && !state.knowledgeBases.some((item) => item.id === knowledgeId) ? option(knowledgeId, `${knowledgeId} · unavailable`, true, true) : "");
       const episodeOptions = state.episodes.map((item) => option(item.id, item.corrupt ? `${item.name} — ${item.lastError}` : `${item.name} — ${item.status}`, currentEpisode?.id === item.id, item.corrupt)).join("");
       $("savedEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
       $("ttsEpisodeSelect").innerHTML = '<option value="">Select saved episode</option>' + episodeOptions;
@@ -1806,7 +1887,7 @@
 
     function syncConfigForm() {
       if (!configState) return;
-      for (const id of ["mimo", "elevenlabs", "openai", "opencodeGo", "chatterbox"]) {
+      for (const id of ["mimo", "elevenlabs", "openai", "chatgpt", "opencodeGo", "chatterbox"]) {
         const row = document.querySelector(`[data-provider-id="${id}"]`);
         if (!row) continue;
         const provider = configState.providers[id];
@@ -1815,6 +1896,13 @@
           const input = row.querySelector(`[data-field="${field}"]`);
           if (input) provider[field] = input.value;
         }
+      }
+      const decisionRow = document.querySelector("[data-assistant-decision]");
+      if (decisionRow) {
+        configState.assistantDecision.enabled = decisionRow.querySelector('[data-field="enabled"]').checked;
+        configState.assistantDecision.provider = decisionRow.querySelector('[data-field="provider"]').value;
+        const keyInput = decisionRow.querySelector('[data-field="apiKey"]');
+        if (keyInput) configState.assistantDecision.apiKey = keyInput.value;
       }
       configState.compatibleConnections = [...document.querySelectorAll("[data-compatible-id]")].map((row) => {
         return {
@@ -1881,7 +1969,7 @@
     }
 
     function keyClearControl(kind, id, connection) {
-      if (connection.clearApiKey) return `<button type="button" data-undo-clear-key="${kind}:${escapeHtml(id)}">${icon("undo-2")}Undo key clear</button><span class="warning" data-key-clear-status>Key will be cleared on save.</span>`;
+      if (connection.clearApiKey) return `<button type="button" data-undo-clear-key="${kind}:${escapeHtml(id)}">${icon("undo-2")}Undo key clear</button><span class="warning" data-key-clear-status>${icon("triangle-alert")} Warning: Key will be cleared on save.</span>`;
       return connection.hasApiKey ? `<button type="button" class="danger" data-clear-key="${kind}:${escapeHtml(id)}">${icon("key-round")}Clear saved key</button>` : "";
     }
 
@@ -1928,20 +2016,93 @@
       return { active: { text: capabilities.some((item) => item.text), tts: capabilities.some((item) => item.tts) } };
     }
 
+    function assistantDecisionCard() {
+      const decision = configState.assistantDecision;
+      const openai = decision.provider === "openai";
+      const configured = decision.enabled && (openai ? configState.providers.openai.hasApiKey : decision.hasApiKey);
+      return `<section class="provider-card"><details class="connection-row" data-assistant-decision${document.querySelector("[data-assistant-decision][open]") ? " open" : ""}><summary><span class="connection-head"><strong>Assistant configuration decisions</strong><span class="status-pill ${configured ? "ready" : "unconfigured"}">${configured ? "Key configured" : "Off or key missing"}</span></span></summary><div class="connection-body"><p class="muted">Typed decisions select settings and actions. Apply and generation approval remain manual. A refusal, invalid answer, or uncertain result stops the proposal.</p><div class="grid"><label>Enabled<input data-field="enabled" type="checkbox"${decision.enabled ? " checked" : ""}></label><label class="full">Provider<select data-field="provider">${option("typesafe", "TypeSafe Jev", !openai)}${option("openai", "OpenAI Decisions", openai)}</select></label><label>Model<input readonly value="${openai ? "gpt-6-luna" : "jev-1.13.0"}"></label>${openai ? `<p class="muted full">Uses OPENAI_API_KEY from the OpenAI connection above. This is billed API use, separate from your ChatGPT subscription. ChatGPT sign-in does not supply this key. The endpoint is fixed at api.openai.com, without URL overrides. The 0.7 safety gate is UNCALIBRATED, not a proven accuracy estimate.</p><label>Documentation<a href="https://developers.openai.com/api/reference/resources/decisions/methods/create" target="_blank" rel="noopener noreferrer">OpenAI Decisions API</a></label>` : `<label>TypeSafe API key<input data-field="apiKey" type="password" value="${escapeHtml(decision.apiKey || "")}" placeholder="${decision.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Documentation<a href="https://docs.typesafe.ai/api" target="_blank" rel="noopener noreferrer">TypeSafe API</a></label>`}</div>${openai ? "" : keyClearControl("decision", "jev", decision)}</div></details></section>`;
+    }
+
     function renderConfigView() {
       if (!configState) return;
       const openConnections = new Set([...document.querySelectorAll("#configProviders .connection-row[open]")].map((row) => row.dataset.providerId ? `provider:${row.dataset.providerId}` : `compatible:${row.dataset.compatibleId}`));
       const p = configState.providers;
       $("configProviders").innerHTML = [
+        providerCard("chatgpt", "ChatGPT plan", ["text"], chatGptFields(), openConnections),
         providerCard("openai", "OpenAI", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.openai.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.openai.apiKey || "")}" placeholder="${p.openai.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.openai.baseUrl || "https://api.openai.com/v1")}"></label><label>Text generation URL override<input data-field="llmBaseUrl" value="${escapeHtml(p.openai.llmBaseUrl || "")}" placeholder="Optional"></label><label>Speech URL override<input data-field="ttsBaseUrl" value="${escapeHtml(p.openai.ttsBaseUrl || "")}" placeholder="Optional"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.openai.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
         providerCard("opencodeGo", "OpenCode Go", ["text"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.opencodeGo.enabled !== false ? " checked" : ""}></label><label>Credential source<input readonly value="${escapeHtml(p.opencodeGo.credentialSource === "environment" ? "OPENCODE_GO_API_KEY" : p.opencodeGo.credentialSource === "opencode-login" ? "OpenCode login" : "Not found")}"></label><label>Base URL<input readonly value="https://opencode.ai/zen/go/v1"></label><label>Documentation<a href="https://opencode.ai/docs/go/" target="_blank" rel="noreferrer">OpenCode Go API</a></label>`, openConnections),
         providerCard("elevenlabs", "ElevenLabs", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.elevenlabs.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.elevenlabs.apiKey || "")}" placeholder="${p.elevenlabs.hasApiKey ? "Key saved on server" : "Paste key"}"></label>`, openConnections),
         providerCard("chatterbox", "Chatterbox", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.chatterbox.enabled === true ? " checked" : ""}></label><label>API key, optional<input data-field="apiKey" type="password" value="${escapeHtml(p.chatterbox.apiKey || "")}" placeholder="${p.chatterbox.hasApiKey ? "Key saved on server" : "Optional"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.chatterbox.baseUrl || "")}" placeholder="http://127.0.0.1:8000/v1"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.chatterbox.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
         providerCard("mimo", "MiMo", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.mimo.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.mimo.apiKey || "")}" placeholder="${p.mimo.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.mimo.baseUrl || "")}"></label>`, openConnections),
+        assistantDecisionCard(),
         `<section class="provider-card provider-group"><div class="provider-head"><div><h3>OpenAI Compatible</h3>${modalityPills(["text", "tts"], compatibleActiveSummary())}</div><span class="badge">${configState.compatibleConnections.length} connection${configState.compatibleConnections.length === 1 ? "" : "s"}</span></div>${compatibleRows(openConnections)}</section>`,
       ].join("");
       renderModelStatus();
       updateSaveButtons();
+    }
+
+    function chatGptFields() {
+      const active = chatGptConnection.accounts.find((account) => account.id === chatGptConnection.activeAccountId);
+      const pending = Boolean(chatGptConnection.pending);
+      const status = pending ? "Complete sign-in in your browser." : active?.grant && active.status === "connected" ? configState.providers.chatgpt.enabled ? "Using ChatGPT plan" : "Plan usage is allowed. Enable this provider and select active models before use." : active?.status === "plan_disabled" ? "Plan usage is not allowed. Continue with ChatGPT to allow it." : "Sign in to use your ChatGPT plan for text generation.";
+      return `<label>Enabled<input data-field="enabled" type="checkbox"${configState.providers.chatgpt.enabled ? " checked" : ""}></label><label>Account<select data-chatgpt-account${pending ? " disabled" : ""}>${option("", "Add an account", !active)}${chatGptConnection.accounts.map((account) => option(account.id, `${account.label} · ${account.status}`, account.id === active?.id)).join("")}</select></label><div class="full"><p role="status" aria-live="polite">${escapeHtml(status)}</p>${chatGptConnection.lastSignIn?.error ? `<p class="error">${icon("circle-x")} Error: ${escapeHtml(chatGptConnection.lastSignIn.error)}</p>` : ""}<div class="actions"><button type="button" data-chatgpt-action="signin"${pending ? " disabled" : ""}>Continue with ChatGPT</button><button type="button" data-chatgpt-action="signout"${active && !pending ? "" : " disabled"}>Sign out</button>${pending ? `<button type="button" data-chatgpt-action="cancel">Cancel sign-in</button>` : ""}<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage usage</a>${pending && chatGptAuthorizeUrl ? `<a href="${escapeHtml(chatGptAuthorizeUrl)}" target="_blank" rel="noopener noreferrer">Open ChatGPT sign-in</a>` : ""}</div><p class="muted">Plan usage needs your permission. Prompts and selected context are sent to OpenAI. TTS needs its own provider. API-key billing will not start automatically.</p></div>`;
+    }
+
+    async function refreshChatGptStatus() {
+      clearTimeout(chatGptPollTimer);
+      syncConfigForm();
+      chatGptConnection = await api("/api/chatgpt/status");
+      if (chatGptConnection.modelCatalog) { modelCatalog = chatGptConnection.modelCatalog; renderSettingsAfterAsync(renderModelSelectors); }
+      if (!chatGptConnection.pending) {
+        chatGptAuthorizeUrl = "";
+        if (chatGptConnection.lastSignIn?.status === "complete" && chatGptConnection.accounts.some((account) => account.active && account.grant) && !localStorage.getItem("pod-god-chatgpt-plan-welcome")) {
+          notify("ChatGPT plan usage is allowed. Eligible text requests use your plan or credits. Enable the provider and select active models. Use Manage usage to review limits.", "ok");
+          localStorage.setItem("pod-god-chatgpt-plan-welcome", "1");
+        }
+      } else if (chatGptPollCount++ < 300) chatGptPollTimer = setTimeout(() => refreshChatGptStatus().catch((error) => notify(error.message, "error")), 2_000);
+      else {
+        chatGptConnection = await api("/api/chatgpt/cancel", { method: "POST", body: "{}" });
+        chatGptAuthorizeUrl = "";
+        notify("ChatGPT sign-in ended. Continue with ChatGPT to try again.", "warning");
+      }
+      renderSettingsAfterAsync();
+    }
+
+    function renderSettingsAfterAsync(render = renderConfigView, sync = true) {
+      const active = document.activeElement;
+      const row = active?.closest("[data-provider-id], [data-compatible-id], [data-assistant-decision]");
+      const rowSelector = row?.hasAttribute("data-assistant-decision") ? "[data-assistant-decision]" : row?.dataset.providerId ? `[data-provider-id="${CSS.escape(row.dataset.providerId)}"]` : row?.dataset.compatibleId ? `[data-compatible-id="${CSS.escape(row.dataset.compatibleId)}"]` : "";
+      const fieldSelector = active?.dataset.field ? `[data-field="${CSS.escape(active.dataset.field)}"]` : active?.matches("[data-chatgpt-account]") ? "[data-chatgpt-account]" : "";
+      const selection = typeof active?.selectionStart === "number" ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
+      if (sync) syncConfigForm();
+      render();
+      const replacement = rowSelector && fieldSelector ? document.querySelector(`${rowSelector} ${fieldSelector}`) : null;
+      if (replacement) {
+        replacement.focus({ preventScroll: true });
+        if (selection) replacement.setSelectionRange(...selection);
+      }
+    }
+
+    async function chatGptAction(action) {
+      syncConfigForm();
+      clearTimeout(chatGptPollTimer);
+      const accountId = document.querySelector("[data-chatgpt-account]")?.value || "";
+      const popup = action === "signin" ? window.open("about:blank", "_blank") : null;
+      if (popup) popup.opener = null;
+      try {
+        const value = await api(`/api/chatgpt/${action}`, { method: "POST", body: JSON.stringify({ accountId }) });
+        if (action === "signin") {
+          const url = new URL(value.authorizeUrl);
+          if (url.origin !== "https://auth.openai.com" || url.pathname !== "/api/accounts/authorize" || url.username || url.password || url.hash) throw new Error("ChatGPT returned an invalid sign-in URL.");
+          chatGptAuthorizeUrl = url.href;
+          if (popup) popup.location = url.href;
+          chatGptPollCount = 0;
+        }
+        chatGptConnection = value;
+        if (value.modelCatalog) { modelCatalog = value.modelCatalog; renderSettingsAfterAsync(renderModelSelectors); }
+        if (value.warning) notify(value.warning, "warning");
+        await refreshChatGptStatus();
+      } catch (error) { popup?.close(); throw error; }
     }
 
     function selectedModelTarget() {
@@ -1949,9 +2110,9 @@
       if (modelDialogTarget.kind === "provider") return {
         connection: configState.providers[modelDialogTarget.id],
         provider: modelCatalog.providers?.[modelDialogTarget.id],
-        name: modelDialogTarget.id === "mimo" ? "MiMo" : modelDialogTarget.id === "elevenlabs" ? "ElevenLabs" : modelDialogTarget.id === "openai" ? "OpenAI" : modelDialogTarget.id === "opencodeGo" ? "OpenCode Go" : "Chatterbox",
-        fixedType: ["elevenlabs", "chatterbox"].includes(modelDialogTarget.id) ? "tts" : modelDialogTarget.id === "opencodeGo" ? "text" : "",
-        allowCustom: modelDialogTarget.id !== "opencodeGo",
+        name: modelDialogTarget.id === "mimo" ? "MiMo" : modelDialogTarget.id === "elevenlabs" ? "ElevenLabs" : modelDialogTarget.id === "openai" ? "OpenAI" : modelDialogTarget.id === "chatgpt" ? "ChatGPT plan" : modelDialogTarget.id === "opencodeGo" ? "OpenCode Go" : "Chatterbox",
+        fixedType: ["elevenlabs", "chatterbox"].includes(modelDialogTarget.id) ? "tts" : ["chatgpt", "opencodeGo"].includes(modelDialogTarget.id) ? "text" : "",
+        allowCustom: !["chatgpt", "opencodeGo"].includes(modelDialogTarget.id),
       };
       const connection = configState.compatibleConnections.find((item) => item.id === modelDialogTarget.id);
       return { connection, provider: compatibleProvider(modelDialogTarget.id), name: connection?.name || "OpenAI compatible", fixedType: "", allowCustom: true };
@@ -1965,7 +2126,7 @@
     function modelSelectionRow(id, model, active, fixedType) {
       const supported = model?.supported !== false;
       const mode = fixedType || modelMode(active || model?.suggested);
-      return `<div class="model-row" data-model-id="${escapeHtml(id)}" data-search="${escapeHtml(id.toLowerCase())}"><input type="checkbox" data-model-active aria-label="Activate ${escapeHtml(id)}"${supported && (active?.text || active?.tts) ? " checked" : ""}${supported ? "" : " disabled"}><span>${escapeHtml(id)}${supported ? "" : " · unsupported protocol"}</span><select data-model-type aria-label="${escapeHtml(id)} capability"${supported ? "" : " disabled"}>${modelTypeOptions(mode, fixedType)}</select></div>`;
+      return `<div class="model-row" data-model-id="${escapeHtml(id)}" data-search="${escapeHtml(id.toLowerCase())}"><input type="checkbox" data-model-active aria-label="Activate ${escapeHtml(id)}"${supported && (active?.text || active?.tts) ? " checked" : ""}${supported ? "" : " disabled"}><span title="${escapeHtml(model?.unsupportedReason || "")}">${escapeHtml(id)}${supported ? "" : " · unsupported API"}</span><select data-model-type aria-label="${escapeHtml(id)} capability"${supported ? "" : " disabled"}>${modelTypeOptions(mode, fixedType)}</select></div>`;
     }
 
     function openModelDialog(kind, id) {
@@ -2112,8 +2273,8 @@
       format.targetMinutes = Number($("fmtMinutes").value) || format.targetMinutes;
       if ($("fmtOutlineModel").value) format.outlineModel = $("fmtOutlineModel").value;
       if ($("fmtTranscriptModel").value) format.transcriptModel = $("fmtTranscriptModel").value;
-      format.outlineEffort = $("fmtOutlineEffort").value;
-      format.transcriptEffort = $("fmtTranscriptEffort").value;
+      if (format.outlineEffort != null || $("fmtOutlineEffort").value) format.outlineEffort = $("fmtOutlineEffort").value;
+      if (format.transcriptEffort != null || $("fmtTranscriptEffort").value) format.transcriptEffort = $("fmtTranscriptEffort").value;
     }
 
     function voiceProvider(model) {
@@ -2146,7 +2307,8 @@
     function ensureProviderVoices(model) {
       const provider = voiceProvider(model);
       if (!["elevenlabs", "chatterbox"].includes(provider) || voiceRequests[provider]) return;
-      voiceRequests[provider] = api(`/api/tts/${provider}/voices`).then((value) => {
+      const request = api(`/api/tts/${provider}/voices`).then((value) => {
+        if (voiceRequests[provider] !== request) return;
         if (provider === "elevenlabs") elevenVoices = value.voices;
         else { chatterboxVoices = value.voices; chatterboxVoicesLoaded = true; }
         syncSpeakerForm();
@@ -2154,10 +2316,12 @@
         if (profile) renderSpeakerCards(profile);
         renderTtsView();
       }).catch((error) => {
+        if (voiceRequests[provider] !== request) return;
         if (provider === "chatterbox") chatterboxVoicesLoaded = false;
         delete voiceRequests[provider];
         notify(error.message || String(error), "error");
       });
+      voiceRequests[provider] = request;
     }
 
     function voiceSelector(model, selected, index) {
@@ -2193,16 +2357,18 @@
             <label class="full" title="Extra MiMo instruction appended to the TTS instruction.">MiMo instruction<textarea data-field="mimoInstructionText" placeholder="Example: Keep pacing relaxed and avoid announcer energy.">${escapeHtml(speaker.mimoInstructionText || "")}</textarea></label>`;
       if (ttsProvider(model) === "elevenlabs") return `
             <label title="Voice consistency. Higher is more stable; lower is more expressive.">Stability<input data-field="elevenlabsStability" type="number" min="0" max="1" step="0.05" value="${speaker.elevenlabsStability ?? 0.5}"></label>
-            <label title="How closely to match the selected voice.">Similarity boost<input data-field="elevenlabsSimilarityBoost" type="number" min="0" max="1" step="0.05" value="${speaker.elevenlabsSimilarityBoost ?? 0.75}"></label>
+            <label title="How closely to match the selected voice.">${model === "eleven_v4" ? "Similarity" : "Similarity boost"}<input data-field="elevenlabsSimilarityBoost" type="number" min="0" max="1" step="0.05" value="${speaker.elevenlabsSimilarityBoost ?? 0.75}"></label>
+            ${model === "eleven_v4" ? "" : `
             <label title="Style exaggeration for supported models.">Style<input data-field="elevenlabsStyle" type="number" min="0" max="1" step="0.05" value="${speaker.elevenlabsStyle ?? 0}"></label>
             <label title="Playback/generation speed.">Speed<input data-field="elevenlabsSpeed" type="number" min="0.7" max="1.2" step="0.01" value="${speaker.elevenlabsSpeed ?? 1}"></label>
+            <label title="Use ElevenLabs speaker boost.">Speaker boost<input data-field="elevenlabsUseSpeakerBoost" type="checkbox"${speaker.elevenlabsUseSpeakerBoost !== false ? " checked" : ""}></label>`}
             <label title="Optional deterministic seed. Blank omits it.">Seed<input data-field="elevenlabsSeed" type="number" min="0" max="4294967295" step="1" value="${speaker.elevenlabsSeed ?? ""}"></label>
             <label>Text normalization<select data-field="elevenlabsTextNormalization">
               ${option("auto", "Auto", (speaker.elevenlabsTextNormalization || "auto") === "auto")}
               ${option("on", "On", speaker.elevenlabsTextNormalization === "on")}
               ${option("off", "Off", speaker.elevenlabsTextNormalization === "off")}
             </select></label>
-            <label title="Use ElevenLabs speaker boost.">Speaker boost<input data-field="elevenlabsUseSpeakerBoost" type="checkbox"${speaker.elevenlabsUseSpeakerBoost !== false ? " checked" : ""}></label>`;
+            ${model === "eleven_v4" ? `<p class="muted full">v4 uses Stability and Similarity. Style, Speed, and Speaker boost are not sent. Use natural audio tags such as [whispers] or [laughs], not SSML. <a href="https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices" target="_blank" rel="noopener noreferrer">Audio tag guide</a></p>` : ""}`;
       return "";
     }
 
@@ -2237,6 +2403,7 @@
               <summary>Delivery and character</summary>
               <div class="grid">
                 <label class="full">Accent override<input data-field="accent" list="accent-list-${index}" value="${escapeHtml(speaker.accent || "")}" placeholder="Use episode language default"><datalist id="accent-list-${index}">${accentOptions()}</datalist></label>
+                ${resolvedModel === "eleven_v4" ? `<p class="muted full">v4 does not send this accent override to the API. Select a voice with the required accent and preview it. If the episode language differs from the reference voice language, v4 uses a natural target-language accent.</p>` : ""}
                 ${providerTtsFields(speaker, resolvedModel)}
                 <label class="full">Backstory<textarea data-field="backstory">${escapeHtml(speaker.backstory)}</textarea></label>
                 <label class="full">Personality<textarea data-field="personality">${escapeHtml(speaker.personality)}</textarea></label>
@@ -2330,9 +2497,12 @@
       updateSaveButtons();
     }
 
-    function renderEpisodeSettingsFields() {
+    function renderEpisodeSettingsFields(loadSavedHosts = false, draftHosts = "") {
       const format = state?.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
-      $("episodeHosts").innerHTML = (state?.profiles.speakerProfiles || []).map((item) => option(item.id, item.name, item.id === (currentEpisode?.speakerProfileId || format?.speakerProfileId))).join("");
+      const hostId = draftHosts || !loadSavedHosts && $("episodeHosts").value || currentEpisode?.speakerProfileId || format?.speakerProfileId || "";
+      const hosts = state?.profiles.speakerProfiles || [];
+      $("episodeHosts").innerHTML = hosts.map((item) => option(item.id, item.name, item.id === hostId)).join("")
+        + (hostId && !hosts.some((item) => item.id === hostId) ? option(hostId, `${hostId} · unavailable`, true, true) : "");
       $("transcriptEffort").innerHTML = effortOptions(format?.transcriptModel, format?.transcriptEffort || "");
       $("transcriptEffortLabel").hidden = !effortLevelsForModel(format?.transcriptModel).length;
     }
@@ -2346,7 +2516,8 @@
     function addSpeakerProfile(copy) {
       syncSpeakerForm();
       const current = state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId);
-      const voiceModel = discoveredModels("tts")[0]?.id || "";
+      const models = discoveredModels("tts");
+      const voiceModel = models.find((model) => model.id === "eleven_v4")?.id || models[0]?.id || "";
       const base = copy ? structuredClone(current) : {
         name: "New speaker profile", description: "", voiceModel, instructions: "",
         speakers: [{ name: "Speaker 1", backstory: "Required", personality: "Required", voiceId: defaultVoiceId(voiceModel), style: "Speak naturally in the configured episode language.", accent: "", ttsModelOverride: "", chatterboxExaggeration: 0.7, chatterboxCfgWeight: 0.3, chatterboxTemperature: 0.7, mimoTemperature: null, mimoTopP: null, mimoInstructionPreset: "", mimoInstructionText: "", elevenlabsStability: 0.5, elevenlabsSimilarityBoost: 0.75, elevenlabsStyle: 0, elevenlabsUseSpeakerBoost: true, elevenlabsSpeed: 1, elevenlabsSeed: null, elevenlabsTextNormalization: "auto" }],
@@ -2360,21 +2531,34 @@
     }
 
     async function saveProfiles() {
-      const view = activeViewName();
-      if (["speakers", "format"].includes(view) && !validateControls($(`view-${view}`))) return false;
-      syncSpeakerForm();
-      syncFormatForm();
-      const result = await api("/api/profiles", { method: "PUT", body: JSON.stringify(state.profiles) });
-      state.profiles = result.profiles || result;
-      profilesDirty = false;
-      renderProfileOptions();
-      renderBuildOptions();
-      renderFormatView();
-      renderEpisodeSettingsFields();
-      renderTtsView();
-      if (result.warnings?.length) notify(`Profiles saved with warnings: ${result.warnings.join(" ")}`, "warning");
-      else notify("Profiles saved.", "ok");
-      return result.profiles || result;
+      return saveEditor("profilesSave", async () => {
+        const view = activeViewName();
+        if (["speakers", "format"].includes(view) && !validateControls($(`view-${view}`))) return false;
+        syncSpeakerForm();
+        syncFormatForm();
+        const submitted = structuredClone(state.profiles);
+        const result = await api("/api/profiles", { method: "PUT", body: JSON.stringify(submitted) });
+        ++uiRequests.state;
+        syncSpeakerForm();
+        syncFormatForm();
+        const saved = result.profiles || result;
+        for (const key of ["speakerProfiles", "episodeProfiles"]) {
+          state.profiles[key] = state.profiles[key].map((profile) => {
+            const original = submitted[key].find((item) => item.id === profile.id);
+            const updated = saved[key].find((item) => item.id === profile.id);
+            return JSON.stringify(profile) === JSON.stringify(original) ? updated || profile : { ...profile, ...(updated ? { revision: updated.revision } : {}) };
+          });
+        }
+        profilesDirty = JSON.stringify(state.profiles) !== JSON.stringify(saved);
+        renderProfileOptions();
+        renderBuildOptions();
+        renderFormatView();
+        renderEpisodeSettingsFields();
+        renderTtsView();
+        if (result.warnings?.length) notify(`Profiles saved with warnings: ${result.warnings.join(" ")}`, "warning");
+        else notify("Profiles saved.", "ok");
+        return result.profiles || result;
+      });
     }
 
     function addCompatibleConnection() {
@@ -2398,24 +2582,29 @@
     }
 
     async function saveConfig() {
-      if (!configState) throw new Error("Config is not loaded yet.");
-      if (!validateControls($("view-config"))) return false;
-      syncConfigForm();
-      const value = await api("/api/config", { method: "PUT", body: JSON.stringify(configState) });
-      configState = structuredClone(value.config);
-      if (state) state.config = structuredClone(value.config);
-      modelCatalog = value.modelCatalog;
-      elevenVoices = [];
-      chatterboxVoices = [];
-      chatterboxVoicesLoaded = false;
-      delete voiceRequests.elevenlabs;
-      delete voiceRequests.chatterbox;
-      configDirty = false;
-      renderModelSelectors();
-      if (value.warnings?.length) {
-        alert(`Config saved with warnings:\n\n${value.warnings.join("\n")}`);
-        notify(`Config saved with warnings: ${value.warnings.join(" ")}`, "warning");
-      } else notify("Config saved.", "ok");
+      return saveEditor("configSave", async () => {
+        if (!configState) throw new Error("Config is not loaded yet.");
+        if (!validateControls($("view-config"))) return false;
+        syncConfigForm();
+        const submitted = JSON.stringify(configState);
+        const value = await api("/api/config", { method: "PUT", body: submitted });
+        ++uiRequests.state;
+        syncConfigForm();
+        configDirty = JSON.stringify(configState) !== submitted;
+        if (!configDirty) configState = structuredClone(value.config);
+        if (state) state.config = structuredClone(value.config);
+        modelCatalog = value.modelCatalog;
+        elevenVoices = [];
+        chatterboxVoices = [];
+        chatterboxVoicesLoaded = false;
+        delete voiceRequests.elevenlabs;
+        delete voiceRequests.chatterbox;
+        renderSettingsAfterAsync(renderModelSelectors, false);
+        if (value.warnings?.length) {
+          alert(`Config saved with warnings:\n\n${value.warnings.join("\n")}`);
+          notify(`Config saved with warnings: ${value.warnings.join(" ")}`, "warning");
+        } else notify("Config saved.", "ok");
+      });
     }
 
     async function uploadKnowledge() {
@@ -2440,15 +2629,18 @@
       const episodes = state.episodes.filter((episode) => episode.knowledgeBaseId === id).length;
       if (!confirm(`Delete "${item.name}"?\n\nThis will clear it from ${plans} plan(s), ${episodes} episode(s), and any assistant chats using it. Cancel if you want to clear those references manually first.`)) return;
       const result = await api(`/api/knowledge/${encodeURIComponent(id)}`, { method: "DELETE" });
+      ++uiRequests.state;
+      const affectedPlan = activePlan?.knowledgeBaseId === id ? structuredClone(activePlan) : null;
       if ($("buildKnowledge").value === id) $("buildKnowledge").value = "";
       if (currentEpisode?.knowledgeBaseId === id) currentEpisode.knowledgeBaseId = "";
       if (activePlan?.knowledgeBaseId === id) activePlan.knowledgeBaseId = "";
       if (plannerChatThread?.kbId === id) plannerChatThread.kbId = "";
       await refreshState(currentEpisode?.id);
+      if (affectedPlan) await refreshPlanVersionAfterRepoint(affectedPlan, { knowledgeBaseId: "" });
       notify(`Deleted ${item.name}. Cleared ${result.cleared.plans} plan(s), ${result.cleared.episodes} episode(s), and ${result.cleared.chats} chat(s).`, "ok");
     }
 
-    function renderChatControls() {
+    function renderChatControls(defaults = null) {
       if (!state) return;
       const plans = state.plans || [];
       if (activePlanId && !plans.some((item) => item.id === activePlanId)) {
@@ -2460,9 +2652,10 @@
         activePlanId = plans[0].id;
         queueMicrotask(() => loadPlan(activePlanId, true).catch((error) => notify(error.message, "error")));
       }
-      const chatModel = plannerChatThread?.lastModel || $("plannerChatModel").value || activePlan?.planningModel || "";
+      const previousModel = $("plannerChatModel").value;
+      const chatModel = defaults?.model ?? (previousModel || plannerChatThread?.lastModel || activePlan?.planningModel || "");
       $("plannerChatModel").innerHTML = textModelOptions(chatModel);
-      const chatEffort = (activePlan ? activePlan.planningEffort : $("plannerChatEffort").value) || "";
+      const chatEffort = defaults?.effort ?? (previousModel === chatModel ? $("plannerChatEffort").value : activePlan?.planningEffort || "");
       $("plannerChatEffort").innerHTML = effortOptions(chatModel, chatEffort);
       $("plannerChatEffortLabel").hidden = !effortLevelsForModel(chatModel).length;
       const chatKb = plannerChatThread?.kbId || $("plannerChatKb").value || "";
@@ -2479,6 +2672,7 @@
       const modelText = modelSel.selectedOptions[0]?.textContent?.trim() || "—";
       const kbText = kbSel.selectedOptions[0]?.textContent?.trim() || "None";
       $("chatPillModel").textContent = modelText;
+      $("chatGptPlanUsage").hidden = !modelSel.value.startsWith("compat:chatgpt:") || !chatGptConnection.accounts.some((account) => account.active && account.grant);
       $("chatPillModel").title = "Model: " + modelText;
       $("chatPillKb").textContent = kbText;
       $("chatPillKb").title = "Knowledge base: " + kbText;
@@ -2494,11 +2688,23 @@
     }
 
     function loadPlanForm(plan) {
+      if (activePlanId !== plan.id) ++uiRequests.chatSelection;
       activePlan = structuredClone(plan);
       activePlanId = plan.id;
       rememberViewSelection("planId", plan.id);
-      renderChatControls();
+      renderChatControls({ model: plan.planningModel || "", effort: plan.planningEffort || "" });
       renderEpisodeList();
+    }
+
+    async function refreshPlanVersionAfterRepoint(plan, changes) {
+      if (activePlan?.id !== plan.id) return;
+      const selection = uiRequests.planLoad;
+      const { plan: saved } = await api(`/api/plans/${encodeURIComponent(plan.id)}`);
+      if (activePlan?.id !== plan.id || selection !== uiRequests.planLoad) return;
+      const { updatedAt: previousStamp, ...expected } = { ...plan, ...changes };
+      const { updatedAt: savedStamp, ...savedFields } = saved;
+      if (JSON.stringify(expected) === JSON.stringify(savedFields)) activePlan.updatedAt = savedStamp;
+      else notify("The plan also changed. Reload it before saving. Your local changes are still in the editor.", "warning");
     }
 
     function capturePlanDraft() {
@@ -2510,8 +2716,11 @@
     }
 
     async function loadPlan(id, force = false) {
+      const request = ++uiRequests.planLoad;
+      ++uiRequests.chatSelection;
       if (!id) { activePlanId = ""; activePlan = null; rememberViewSelection("planId", ""); renderChatControls(); renderEpisodeList(); return; }
       const data = await api(`/api/plans/${encodeURIComponent(id)}`);
+      if (request !== uiRequests.planLoad) return;
       loadPlanForm(data.plan);
       plannerChatThreadId = "";
       plannerChatThread = null;
@@ -2520,10 +2729,21 @@
 
     async function saveActivePlan() {
       if (!activePlan) throw new Error("Describe the podcast in the chat first.");
-      const data = await api(`/api/plans/${encodeURIComponent(activePlan.id)}`, { method: "PUT", body: JSON.stringify(capturePlanDraft()) });
-      loadPlanForm(data.plan);
-      await refreshPlanIndex();
-      return data.plan;
+      const id = activePlan.id;
+      return saveEditor("planSave", async () => {
+        if (activePlan?.id !== id) return false;
+        const selection = uiRequests.planLoad;
+        const submitted = capturePlanDraft();
+        const data = await api(`/api/plans/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ ...submitted, expectedUpdatedAt: activePlan.updatedAt }) });
+        ++uiRequests.state;
+        if (activePlan?.id === id && selection === uiRequests.planLoad) {
+          const live = capturePlanDraft();
+          if (JSON.stringify(live) === JSON.stringify(submitted)) loadPlanForm(data.plan);
+          else activePlan = { ...live, updatedAt: data.plan.updatedAt };
+        }
+        await refreshPlanIndex();
+        return data.plan;
+      });
     }
 
     async function refreshPlanIndex() {
@@ -2652,6 +2872,8 @@
     }
 
     function resetEpisodeForm(preserveDirty = false) {
+      ++uiRequests.episode;
+      ++uiRequests.prompt;
       activeTranscriptSection = "script";
       currentEpisode = null;
       rememberViewSelection("episodeId", "");
@@ -2680,10 +2902,24 @@
       return episodeDraftDirty || transcriptDirty || transcriptPromptDirty;
     }
 
-    async function selectEpisode(id, pendingDraft = null) {
+    async function selectEpisode(id, pendingDraft = null, refreshRequest = null) {
       if (id !== currentEpisode?.id && hasUnsavedEpisodeChanges() && pendingDraft?.id !== id && !confirm("Discard unsaved episode changes?")) return false;
+      const request = ++uiRequests.episode;
+      const currentRequest = () => request === uiRequests.episode && (refreshRequest === null || refreshRequest === uiRequests.state);
       if (!id) { resetEpisodeForm(); return true; }
-      currentEpisode = await api(`/api/episodes/${id}`);
+      const before = captureEpisodeDraft();
+      let episode;
+      try { episode = await api(`/api/episodes/${encodeURIComponent(id)}`); }
+      catch (error) { if (!currentRequest()) return false; throw error; }
+      if (!currentRequest()) return false;
+      const liveDraft = captureEpisodeDraft();
+      if (id !== before.id && JSON.stringify(liveDraft) !== JSON.stringify(before)) {
+        notify("Episode selection stopped because the draft changed. Save your changes, then select the episode again.", "warning");
+        return false;
+      }
+      if (liveDraft.id === id && hasUnsavedEpisodeChanges()) pendingDraft = liveDraft;
+      currentEpisode = episode;
+      renderBuildOptions(episode);
       rememberViewSelection("episodeId", id);
       transcriptPromptDirty = false;
       $("savedEpisodeSelect").value = id;
@@ -2694,14 +2930,16 @@
       $("additionalInstructions").value = currentEpisode.additionalInstructions || "";
       $("transcriptPromptGuidance").value = currentEpisode.transcriptPromptGuidance || "";
       $("transcriptText").value = currentEpisode.transcript || "";
-      renderEpisodeSettingsFields();
+      renderEpisodeSettingsFields(true);
       if (pendingDraft?.id === id) restoreEpisodeDraft(pendingDraft);
       else {
         episodeDraftDirty = false;
         transcriptDirty = false;
       }
       updateWordCount();
-      await resolveTranscriptPrompt();
+      try { await resolveTranscriptPrompt(); }
+      catch (error) { if (!currentRequest()) return false; throw error; }
+      if (!currentRequest()) return false;
       renderTtsView();
       renderJobIndicators();
       renderPodcastAssistant();
@@ -2725,7 +2963,9 @@
     }
 
     function restoreEpisodeDraft(draft) {
+      renderBuildOptions(draft);
       $("buildEpisodeProfile").value = draft.episodeProfileId;
+      renderEpisodeSettingsFields(false, draft.speakerProfileId);
       if (draft.speakerProfileId) $("episodeHosts").value = draft.speakerProfileId;
       $("buildKnowledge").value = draft.knowledgeBaseId;
       $("episodeName").value = draft.name;
@@ -2742,43 +2982,61 @@
     async function saveEpisode() {
       if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
       if (activeViewName() === "transcript" && !validateControls($("view-transcript"))) return false;
-      const value = await api("/api/episodes", {
-        method: "POST",
-        body: JSON.stringify({
-          id: currentEpisode.id,
-          name: $("episodeName").value,
-          episodeProfileId: $("buildEpisodeProfile").value,
-          speakerProfileId: $("episodeHosts").value,
-          knowledgeBaseId: $("buildKnowledge").value,
-          additionalInstructions: $("additionalInstructions").value,
-          transcriptPromptGuidance: $("transcriptPromptGuidance").value,
-        }),
+      const submitted = captureEpisodeDraft();
+      const selection = uiRequests.episode;
+      return saveEditor("episodeSave", async () => {
+        const value = await api("/api/episodes", {
+          method: "POST",
+          body: JSON.stringify({
+            id: submitted.id,
+            name: submitted.name,
+            episodeProfileId: submitted.episodeProfileId,
+            speakerProfileId: submitted.speakerProfileId,
+            knowledgeBaseId: submitted.knowledgeBaseId,
+            additionalInstructions: submitted.additionalInstructions,
+            transcriptPromptGuidance: submitted.transcriptPromptGuidance,
+          }),
+        });
+        ++uiRequests.state;
+        const warning = value.warning || "";
+        if (currentEpisode?.id === submitted.id && selection === uiRequests.episode) {
+          const live = captureEpisodeDraft();
+          currentEpisode = { ...currentEpisode, ...value };
+          const fields = ["name", "episodeProfileId", "speakerProfileId", "knowledgeBaseId", "additionalInstructions"];
+          episodeDraftDirty = fields.some((field) => live[field] !== submitted[field]);
+          transcriptPromptDirty = live.transcriptPromptGuidance !== submitted.transcriptPromptGuidance;
+          await refreshState(value.id);
+        }
+        if (warning) notify(warning, "warning");
+        return { ...value, warning };
       });
-      const warning = value.warning || "";
-      currentEpisode = { ...currentEpisode, ...value };
-      episodeDraftDirty = false;
-      transcriptPromptDirty = false;
-      await refreshState(value.id);
-      if (warning) notify(warning, "warning");
-      return { ...currentEpisode, warning };
     }
 
     async function saveTranscript() {
       if (!currentEpisode) throw new Error("Ask the chat to create episodes first.");
-      const saved = await api(`/api/episodes/${currentEpisode.id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript: $("transcriptText").value }) });
-      const segmentWarning = saved.warning || "";
-      currentEpisode = saved;
-      transcriptDirty = false;
-      await refreshState(currentEpisode.id);
-      const warning = [segmentWarning, transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile)].filter(Boolean).join(" ");
-      notify(warning || "Transcript saved and validated.", warning ? "warning" : "ok");
-      return currentEpisode;
+      const id = currentEpisode.id;
+      const selection = uiRequests.episode;
+      const transcript = $("transcriptText").value;
+      return saveEditor("transcriptSave", async () => {
+        const saved = await api(`/api/episodes/${id}/transcript`, { method: "PUT", body: JSON.stringify({ transcript }) });
+        ++uiRequests.state;
+        const segmentWarning = saved.warning || "";
+        if (currentEpisode?.id === id && selection === uiRequests.episode) {
+          transcriptDirty = $("transcriptText").value !== transcript;
+          currentEpisode = saved;
+          await refreshState(id);
+        }
+        const warning = [segmentWarning, transcriptLengthMessage(saved.transcriptWords, saved.episodeProfile)].filter(Boolean).join(" ");
+        notify(warning || "Transcript saved and validated.", warning ? "warning" : "ok");
+        return saved;
+      });
     }
 
     async function generateTranscript() {
-      if (await saveEpisode() === false) return;
       const generateTts = $("autoGenerateTts").checked;
-      const { job } = await api(`/api/episodes/${currentEpisode.id}/generate`, { method: "POST", body: JSON.stringify({ autoTts: generateTts }) });
+      const saved = await saveEpisode();
+      if (saved === false) return;
+      const { job } = await api(`/api/episodes/${saved.id}/generate`, { method: "POST", body: JSON.stringify({ autoTts: generateTts }) });
       trackJob(job);
       notify(generateTts ? "Transcript job queued. TTS will start when it completes." : "Transcript job queued.");
     }
@@ -2876,9 +3134,9 @@
         const verified = voice?.verifiedLanguages?.find((item) => item.language === language?.apiCode || item.locale === language?.id);
         const voiceAccent = verified?.accent || voice?.labels?.accent || "";
         const mismatch = voiceAccent && requestedAccent !== "language default" && !voiceAccent.toLowerCase().includes(requestedAccent.toLowerCase()) && !requestedAccent.toLowerCase().includes(voiceAccent.toLowerCase());
-        return `<div><strong>${escapeHtml(speaker.name)}</strong> <span class="badge">${escapeHtml(modelLabel(model))}</span><br><span class="muted">Voice: ${escapeHtml(voice ? voiceDescription(voice) : speaker.voiceId)} · Requested accent: ${escapeHtml(requestedAccent)}</span>${mismatch ? `<br><span class="warning">Voice metadata says ${escapeHtml(voiceAccent)}; preview before rendering.</span>` : ""}</div>`;
-      }).join("") + errors.map((error) => `<div class="warning">${escapeHtml(error)}</div>`).join("");
-      if (lengthWarning) $("ttsSummary").insertAdjacentHTML("afterbegin", `<div class="warning">${escapeHtml(lengthWarning)}</div>`);
+        return `<div><strong>${escapeHtml(speaker.name)}</strong> <span class="badge">${escapeHtml(modelLabel(model))}</span><br><span class="muted">Voice: ${escapeHtml(voice ? voiceDescription(voice) : speaker.voiceId)} · Requested accent: ${escapeHtml(requestedAccent)}</span>${model === "eleven_v4" ? `<br><span class="muted">v4 does not enforce accent overrides. A different reference voice language uses a natural target-language accent. Preview before rendering.</span>` : ""}${mismatch ? `<br><span class="warning">${icon("triangle-alert")} Warning: Voice metadata says ${escapeHtml(voiceAccent)}; preview before rendering.</span>` : ""}</div>`;
+      }).join("") + errors.map((error) => `<div class="error">${icon("circle-x")} Error: ${escapeHtml(error)}</div>`).join("");
+      if (lengthWarning) $("ttsSummary").insertAdjacentHTML("afterbegin", `<div class="warning">${icon("triangle-alert")} Warning: ${escapeHtml(lengthWarning)}</div>`);
       $("previewButtons").innerHTML = speakerProfile.speakers.map((speaker, index) => {
         const error = modelLanguageError(speaker.ttsModelOverride || speakerProfile.voiceModel, language);
         return `<button type="button" data-preview-index="${index}"${error ? " disabled" : ""}>${icon("volume-2")}${escapeHtml(speaker.name)}</button>`;
@@ -2907,8 +3165,15 @@
       } catch { return []; }
     }
 
-    function savePlayerPlaylists() {
-      localStorage.setItem(PLAYER_PLAYLISTS_KEY, JSON.stringify(playerPlaylists));
+    async function savePlayerPlaylists(mutate) {
+      if (!navigator.locks?.request) throw new Error("This browser cannot safely save playlists across tabs. Use a browser with Web Locks support. Your playback queue is unchanged.");
+      return navigator.locks.request(PLAYER_PLAYLISTS_KEY, () => {
+        const latest = loadPlayerPlaylists();
+        const result = mutate(latest);
+        localStorage.setItem(PLAYER_PLAYLISTS_KEY, JSON.stringify(latest));
+        playerPlaylists = latest;
+        return result;
+      });
     }
 
     function currentPlayerOrder() {
@@ -2933,45 +3198,60 @@
       return name;
     }
 
-    function saveNewPlayerPlaylist() {
+    async function saveNewPlayerPlaylist() {
       const episodeIds = currentPlayerOrder();
       if (!episodeIds.length) throw new Error("Add or play an episode before saving a playlist.");
+      playerPlaylists = loadPlayerPlaylists();
       const name = requestedPlaylistName("Playlist name");
       if (!name) return;
       const playlist = { id: crypto.randomUUID(), name, episodeIds };
-      playerPlaylists.push(playlist);
+      await savePlayerPlaylists((latest) => {
+        if (latest.some((item) => item.name.toLowerCase() === name.toLowerCase())) throw new Error("Playlist name already exists.");
+        latest.push(playlist);
+      });
       activePlayerPlaylistId = playlist.id;
-      savePlayerPlaylists();
       renderPlayer();
       notify(`Saved playlist ${name}.`, "ok");
     }
 
-    function updatePlayerPlaylist() {
-      const playlist = playerPlaylists.find((item) => item.id === activePlayerPlaylistId);
+    async function updatePlayerPlaylist() {
+      const id = activePlayerPlaylistId;
       const episodeIds = currentPlayerOrder();
-      if (!playlist || !episodeIds.length) throw new Error("Select a playlist and add at least one episode.");
-      playlist.episodeIds = episodeIds;
-      savePlayerPlaylists();
+      if (!id || !episodeIds.length) throw new Error("Select a playlist and add at least one episode.");
+      const playlist = await savePlayerPlaylists((latest) => {
+        const item = latest.find((entry) => entry.id === id);
+        if (!item) throw new Error("This playlist was deleted in another tab. Select or save a playlist again.");
+        item.episodeIds = episodeIds;
+        return item;
+      });
       renderPlayer();
       notify(`Updated playlist ${playlist.name}.`, "ok");
     }
 
-    function renamePlayerPlaylist() {
+    async function renamePlayerPlaylist() {
+      playerPlaylists = loadPlayerPlaylists();
       const playlist = playerPlaylists.find((item) => item.id === activePlayerPlaylistId);
       if (!playlist) return;
       const name = requestedPlaylistName("Rename playlist", playlist.name, playlist.id);
       if (!name) return;
-      playlist.name = name;
-      savePlayerPlaylists();
+      await savePlayerPlaylists((latest) => {
+        const item = latest.find((entry) => entry.id === playlist.id);
+        if (!item) throw new Error("This playlist was deleted in another tab. Select or save a playlist again.");
+        if (latest.some((entry) => entry.id !== item.id && entry.name.toLowerCase() === name.toLowerCase())) throw new Error("Playlist name already exists.");
+        item.name = name;
+      });
       renderPlayer();
     }
 
-    function deletePlayerPlaylist() {
+    async function deletePlayerPlaylist() {
+      playerPlaylists = loadPlayerPlaylists();
       const playlist = playerPlaylists.find((item) => item.id === activePlayerPlaylistId);
       if (!playlist || !confirm(`Delete playlist "${playlist.name}"?`)) return;
-      playerPlaylists = playerPlaylists.filter((item) => item.id !== playlist.id);
-      activePlayerPlaylistId = playerPlaylists[0]?.id || "";
-      savePlayerPlaylists();
+      await savePlayerPlaylists((latest) => {
+        const index = latest.findIndex((item) => item.id === playlist.id);
+        if (index >= 0) latest.splice(index, 1);
+      });
+      if (activePlayerPlaylistId === playlist.id) activePlayerPlaylistId = playerPlaylists[0]?.id || "";
       renderPlayer();
     }
 
@@ -3196,6 +3476,7 @@
     }
 
     async function resolveTranscriptPrompt() {
+      const request = ++uiRequests.prompt;
       const episodeProfileId = $("buildEpisodeProfile").value;
       if (!state || !episodeProfileId) {
         transcriptPromptState = null;
@@ -3204,10 +3485,12 @@
       const speakerProfileId = $("episodeHosts").value;
       const savedSpeakerProfileId = currentEpisode?.speakerProfileId || currentEpisode?.speakerProfile?.id || currentEpisode?.episodeProfile?.speakerProfileId || "";
       const profilesChanged = !currentEpisode || currentEpisode.episodeProfileId !== episodeProfileId || savedSpeakerProfileId !== speakerProfileId;
-      transcriptPromptState = await api("/api/transcript-prompt/resolve", {
+      const value = await api("/api/transcript-prompt/resolve", {
         method: "POST",
         body: JSON.stringify({ ...(profilesChanged ? { episodeProfileId, speakerProfileId } : { episodeId: currentEpisode.id }), guidance: $("transcriptPromptGuidance").value }),
       });
+      if (request !== uiRequests.prompt) return;
+      transcriptPromptState = value;
       renderTranscriptPrompt();
     }
 
@@ -3224,18 +3507,24 @@
     async function applyLatestProfiles() {
       if (!currentEpisode) throw new Error("Select a saved episode first.");
       const id = currentEpisode.id;
+      const selection = uiRequests.episode;
       const value = await api(`/api/episodes/${id}/profiles`, { method: "PUT" });
-      currentEpisode = value.episode;
-      await refreshState(id);
+      if (currentEpisode?.id === id && selection === uiRequests.episode) {
+        currentEpisode = value.episode;
+        await refreshState(id);
+      }
       notify(value.warning || (value.changed ? "Latest profiles applied. Re-render MP3 to update audio." : "Episode already uses latest profiles."), value.warning ? "warning" : "ok");
     }
 
     async function renderAudio() {
       if (!currentEpisode) throw new Error("Select a saved episode first.");
+      const id = currentEpisode.id;
       if ((episodeDraftDirty || transcriptPromptDirty) && await saveEpisode() === false) return;
+      if (currentEpisode?.id !== id) return;
       if (transcriptDirty) await saveTranscript();
+      if (currentEpisode?.id !== id) return;
       const lengthWarning = transcriptLengthMessage(currentEpisode.transcriptWords, currentEpisodeProfiles().episodeProfile);
-      await queueTts(currentEpisode.id, lengthWarning);
+      await queueTts(id, lengthWarning);
     }
 
     async function queueTts(episodeId, lengthWarning = "") {
@@ -3258,7 +3547,7 @@
       const words = text ? [...new Intl.Segmenter(episodeProfile?.language || "en", { granularity: "word" }).segment(text)].filter((part) => part.isWordLike).length : 0;
       $("wordCount").textContent = `${words.toLocaleString()} words`;
       const warning = transcriptLengthMessage(words, episodeProfile);
-      $("transcriptLengthWarning").textContent = warning;
+      $("transcriptLengthWarning").innerHTML = warning ? `${icon("triangle-alert")} Warning: ${escapeHtml(warning)}` : "";
       $("transcriptLengthWarning").hidden = !warning;
     }
 
@@ -3279,7 +3568,7 @@
 
     function configKeyTarget(spec) {
       const [kind, id] = spec.split(":", 2);
-      return kind === "provider" ? configState.providers[id] : configState.compatibleConnections.find((connection) => connection.id === id);
+      return kind === "decision" ? configState.assistantDecision : kind === "provider" ? configState.providers[id] : configState.compatibleConnections.find((connection) => connection.id === id);
     }
 
     async function changeEpisodeSelection(event) {
@@ -3323,30 +3612,71 @@
         ? `"${profile.name}" is hosts for ${podcasts.length ? podcasts.map((item) => `"${item.name}"`).join(", ") : "no podcast"} and ${episodes.length} episode(s). Episodes keep their current audio; affected podcasts switch to "${fallback.name}". Delete?`
         : `Delete host profile "${profile.name}"?`;
       if (!confirm(question)) return;
-      await api(`/api/speaker-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
-      profilesDirty = false;
+      let affectedPlan;
+      let fallbackId;
+      await saveEditor("profilesSave", async () => {
+        syncSpeakerForm();
+        syncFormatForm();
+        const result = await api(`/api/speaker-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+        ++uiRequests.state;
+        fallbackId = result.fallbackId;
+        if (activePlan?.speakerProfileId === id) {
+          affectedPlan = structuredClone(activePlan);
+          activePlan.speakerProfileId = fallbackId;
+        }
+        syncSpeakerForm();
+        syncFormatForm();
+        state.profiles.speakerProfiles = state.profiles.speakerProfiles.filter((item) => item.id !== id);
+        for (const format of state.profiles.episodeProfiles) {
+          if (format.speakerProfileId === id) format.speakerProfileId = result.fallbackId;
+        }
+        for (const key of ["speakerProfiles", "episodeProfiles"]) {
+          state.profiles[key] = state.profiles[key].map((profile) => {
+            const saved = result.profiles[key].find((item) => item.id === profile.id);
+            if (!saved) return profile;
+            const beforeRevision = result.beforeRevisions?.[key]?.[profile.id];
+            if (beforeRevision != null && (profile.revision ?? 0) === beforeRevision) return { ...profile, revision: saved.revision };
+            const { revision: localRevision, ...localFields } = profile;
+            const { revision: savedRevision, ...savedFields } = saved;
+            return JSON.stringify(localFields) === JSON.stringify(savedFields) ? saved : profile;
+          });
+        }
+        profilesDirty = JSON.stringify(state.profiles) !== JSON.stringify(result.profiles);
+      });
       await refreshState(currentEpisode?.id);
       await refreshPlanIndex();
-      if (activePlanId && podcasts.some((item) => item.id === activePlanId)) {
-        const data = await api(`/api/plans/${encodeURIComponent(activePlanId)}`);
-        loadPlanForm(data.plan);
-      }
+      if (affectedPlan) await refreshPlanVersionAfterRepoint(affectedPlan, { speakerProfileId: fallbackId });
       notify("Host profile deleted.", "ok");
     }));
     $("saveProfiles").addEventListener("click", guard(saveProfiles));
+    $("suggestDeliverySetup").addEventListener("click", guard(() => lockWhile($("suggestDeliverySetup"), () => {
+      if (!state.config.assistantDecision.enabled || state.config.assistantDecision.provider !== "openai") throw new Error("Enable OpenAI Decisions in Model Connections, then save the configuration.");
+      if (!validateControls($("view-speakers"))) return;
+      setAssistantChatOpen(true);
+      return sendPlannerChat({ action: "suggestDeliverySetup", text: "Suggest a delivery setup from the current Hosts draft backstory, personality, voice direction, and profile rules. Preserve the host count, voice, model, language, accent, and explicitly edited tuning values." });
+    })));
     $("addCompatibleConnection").addEventListener("click", addCompatibleConnection);
     $("saveConfig").addEventListener("click", guard(saveConfig));
     $("view-config").addEventListener("input", (event) => {
+      if (event.target.matches("[data-chatgpt-account]")) return;
       configDirty = true;
       updateSaveButtons();
       if (event.target.dataset.field === "apiKey" && event.target.value.trim()) {
-        const row = event.target.closest("[data-provider-id], [data-compatible-id]");
-        const target = row?.dataset.providerId ? configState.providers[row.dataset.providerId] : configState.compatibleConnections.find((connection) => connection.id === row?.dataset.compatibleId);
+        const row = event.target.closest("[data-provider-id], [data-compatible-id], [data-assistant-decision]");
+        const target = row?.hasAttribute("data-assistant-decision") ? configState.assistantDecision : row?.dataset.providerId ? configState.providers[row.dataset.providerId] : configState.compatibleConnections.find((connection) => connection.id === row?.dataset.compatibleId);
         if (target) {
           target.clearApiKey = false;
           row.querySelector("[data-undo-clear-key]")?.remove();
           row.querySelector("[data-key-clear-status]")?.remove();
         }
+      }
+    });
+    $("view-config").addEventListener("change", (event) => {
+      if (event.target.matches('[data-assistant-decision] [data-field="provider"]')) {
+        syncConfigForm();
+        configDirty = true;
+        renderConfigView();
+        document.querySelector('[data-assistant-decision] [data-field="provider"]').focus();
       }
     });
     $("uploadKnowledge").addEventListener("click", () => $("knowledgeFile").click());
@@ -3426,6 +3756,11 @@
     $("updatePlayerPlaylist").addEventListener("click", guard(updatePlayerPlaylist));
     $("renamePlayerPlaylist").addEventListener("click", guard(renamePlayerPlaylist));
     $("deletePlayerPlaylist").addEventListener("click", guard(deletePlayerPlaylist));
+    window.addEventListener("storage", (event) => {
+      if (event.key !== PLAYER_PLAYLISTS_KEY && event.key !== null) return;
+      playerPlaylists = loadPlayerPlaylists();
+      renderPlaylistControls();
+    });
     document.querySelectorAll("[data-player-action]").forEach((button) => button.addEventListener("click", guard(async () => {
       const audio = $("playerAudio");
       if (button.dataset.playerAction === "open") location.hash = "player";
@@ -3447,6 +3782,8 @@
     });
     $("playerAudio").addEventListener("error", handlePlayerError);
     $("configProviders").addEventListener("click", (event) => {
+      const chatGptButton = event.target.closest("button[data-chatgpt-action]");
+      if (chatGptButton) return guard(() => chatGptAction(chatGptButton.dataset.chatgptAction))();
       const clearKey = event.target.closest("button[data-clear-key]");
       if (clearKey) {
         syncConfigForm();
@@ -3462,6 +3799,7 @@
       }
       const undoClear = event.target.closest("button[data-undo-clear-key]");
       if (undoClear) {
+        syncConfigForm();
         const target = configKeyTarget(undoClear.dataset.undoClearKey);
         if (target) {
           target.clearApiKey = false;
@@ -3481,6 +3819,9 @@
       if (providerModels) return openModelDialog("provider", providerModels.dataset.modelProvider);
       const compatibleModels = event.target.closest("button[data-model-connection]");
       if (compatibleModels) return openModelDialog("compatible", compatibleModels.dataset.modelConnection);
+    });
+    $("configProviders").addEventListener("change", (event) => {
+      if (event.target.matches("[data-chatgpt-account]") && event.target.value) guard(() => chatGptAction("select"))();
     });
     $("closeModelDialog").addEventListener("click", () => $("modelDialog").close());
     $("modelSearch").addEventListener("input", filterModelSelection);
@@ -3515,9 +3856,14 @@
       });
     }
     $("transcriptEffort").addEventListener("change", guard(async () => {
+      const effort = $("transcriptEffort").value;
+      syncSpeakerForm();
+      syncFormatForm();
       const format = state?.profiles.episodeProfiles.find((item) => item.id === $("buildEpisodeProfile").value);
       if (!format) return;
-      format.transcriptEffort = $("transcriptEffort").value;
+      format.transcriptEffort = effort;
+      if (formatFormId === format.id) $("fmtTranscriptEffort").value = effort;
+      profilesDirty = true;
       // ponytail: wholesale PUT on change; fine for a pill
       await saveProfiles();
     }));
@@ -3530,14 +3876,21 @@
     $("transcriptFile").addEventListener("change", guard(async (event) => {
       const file = event.target.files[0];
       if (!file) return;
+      const id = currentEpisode?.id || "";
+      const selection = uiRequests.episode;
+      const transcript = $("transcriptText").value;
+      const request = uiRequests.transcriptImport = (uiRequests.transcriptImport || 0) + 1;
       try {
-        $("transcriptText").value = await file.text();
+        const imported = await file.text();
+        if (request !== uiRequests.transcriptImport || id !== (currentEpisode?.id || "") || selection !== uiRequests.episode) return;
+        if ($("transcriptText").value !== transcript) { notify("Transcript import stopped because the text changed. Save your changes, then import again.", "warning"); return; }
+        $("transcriptText").value = imported;
         transcriptDirty = true;
         updateWordCount();
         updateSaveButtons();
         notify(`Imported ${file.name}. Save transcript to validate it.`, "ok");
       } finally {
-        event.target.value = "";
+        if (request === uiRequests.transcriptImport) event.target.value = "";
       }
     }));
 
@@ -3655,42 +4008,72 @@
           const next = parsed.nextStep;
           const actionLabels = { generatePlan: "create episodes", createEpisodes: "create episodes", generateTranscript: "generate script", generateTts: "generate audio", openPlayer: "open Player", none: "continue" };
           const nextLabel = next ? actionLabels[next.action] || "continue" : "";
-          const proposalButtons = message.appliedAt ? `<div class="assistant-impact">${icon("circle-check")}<span>Applied</span></div>` : `<div class="actions"><button data-apply-assistant="${index}" data-continue="false">${icon("check")}Apply</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true">${icon("check")}Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div>`;
+          const messageAttributes = `data-chat-thread="${escapeHtml(plannerChatThread.threadId)}" data-message-content="${escapeHtml(message.content)}"`;
+          const proposalButtons = message.appliedAt ? `<div class="assistant-impact">${icon("circle-check")}<span>Applied</span></div>` : `<div class="actions"><button data-apply-assistant="${index}" data-continue="false" ${messageAttributes}>${icon("check")}Apply</button>${next ? `<button class="primary" data-apply-assistant="${index}" data-continue="true" ${messageAttributes}>${icon("check")}Apply &amp; ${escapeHtml(nextLabel)}</button>` : ""}</div>`;
           const proposalHtml = proposal ? `<div class="chat-proposal"><div class="chat-proposal-header"><strong>${escapeHtml(labels[proposalType] || "Proposed changes")}</strong></div><div class="chat-proposal-diff">${summarizeProposal(proposalType, proposal)}</div>${impact}${proposalButtons}</div>` : "";
-          const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}">${icon("play")}${escapeHtml(nextLabel)}</button></div>` : "";
-          return `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>${parsed.questions?.length ? `<div class="chat-questions"><ol>${parsed.questions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : ""}${proposalHtml}${nextHtml}`;
+          const nextHtml = next && !proposal ? `<div class="chat-proposal"><strong>Next step</strong><p>${escapeHtml(next.reason)}</p><button class="primary" data-run-assistant-step="${index}" ${messageAttributes}>${icon("play")}${escapeHtml(nextLabel)}</button></div>` : "";
+          const receipt = parsed.decisionReceipt;
+          const decisionsHtml = receipt ? `<details class="chat-proposal"><summary>Configuration decisions · ${receipt.status === "ready" ? "Ready" : "Needs attention"}</summary><p class="muted">${receipt.provider === "openai" ? "OpenAI Decisions" : "TypeSafe Jev"} · ${escapeHtml(receipt.model || "jev-1.13.0")} · ${escapeHtml(labels[receipt.route] || "Clarification")}</p>${receipt.gate ? `<p class="muted">Safety gate ${escapeHtml(String(receipt.gate.threshold))}: UNCALIBRATED. These confidence values are not proven accuracy estimates.</p>` : ""}${(receipt.decisions || []).map((item) => {
+            const host = item.id.match(/^speakers\.(\d+)\.(.+)$/);
+            const fieldLabels = { voiceModel: "Default TTS model", voiceId: "Voice", ttsModelOverride: "TTS model", deliveryPreset: "Delivery", accent: "Accent", language: "Language", planningModel: "Planning model", outlineModel: "Outline model", transcriptModel: "Script model", targetMinutes: "Minutes", speakerCount: "Host count", profileAction: "Profile action", route: "Change type", nextAction: "Next action" };
+            const label = host ? `Host ${Number(host[1]) + 1} ${fieldLabels[host[2]] || host[2].replace(/^deliveryPreset\./, "")}` : fieldLabels[item.id] || item.id.replace(/([A-Z])/g, " $1");
+            const selection = receipt.selections?.[item.id];
+            const rawValue = item.choice && !["keep_current", "not_requested"].includes(item.choice) ? item.choice : selection?.value;
+            const choiceLabels = { speakerProfile: "Hosts", episodeFormat: "Episode Format", planPatch: "Podcast setup", plannedEpisodePatches: "Episode list", episodePatch: "Episode changes", question: "Question", nextStep: "Next step", create: "Create profile", update: "Update profile", profile_default: "Profile default", default_effort: "Model default", language_default: "Language default", generatePlan: "Generate plan", createEpisodes: "Create episodes", generateTranscript: "Generate script", generateTts: "Generate audio", openPlayer: "Open Player" };
+            const value = typeof item.score === "number" ? `${item.label} (${item.score.toFixed(2)} / 2)` : typeof rawValue === "string" || typeof rawValue === "number" ? choiceLabels[rawValue] || discoveredModels("tts").concat(discoveredModels("text")).find((model) => model.id === rawValue)?.label || String(rawValue || "Default") : item.scope === "not_requested" || ["keep_current", "not_requested"].includes(item.choice) ? "Kept unchanged" : item.scope === "requested" ? "Choice requested" : "Ask for more information";
+            return `<div title="${escapeHtml(item.id)}">${escapeHtml(label)}: ${escapeHtml(value)} · ${Math.round((item.confidence || 0) * 100)}% confidence${item.direction ? `<p>${escapeHtml(item.direction)}</p>` : ""}</div>`;
+          }).join("")}</details>` : "";
+          return `<div class="chat-msg assistant">${escapeHtml(parsed.message || "")}</div>${parsed.questions?.length ? `<div class="chat-questions"><ol>${parsed.questions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : ""}${decisionsHtml}${proposalHtml}${nextHtml}`;
         } catch { return `<div class="chat-msg assistant">${escapeHtml(message.content)}</div>`; }
       }).join("");
       $("plannerChatMessages").scrollTop = $("plannerChatMessages").scrollHeight;
     }
 
     async function loadPlannerChatThread() {
+      const request = ++uiRequests.chat;
+      const planId = activePlanId;
+      const threadId = plannerChatThreadId;
+      const displayedThreadId = plannerChatThread?.threadId || "";
+      const currentRequest = () => request === uiRequests.chat && planId === activePlanId && threadId === plannerChatThreadId;
       setChatHistoryOpen(false);
-      if (!activePlanId) { plannerChatThreads = []; plannerChatThread = null; renderPlannerChatHistory(); renderPlannerChatMessages(); return; }
-      const listed = await api(`/api/chats?kind=planner&planId=${encodeURIComponent(activePlanId)}`);
+      if (!planId) { plannerChatThreads = []; plannerChatThreadId = ""; plannerChatThread = null; renderPlannerChatHistory(); renderPlannerChatMessages(); return; }
+      if (plannerChatThread?.threadId !== threadId) { plannerChatThread = null; renderPlannerChatMessages(); }
+      let listed, thread;
+      let selectedId;
+      try {
+        listed = await api(`/api/chats?kind=planner&planId=${encodeURIComponent(planId)}`);
+        if (!currentRequest()) return;
+        selectedId = (listed.chats || []).some((item) => item.threadId === threadId) ? threadId : "";
+        thread = selectedId ? await api(`/api/chat?threadId=${encodeURIComponent(selectedId)}`) : null;
+      } catch (error) { if (!currentRequest()) return; throw error; }
+      if (!currentRequest()) return;
       plannerChatThreads = listed.chats || [];
-      if (plannerChatThreadId && !plannerChatThreads.some((thread) => thread.threadId === plannerChatThreadId)) plannerChatThreadId = "";
-      plannerChatThread = plannerChatThreadId ? await api(`/api/chat?threadId=${encodeURIComponent(plannerChatThreadId)}`) : null;
-      renderChatControls();
+      plannerChatThreadId = selectedId;
+      plannerChatThread = thread;
+      renderChatControls(thread && selectedId !== displayedThreadId ? { model: thread.lastModel || activePlan?.planningModel || "", effort: activePlan?.planningEffort || "" } : null);
       renderPlannerChatMessages();
     }
 
-    async function sendPlannerChat() {
+    async function sendPlannerChat(request = {}) {
       if (plannerChatBusy) return;
-      const text = $("plannerChatInput").value.trim();
+      const text = (request.text ?? $("plannerChatInput").value).trim();
       if (!text) return;
       const model = $("plannerChatModel").value;
-      if (!model) throw new Error("Select a text model first.");
+      if (!model && request.action !== "suggestDeliverySetup") throw new Error("Select a text model first.");
       plannerChatBusy = true;
-      $("plannerChatBusyText").textContent = "Thinking…";
+      $("plannerChatBusyText").textContent = request.action === "suggestDeliverySetup" ? "Assessing delivery…" : "Thinking…";
       $("plannerChatBusy").hidden = false;
       $("plannerChatInput").disabled = true;
       $("plannerChatSend").disabled = true;
       try {
         if (!activePlan) await createNewPlan();
-        const data = await api("/api/plans/chat", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, planId: activePlan.id, text, model, kbId: $("plannerChatKb").value, planDraft: capturePlanDraft(), activeContext: assistantContext(), workspaceDraft: assistantWorkspaceDraft() }) });
+        const planId = activePlan.id;
+        const threadId = plannerChatThreadId;
+        const selection = uiRequests.chatSelection;
+        const data = await api("/api/plans/chat", { method: "POST", body: JSON.stringify({ threadId, planId, text, model, ...(request.action ? { action: request.action } : {}), kbId: $("plannerChatKb").value, planDraft: capturePlanDraft(), activeContext: assistantContext(), workspaceDraft: assistantWorkspaceDraft() }) });
+        if (activePlan?.id !== planId || plannerChatThreadId !== threadId || selection !== uiRequests.chatSelection) return;
         plannerChatThreadId = data.threadId;
-        $("plannerChatInput").value = "";
+        if (!request.action) $("plannerChatInput").value = "";
         await loadPlannerChatThread();
       } finally {
         plannerChatBusy = false;
@@ -3720,7 +4103,10 @@
         setAssistantChatOpen(true);
         return true;
       }
-      if (resolved === "speakers" && activePlan?.speakerProfileId) loadSpeakerForm(activePlan.speakerProfileId);
+      if (resolved === "speakers" && activePlan?.speakerProfileId) {
+        syncSpeakerForm();
+        loadSpeakerForm(activePlan.speakerProfileId);
+      }
       location.hash = resolved;
       return true;
     }
@@ -3738,23 +4124,54 @@
       if (step.action === "openPlayer" && episodeId) { selectPlayerEpisode(episodeId); location.hash = "player"; }
     }
 
-    async function applyAssistantProposal(index, continueWorkflow) {
+    async function applyAssistantProposal(index, continueWorkflow, threadId = plannerChatThread?.threadId, messageContent = plannerChatThread?.messages?.[index]?.content) {
       const message = plannerChatThread?.messages?.[index];
       if (message?.role !== "assistant") return;
+      const planId = activePlanId || activePlan?.id || "";
+      const currentProposal = () => threadId && plannerChatThreadId === threadId && plannerChatThread?.threadId === threadId && plannerChatThread.messages?.[index]?.content === messageContent && planId === (activePlanId || activePlan?.id || "");
+      if (!currentProposal()) throw new Error("This chat proposal changed. Review the current proposal before Apply.");
       const parsed = JSON.parse(message.content);
       if (!parsed.proposal) return;
       const profileProposal = parsed.proposal.speakerProfile || parsed.proposal.episodeFormat;
+      const draftSource = parsed.decisionReceipt?.draftSource;
+      const hostsView = $("view-speakers");
+      const wasInert = hostsView.inert;
+      const formatView = $("view-format");
+      const formatWasInert = formatView.inert;
       const buttons = document.querySelectorAll(`[data-apply-assistant="${index}"]`);
       buttons.forEach((button) => { button.disabled = true; });
       try {
-        if (profileProposal && profilesDirty && await saveProfiles() === false) return;
-        const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId: plannerChatThreadId, messageIndex: index }) });
+        let workspaceDraft;
+        let pendingProfiles;
+        if (draftSource) {
+          workspaceDraft = assistantSpeakerDraft(draftSource.profileId);
+          if (!workspaceDraft || await assistantDraftHash(workspaceDraft) !== draftSource.hash) throw new Error("The Hosts draft changed. Request a new delivery setup before Apply.");
+          syncFormatForm();
+          pendingProfiles = structuredClone(state.profiles);
+          hostsView.inert = true;
+          formatView.inert = true;
+        } else if (profileProposal && profilesDirty && await saveProfiles() === false) return;
+        if (!currentProposal()) throw new Error("This chat proposal changed. Review the current proposal before Apply.");
+        const data = await api("/api/plans/chat/apply", { method: "POST", body: JSON.stringify({ threadId, messageIndex: index, ...(draftSource ? { workspaceDraft } : {}) }) });
+        ++uiRequests.state;
+        if (!currentProposal()) { notify("Proposal applied to the previous chat. Open that chat to review the result.", "ok"); return; }
+        if (draftSource) {
+          state.profiles = mergeAppliedHostsDraft(pendingProfiles, data.profiles, draftSource.profileId, data.appliedId);
+          profilesDirty = JSON.stringify(state.profiles) !== JSON.stringify(data.profiles);
+        }
         if (data.appliedType === "speakerProfile") activeSpeakerProfileId = data.appliedId;
         if (data.appliedType === "episodeFormat") activeEpisodeProfileId = data.appliedId;
+        if (draftSource) {
+          renderProfileOptions();
+          renderBuildOptions();
+          renderFormatView();
+        }
         await refreshState(data.episode?.id || currentEpisode?.id);
+        if (!currentProposal()) return;
         if (data.plan?.id) loadPlanForm(data.plan);
         await refreshPlanIndex();
         await loadPlannerChatThread();
+        if (!currentProposal()) return;
         if (data.appliedType === "speakerProfile") {
           loadSpeakerForm(data.plan?.speakerProfileId || activePlan?.speakerProfileId);
           notify(`Hosts applied — updated ${data.updatedEpisodes ?? 0} episode(s).${data.warnings?.length ? ` ${data.warnings.join(" ")}` : ""}`, data.warnings?.length ? "warning" : "ok");
@@ -3763,6 +4180,8 @@
         }
         if (continueWorkflow) await runAssistantStep(parsed.nextStep);
       } finally {
+        hostsView.inert = wasInert;
+        formatView.inert = formatWasInert;
         buttons.forEach((button) => { button.disabled = false; });
       }
     }
@@ -3795,6 +4214,8 @@
     $("chatHistoryToggle").addEventListener("click", () => setChatHistoryOpen(true));
     $("chatHistoryClose").addEventListener("click", () => setChatHistoryOpen(false));
     $("chatHistoryNew").addEventListener("click", () => {
+      ++uiRequests.chat;
+      ++uiRequests.chatSelection;
       plannerChatThreadId = ""; plannerChatThread = null;
       setChatHistoryOpen(false);
       renderPlannerChatHistory(); renderPlannerChatMessages();
@@ -3804,6 +4225,7 @@
       if (remove) { await deletePlannerChat(remove.dataset.chatDelete); return; }
       const open = event.target.closest("[data-chat-open]");
       if (!open) return;
+      ++uiRequests.chatSelection;
       plannerChatThreadId = open.dataset.chatOpen;
       await loadPlannerChatThread();
     }));
@@ -3826,11 +4248,14 @@
     });
     $("plannerChatMessages").addEventListener("click", (event) => {
       const apply = event.target.closest("[data-apply-assistant]");
-      if (apply) return guard(() => applyAssistantProposal(Number(apply.dataset.applyAssistant), apply.dataset.continue === "true"))();
+      if (apply) return guard(() => applyAssistantProposal(Number(apply.dataset.applyAssistant), apply.dataset.continue === "true", apply.dataset.chatThread, apply.dataset.messageContent))();
       const run = event.target.closest("[data-run-assistant-step]");
       if (run) {
-        const parsed = JSON.parse(plannerChatThread.messages[Number(run.dataset.runAssistantStep)].content);
-        return guard(() => runAssistantStep(parsed.nextStep))();
+        return guard(() => {
+          const message = plannerChatThread?.messages?.[Number(run.dataset.runAssistantStep)];
+          if (plannerChatThread?.threadId !== run.dataset.chatThread || plannerChatThreadId !== run.dataset.chatThread || message?.content !== run.dataset.messageContent) throw new Error("This chat step changed. Review the current step before continuing.");
+          return runAssistantStep(JSON.parse(message.content).nextStep);
+        })();
       }
     });
 

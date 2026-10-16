@@ -33,7 +33,7 @@ The creator connects text and TTS providers, supplies source material, builds a 
 ## Brand Commitments
 
 - Product name: pod-god.
-- Preserve the existing black, amber/yellow, green-success, and red-error color family.
+- Use the user-selected Honey Graphite profile: dark graphite surfaces, warm content text, and small honey-gold cues. Status uses words, icons, and edge patterns instead of green or red.
 - Use the familiar chat-plus-production-workspace pattern deliberately, executed at a high craft level rather than forced into an unfamiliar metaphor.
 - Take tactile discipline from the Teenage Engineering TP-7: matte near-black surfaces, precise micro-labels, strong physical hierarchy, compact status displays, and oversized controls only where the action truly deserves them.
 - Take digital finish from the Hermes Agent website: confident hierarchy, generous composition, authored visual moments, progressive numbered sequencing, and restrained chrome.

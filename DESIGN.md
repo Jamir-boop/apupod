@@ -2,23 +2,22 @@
 name: pod-god
 description: A tactile, conversation-led production studio for turning podcast ideas into finished audio.
 colors:
-  studio-black: "#000000"
-  rail-black: "#080808"
-  canvas-black: "#0C0C0C"
-  control-black: "#161616"
-  warm-white: "#FFFFFF"
-  quiet-gray: "#9A9A9A"
-  disabled-gray: "#565656"
-  signal-amber: "#FFB900"
-  signal-amber-hover: "#CC9500"
-  signal-amber-subtle: "#15120A"
-  signal-amber-subtle-border: "#4D3900"
-  complete-green: "#35C46A"
-  failure-red: "#EF5B5B"
-  failure-red-border: "#8F3434"
-  failure-red-surface: "#220B0B"
-  quiet-seam: "#242424"
-  strong-seam: "#414141"
+  bg: "#1E1E1D"
+  surface: "#282725"
+  field: "#191918"
+  interaction: "#37332A"
+  text: "#E6E2D8"
+  muted: "#B6AFA1"
+  disabled: "#B6AFA1"
+  border: "#444036"
+  control: "#8E8470"
+  reference: "#CBAA60"
+  accent: "#CBAA60"
+  error: "#CBAA60"
+  success: "#CBAA60"
+  selection: "#CBAA60"
+  selection-ink: "#191918"
+  action-ink: "#191918"
 typography:
   display:
     fontFamily: "system-ui, sans-serif"
@@ -57,26 +56,26 @@ spacing:
   panel: "24px"
 components:
   button-primary:
-    backgroundColor: "{colors.signal-amber}"
-    textColor: "{colors.studio-black}"
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.action-ink}"
     rounded: "{rounded.control}"
     padding: "6px 16px"
     height: "40px"
   button-neutral:
-    backgroundColor: "{colors.control-black}"
-    textColor: "{colors.warm-white}"
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
     rounded: "{rounded.control}"
     padding: "6px 11px"
     height: "38px"
   button-danger:
-    backgroundColor: "#220B0B"
-    textColor: "{colors.warm-white}"
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
     rounded: "{rounded.control}"
     padding: "6px 11px"
     height: "38px"
   field:
-    backgroundColor: "{colors.rail-black}"
-    textColor: "{colors.warm-white}"
+    backgroundColor: "{colors.field}"
+    textColor: "{colors.text}"
     rounded: "{rounded.control}"
     padding: "6px 9px"
     height: "38px"
@@ -88,45 +87,49 @@ components:
 
 **Creative North Star: "Conversation is the Studio"**
 
-pod-god feels like a precise production instrument rather than a generic dashboard. Matte near-black planes join into one workspace; warm white type carries the content; amber, green, and red behave like scarce hardware signals. The hierarchy is confident and spacious around the conversation, then compact and exact inside production controls.
+pod-god uses the user-selected Honey Graphite profile. Dark graphite surfaces form one workspace. Warm content text and small honey-gold cues retain the existing conversation-led hierarchy. Production controls stay compact.
 
-Interaction keeps the creator oriented. Conversation remains the primary canvas, production tools appear contextually, progress is explicit, and advanced infrastructure stays behind disclosure until needed. Motion is brief and functional: it explains a drawer, fold, loading state, or next action, and respects reduced-motion preferences.
+Conversation remains the primary work surface. Production tools open in context, progress is explicit, and advanced controls stay behind disclosure. The theme changes owned UI colors, not layout, fonts, data, or actions. Existing motion owners and reduced-motion behavior remain in place.
+
+Source: [Honey Graphite Style Guide](https://github.com/Jamir-boop/amber-black/blob/main/style-guides/honey-graphite.md), option 02, with source color targets dated 2026-10-09. Its written token specification is normative; the generated reference image is approximate. This record reflects the implementation in `public/index.html`. The existing `public/icon.png`, authored content, and browser-owned audio controls are not recolored.
 
 **Key Characteristics:**
 
-- Matte, joined planes with quiet seams instead of floating card stacks.
-- One dominant amber action or current-state signal per context.
-- Large humanist conversation type paired with compact uppercase mono status labels.
-- Low-radius tactile controls, native disclosure, and visible keyboard focus.
-- Green means completed or ready; red means failed or destructive.
+- Dark graphite surfaces with quiet decorative seams and clear control edges.
+- Small honey-gold actions, references, focus outlines, and state markers.
+- Existing system sans content and compact mono status labels.
+- Low-radius controls, native disclosure, and visible keyboard focus.
+- Words, icon shapes, and boundary patterns identify status; gold alone does not mean success.
 
 ## Colors
 
-The palette is nearly monochrome until an action, progress state, success, or failure deserves a signal.
+Use all 16 roles from the Honey Graphite profile above. The owned root is `html[data-theme="honey-graphite"]`, with `color-scheme: dark`. There is no light mode or light fallback.
 
 ### Primary
 
-- **Signal Amber:** The sole action and current-state color. Use it for primary controls, active workflow position, focused controls, and in-progress status.
-
-### Secondary
-
-- **Complete Green:** Confirms ready, completed, and successfully rendered states.
-- **Failure Red:** Marks errors, destructive actions, and failed jobs only.
+- **Honey Gold:** `accent`, `reference`, `error`, `success`, and `selection` share one color. Use their distinct roles for small primary actions, links, keyboard focus, status markers, and character selection.
+- **Dark Ink:** `action-ink` and `selection-ink` provide text and glyph contrast on gold fills.
 
 ### Neutral
 
-- **Studio Black:** The outermost canvas and high-contrast text on amber.
-- **Rail Black:** Navigation rails, headers, and the darkest inset controls.
-- **Canvas Black:** The primary work surface.
-- **Control Black:** Buttons, user messages, and raised control faces.
-- **Warm White:** Primary content and labels.
-- **Quiet Gray:** Secondary copy, hints, and inactive navigation.
-- **Disabled Gray:** Unavailable actions and pending progress.
-- **Quiet Seam / Strong Seam:** Structural dividers and interactive boundaries; use the stronger seam for fields, controls, and overlays.
+- **Graphite Canvas:** `bg` covers the main workspace.
+- **Graphite Surface:** `surface` covers panels, rails, headers, menus, dialogs, and transport.
+- **Inset Graphite:** `field` covers fields, the composer, and code surfaces.
+- **Warm Interaction:** `interaction` covers hover, active neutral controls, and selected rows.
+- **Warm Content:** `text` carries content, labels, and read-only values.
+- **Quiet Text:** `muted` carries secondary text and placeholders at full opacity. `disabled` uses the same value only for disabled controls.
+- **Decorative Seam:** `border` separates regions without a control-boundary claim.
+- **Control Edge:** `control` identifies required interactive boundaries.
 
-**The Signal Rarity Rule.** Amber identifies the next action or current state; it does not decorate containers.
+**The Signal Rarity Rule.** Keep resting surfaces dark and neutral. Use gold in small actions, references, focus outlines, and state markers.
 
-**The Semantic Status Rule.** Green is completion, red is failure or destruction, and neither color substitutes for general emphasis.
+**The Semantic Status Rule.** Gold alone does not identify a result. Keep state words and icons; use dashed error edges and dotted warning edges where implemented.
+
+**The Boundary Ownership Rule.** Decorative seams use `border`; required control edges use `control`. Keyboard focus has a separate offset gold outline, and error edges remain visible.
+
+Text, placeholders, action ink, and selection ink must meet 4.5:1 contrast. Required control edges and focus must meet 3:1 on adjacent surfaces. Opaque-pair calculations do not prove live contrast or WCAG conformance. Browser-owned audio chrome follows the browser's dark color scheme and retains native behavior.
+
+Sidecar tonal ramps are preview metadata, not additional application tokens.
 
 ## Typography
 
@@ -155,12 +158,12 @@ Spacing follows a tight 4px rhythm, with 8–16px inside controls and 20–24px 
 
 ## Elevation & Depth
 
-The system is flat by default. Tonal shifts and 1px seams establish depth between joined planes. Deep black shadows are reserved for true overlays such as activity drawers and transient notices; persistent regions and cards do not float. No glass, blur, or glow is part of the visual language.
+The system is flat by default. Graphite surface changes and 1px seams separate joined regions. Shadows use translucent `field` color for temporary overlays and notices. Persistent regions and cards do not float. No glass, blur, or glow is part of the visual language.
 
 ### Shadow Vocabulary
 
-- **Overlay:** A broad, opaque black shadow separates a temporary drawer from the workspace.
-- **Transient Notice:** A compact downward black shadow lifts a toast above active content.
+- **Overlay:** A broad graphite shadow separates a temporary drawer from the workspace.
+- **Transient Notice:** A compact downward graphite shadow separates a toast from active content.
 
 **The Flat-by-Default Rule.** If a seam or tonal step can explain the hierarchy, do not add a shadow.
 
@@ -175,54 +178,62 @@ Controls and content regions are square or gently eased at 2–3px. Joined plane
 ### Buttons
 
 - **Shape:** Tactile rectangular controls with gently eased corners; icon-only and text buttons share the same physical weight.
-- **Primary:** Amber face with black content. Keep one primary action per immediate context.
-- **Hover / Focus:** Neutral buttons invert to amber when the action deserves emphasis; every keyboard focus state uses a 2px amber outline with a 2px offset.
-- **Danger:** Dark red face and red seam, brightening only on hover. Never use it as a general secondary action.
+- **Primary:** Small gold face with dark action ink. Hover uses the dark interaction fill and content text, with a gold edge. The fill and ink change immediately to retain contrast. Keep one primary action per immediate context.
+- **Hover / Focus:** Neutral buttons use the dark interaction fill and content text. Selected buttons retain a gold edge or underline. Keyboard focus uses a separate 2px gold outline with an offset.
+- **Danger:** Dark surface, content text, and a dashed gold edge. Keep the destructive label or icon and the existing confirmation behavior.
+- **Disabled:** Full-opacity disabled text on a dark surface. Keep native disabled semantics, with no action or hover feedback.
 
 ### Chips
 
-- **Style:** Compact, low-radius metadata and state tokens on the darkest surface.
-- **State:** Selected or active chips use amber; ready and error chips use their semantic colors. Rounded pills remain limited to status-oriented legacy cases.
+- **Style:** Compact, low-radius metadata and state tokens on the graphite surface.
+- **State:** Selected chips use the dark interaction fill and a gold edge. Ready states retain a checkmark; errors retain words, a distinct marker, and a dashed edge. Gold is shared, not a success code.
 
 ### Cards / Containers
 
 - **Corner Style:** Square to 2px corners.
-- **Background:** Use tonal black steps with quiet seams; prefer joined regions and section dividers over nested cards.
+- **Background:** Use graphite surfaces with quiet seams; prefer joined regions and section dividers over nested cards.
 - **Shadow Strategy:** Flat at rest; only true overlays receive shadow.
 - **Internal Padding:** Compact controls use 8–16px; production sections use about 20–24px.
 
 ### Inputs / Fields
 
-- **Style:** Dark inset field, strong neutral seam, low radius, warm white value, and quiet gray supporting copy.
-- **Focus:** A visible amber outline supplements rather than replaces the field boundary.
-- **Error / Disabled:** Error uses failure red with accompanying text; disabled states remain legible in disabled gray and keep their layout.
+- **Style:** Inset graphite field, required control edge, low radius, warm content value, and full-opacity secondary text.
+- **Focus:** A separate gold outline supplements the field boundary. The composer retains its larger outline offset.
+- **Error / Disabled:** Invalid fields retain a dashed gold edge and error text during focus or selection. Disabled controls use full-opacity disabled text and retain their layout. Read-only values use normal content text.
+- **Selection:** Selected characters use gold with dark selection ink. Selected rows use the dark interaction fill, content text, and an edge or native selected cue.
 
 ### Navigation
 
-Navigation uses simple line icons plus short labels. Default items are quiet gray, hover becomes warm white on a slightly lighter black, and the selected item uses amber with a restrained dark-amber backing or underline. Labels remain available to assistive technology at every width.
+Navigation retains line icons and short labels. Default items use muted text. Hover and selected items use the dark interaction fill and content text. A gold edge or underline identifies the selected item. Labels remain available to assistive technology at every width.
 
 ### Progress and Status
 
-Progress reads like a tape counter, not a decorative chart: the current stage and position lead in compact mono type, while the connected stage track supports orientation. Completed steps and connectors are green, the current step is amber, pending steps are disabled gray, and job state uses compact uppercase mono labels. On narrow screens the current counter remains visible and discloses the complete track on demand. Values always come from real application state.
+Progress retains the tape-counter layout. Completed steps use checkmarks and gold connectors. The current step uses a filled marker; pending steps use muted text and empty markers. Job labels, icons, and edge patterns retain their meaning without green or red. On narrow screens the current counter remains visible and opens the complete track on demand. Values always come from real application state.
+
+Existing motion uses 120ms control feedback, 180ms control or menu changes, and 240ms panel entrances with `cubic-bezier(.16, 1, .3, 1)`. Loading markers and spinners retain their existing motion owners. The next-action cue is a static three-second outline, not a glow. Reduced-motion preferences retain effectively instant state changes. No navigation glide was added.
 
 ### Contextual Disclosure
 
 Use native disclosure for advanced settings and provider detail. A contextual tool region should explain what is open, keep its close action obvious, and never sever the creator from the production stage that opened it.
+
+Activity notification and job summaries use an inset gold focus outline (-4px offset). This keeps all four sides visible inside scrolling regions while dashed error boundaries remain visible.
 
 ## Do's and Don'ts
 
 ### Do:
 
 - **Do** let conversation lead and reveal production controls in context.
-- **Do** use neutral seams and tonal black steps to organize dense work.
-- **Do** reserve amber for the current state, visible focus, and the next meaningful action.
-- **Do** preserve semantic status colors, keyboard operation, native disclosure, and reduced-motion behavior.
+- **Do** use graphite surfaces, decorative seams, and clear control edges to organize dense work.
+- **Do** keep gold cues small and identify status with words, icons, and edge patterns.
+- **Do** preserve keyboard operation, native disclosure, readable disabled text, and reduced-motion behavior.
 - **Do** keep generated changes, progress, and completion states explicit and reviewable.
 
 ### Don't:
 
 - **Don't** turn every section into a rounded floating card.
 - **Don't** outline every container in amber or use glow as decoration.
+- **Don't** add other accent hues, a light fallback, blanket filters, or forced SVG paint.
+- **Don't** recolor artwork, authored content, or browser-owned audio controls.
 - **Don't** invent waveform, progress, collaboration, or publishing data.
 - **Don't** hide advanced control permanently; disclose it when relevant.
 - **Don't** use motion without a state change to explain.

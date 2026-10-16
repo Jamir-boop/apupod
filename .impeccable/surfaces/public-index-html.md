@@ -12,10 +12,13 @@ related_targets: []
 - Primary target: `public/index.html`; Operate surface for one solo podcast creator.
 - Job: move from idea to finished audio through a chat-first assistant while retaining direct access to every production control.
 - Primary action: continue the current production step from the conversation.
-- Constraints: preserve all existing IDs, capabilities, state handling, accessibility, semantic status roles, and desktop/mobile operation.
+- Constraints: preserve all existing IDs, capabilities, state handling, accessibility, status meaning, and desktop/mobile operation.
 
 ## Shipped direction
 
+- Theme: user-selected [Honey Graphite](https://github.com/Jamir-boop/amber-black/blob/main/style-guides/honey-graphite.md), with all 16 exact roles on the owned HTML root. The theme retains the approved composition, fonts, spacing, and geometry.
+- State colors share honey gold. Words, checkmarks, distinct markers, and dashed or dotted edges retain success, warning, error, and destructive meaning. Selected rows stay dark; character selection uses gold with dark ink.
+- Browser-owned audio chrome follows the dark color scheme. The existing artwork and authored content retain their colors.
 - Approved comp: `.impeccable/mocks/comp-c-focus-canvas-drawer.webp`.
 - Thesis: conversation is the studio; production tools appear beside it instead of replacing it.
 - Composition: a 112px icon-and-label mode rail and dominant chat canvas occupy the flexible workspace; one 420–560px contextual production drawer occupies the right; a 64px tape-counter progress header spans both; the 72px transport persists below the active workspace.
@@ -54,8 +57,12 @@ related_targets: []
 
 ## Finish disposition
 
-- Final independent disposition: **PASS**.
-- No material visual, interaction, responsive, or accessibility findings remain.
+- The earlier composition review recorded **PASS** before Honey Graphite adoption. It is not evidence for the new theme.
+- Final Honey Graphite disposition: **SHIP**. No material findings remain from this review.
+- Review covered the exact theme, desktop (1280px) and mobile (390px) snapshots, keyboard focus, saved states, and error states.
+- Activity notification and job summaries use an inset focus outline (-4px offset). The final focus image shows all four sides inside the dashed error boundary.
+- Existing font-size advisories remain. Existing fonts and sizes were preserved.
+- This review does not claim full WCAG conformance, live-provider validation, or cross-browser coverage.
 
 ## Unresolved decisions
 
