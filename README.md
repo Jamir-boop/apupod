@@ -12,10 +12,14 @@ Small local web app for building reviewed podcast transcripts and rendered audio
 
 ```bash
 cp .env.example .env
+npm ci
 npm start
 ```
 
 Open `http://127.0.0.1:4173`.
+
+The app depends on the official `openai` and `@anthropic-ai/sdk` packages, pinned in `package-lock.json`.
+The SDKs add their own `User-Agent` and `X-Stainless-*` headers to each request. The app stops the SDKs from using the environment base URL, key, organization, project, `OPENAI_CUSTOM_HEADERS` or `ANTHROPIC_CUSTOM_HEADERS`; each connection uses only its configured URL and key.
 
 ## Development
 

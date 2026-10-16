@@ -26,6 +26,7 @@ import { applyWrites } from "../scripts/update-version.mjs";
 
 const speakers = DEFAULT_DATA.speakerProfiles[0].speakers;
 const execFileAsync = promisify(execFile);
+const header = (options, name) => new Headers(options.headers).get(name);
 
 test("version writes restore completed files when a later write fails", async () => {
   const files = new Map([["package.json", "old-package"], ["package-lock.json", "old-lock"]]);
@@ -1857,7 +1858,7 @@ test("gpt-5.5/5.6 on the built-in OpenAI connection use the Responses API", { co
   assert.equal(response.status, 200, generatedBody.error);
   assert.equal(responsesCalls.length, 1);
   assert.equal(responsesCalls[0].url, "https://llm.example/v1/responses");
-  assert.equal(responsesCalls[0].options.headers.Authorization, "Bearer sk-openai-test");
+  assert.equal(header(responsesCalls[0].options, "authorization"), "Bearer sk-openai-test");
   const responsesRequest = JSON.parse(responsesCalls[0].options.body);
   assert.equal(responsesRequest.model, "gpt-5.6");
   assert.equal(typeof responsesRequest.max_output_tokens, "number");
@@ -1929,7 +1930,7 @@ test("OpenCode Go reuses login credentials and routes both model protocols", { c
   for (const id of messagesModels) assert.deepEqual({ protocol: discoveredById.get(id)?.protocol, supported: discoveredById.get(id)?.supported }, { protocol: "messages", supported: true });
   assert.deepEqual({ protocol: discoveredById.get("future-unknown")?.protocol, supported: discoveredById.get("future-unknown")?.supported }, { protocol: null, supported: false });
   assert.deepEqual(catalog.providers.opencodeGo.textModels, []);
-  assert.equal(calls.find((call) => call.url.endsWith("/models")).options.headers.Authorization, "Bearer go-login-secret");
+  assert.equal(header(calls.find((call) => call.url.endsWith("/models")).options, "authorization"), "Bearer go-login-secret");
 
   state.config.providers.opencodeGo.activeModels = {
     "kimi-k3": { text: true, tts: true },
@@ -1973,7 +1974,7 @@ test("OpenCode Go reuses login credentials and routes both model protocols", { c
   assert.equal(response.status, 200, generated.error);
   const chatCall = calls.find((call) => call.url.endsWith("/chat/completions"));
   assert.equal(chatCall.url, "https://opencode.ai/zen/go/v1/chat/completions");
-  assert.equal(chatCall.options.headers.Authorization, "Bearer go-login-secret");
+  assert.equal(header(chatCall.options, "authorization"), "Bearer go-login-secret");
   assert.equal(JSON.parse(chatCall.options.body).model, "kimi-k3");
 
   process.env.OPENCODE_GO_API_KEY = "go-env-secret";
@@ -1981,7 +1982,7 @@ test("OpenCode Go reuses login credentials and routes both model protocols", { c
   assert.equal(response.status, 202);
   await waitFor(async () => {
     const value = await (await fetch(`${baseUrl}/api/models`)).json();
-    return value.providers.opencodeGo.status === "ready" && calls.filter((call) => call.url.endsWith("/models")).at(-1)?.options.headers.Authorization === "Bearer go-env-secret" ? value : null;
+    return value.providers.opencodeGo.status === "ready" && header(calls.filter((call) => call.url.endsWith("/models")).at(-1)?.options ?? {}, "authorization") === "Bearer go-env-secret" ? value : null;
   });
   assert.equal((await (await fetch(`${baseUrl}/api/config`)).json()).providers.opencodeGo.credentialSource, "environment");
 
@@ -1991,8 +1992,8 @@ test("OpenCode Go reuses login credentials and routes both model protocols", { c
   assert.equal(response.status, 200);
   const messagesCall = calls.find((call) => call.url.endsWith("/messages"));
   assert.equal(messagesCall.url, "https://opencode.ai/zen/go/v1/messages");
-  assert.equal(messagesCall.options.headers["x-api-key"], "go-env-secret");
-  assert.equal(messagesCall.options.headers["anthropic-version"], "2023-06-01");
+  assert.equal(header(messagesCall.options, "x-api-key"), "go-env-secret");
+  assert.equal(header(messagesCall.options, "anthropic-version"), "2023-06-01");
   const messagesBody = JSON.parse(messagesCall.options.body);
   assert.equal(messagesBody.model, "minimax-m3");
   assert.equal(messagesBody.messages[0].role, "user");
@@ -2139,14 +2140,14 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", { conc
 
   const chatRequest = compatCalls.find((call) => call.url.endsWith("/chat/completions"));
   assert.equal(chatRequest.url, "https://llm.example/v1/chat/completions");
-  assert.equal(chatRequest.options.headers.Authorization, "Bearer sk-openai-test");
+  assert.equal(header(chatRequest.options, "authorization"), "Bearer sk-openai-test");
   assert.equal(JSON.parse(chatRequest.options.body).max_tokens, undefined);
   assert.equal(typeof JSON.parse(chatRequest.options.body).max_completion_tokens, "number");
   assert.match(JSON.parse(chatRequest.options.body).messages[1].content, /NON-NEGOTIABLE LANGUAGE OVERRIDE/);
   const ttsRequest = compatCalls.find((call) => call.url.endsWith("/audio/speech"));
   const ttsBody = JSON.parse(ttsRequest.options.body);
   assert.equal(ttsRequest.url, "https://tts.example/v1/audio/speech");
-  assert.equal(ttsRequest.options.headers.Authorization, "Bearer sk-openai-test");
+  assert.equal(header(ttsRequest.options, "authorization"), "Bearer sk-openai-test");
   assert.equal(ttsBody.model, "gpt-4o-mini-tts");
   assert.equal(ttsBody.voice, "alloy");
   assert.equal(ttsBody.input, "Hello there");
@@ -2307,7 +2308,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", { 
   assert.equal(preview.readUInt32LE(24), 24_000);
   assert.equal(preview.readUInt16LE(34), 16);
   const ttsCall = calls.find((call) => call.url.endsWith("/audio/speech"));
-  assert.equal(ttsCall.options.headers.Authorization, undefined);
+  assert.equal(header(ttsCall.options, "authorization"), null);
   assert.deepEqual(JSON.parse(ttsCall.options.body), {
     model: "chatterbox-turbo",
     voice: "female",

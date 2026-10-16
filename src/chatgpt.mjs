@@ -4,6 +4,7 @@ import { createHash, createPublicKey, randomBytes, randomUUID, timingSafeEqual, 
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { openAiClient } from "./providers/transport.mjs";
 
 const ISSUER = "https://auth.openai.com";
 const RESOURCE = "https://api.openai.com/v1";
@@ -748,8 +749,14 @@ export async function createChatGptClient({
       if (system) payload.instructions = system;
       if (effort) payload.reasoning = { effort };
       const streamSignal = AbortSignal.any([signal, lifetime.signal, AbortSignal.timeout(streamTimeoutMs)]);
-      const response = await request(`${RESOURCE}/responses`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "text/event-stream" }, body: JSON.stringify(payload) }, signal, streamTimeoutMs);
-      if (!response.ok) throw responseError(await json(response), response, "chatgpt_responses_failed", [token]);
+      const client = openAiClient({ baseURL: RESOURCE, apiKey: token, fetch: async (url, init) => {
+        const response = await request(url, init, signal, streamTimeoutMs);
+        if (!response.ok) throw responseError(await json(response), response, "chatgpt_responses_failed", [token]);
+        return response;
+      } });
+      let response;
+      try { response = await client.responses.create(payload, { headers: { accept: "text/event-stream" }, timeout: streamTimeoutMs }).asResponse(); }
+      catch (error) { throw error?.cause instanceof ChatGptError ? error.cause : error; }
       return streamText(response, token, streamSignal);
     });
   }

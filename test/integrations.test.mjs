@@ -8,6 +8,7 @@ import test from "node:test";
 import { createPodcastServer } from "../src/app.mjs";
 import { ChatGptError } from "../src/chatgpt.mjs";
 import { DECISIONS_MODEL } from "../src/decisions.mjs";
+const header = (options, name) => new Headers(options.headers).get(name);
 
 process.env.OPENCODE_GO_API_KEY = "test-opencode-go-key";
 
@@ -167,7 +168,7 @@ function decisionsMock() {
       if (String(url) !== "https://api.openai.com/v1/decisions") return legacy.fetchImpl(url, options);
       const request = JSON.parse(options.body);
       requests.push(request);
-      assert.equal(options.headers.Authorization, "Bearer test-openai-decisions-key");
+      assert.equal(header(options, "authorization"), "Bearer test-openai-decisions-key");
       assert.equal(options.redirect, "error");
       assert.doesNotMatch(request.input, /test-openai-decisions-key|test-typesafe-key|FULL_KNOWLEDGE/);
       const answers = request.questions.map((question) => {

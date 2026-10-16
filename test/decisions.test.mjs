@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DECISIONS_MODEL, evaluateOpenAiDecisions, deliveryTraitDefinitions, compileDeliveryTraits } from "../src/decisions.mjs";
 import { decideAssistantConfiguration, enforceJevSelections } from "../src/jev.mjs";
+const header = (options, name) => new Headers(options.headers).get(name);
 
 const definitions = {
   scope: { question: { type: "noul", instructions: "Is this requested?" } },
@@ -37,7 +38,7 @@ test("native Decisions payload and typed predicate, choice, and ordinal score us
   const result = await evaluateOpenAiDecisions({ ...base, ...fixture }, definitions);
   const { url, options, request } = fixture.requests[0];
   assert.equal(url, "https://api.openai.com/v1/decisions");
-  assert.equal(options.headers.Authorization, "Bearer server-only-secret");
+  assert.equal(header(options, "authorization"), "Bearer server-only-secret");
   assert.equal(options.redirect, "error");
   assert.ok(options.signal instanceof AbortSignal);
   assert.equal(request.model, DECISIONS_MODEL);
@@ -101,12 +102,16 @@ test("Decisions transport errors, timeouts including slow bodies, limits, and in
     assert.equal(calls, 1);
   }
   await assert.rejects(evaluateOpenAiDecisions({ ...base, fetchImpl: async () => { throw new Error("server-only-secret"); } }, definitions), (error) => error.code === "unavailable" && !error.message.includes("server-only-secret"));
+  const timers = () => process.getActiveResourcesInfo().filter((resource) => resource === "Timeout").length;
   for (const fetchImpl of [async () => new Promise(() => {}), async () => new Response(new ReadableStream({ start() {} }))]) {
+    const before = timers();
     await assert.rejects(evaluateOpenAiDecisions({ ...base, fetchImpl, timeoutMs: 5 }, definitions), (error) => error.code === "timeout");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(timers() - before, 0, "a Decisions timeout must not leave a pending timer");
   }
   await assert.rejects(evaluateOpenAiDecisions({ ...base, ...mock(), state: { text: "x".repeat(300_000) } }, definitions), (error) => error.code === "request_too_large");
-  for (const response of [new Response("x".repeat(300_000)), new Response("{}", { headers: { "Content-Length": "300000" } }), new Response("not-json")]) {
-    await assert.rejects(evaluateOpenAiDecisions({ ...base, fetchImpl: async () => response }, definitions), (error) => ["response_too_large", "invalid_response"].includes(error.code));
+  for (const [response, code] of [[new Response("x".repeat(300_000)), "response_too_large"], [new Response("{}", { headers: { "Content-Length": "300000" } }), "response_too_large"], [new Response("not-json"), "invalid_response"]]) {
+    await assert.rejects(evaluateOpenAiDecisions({ ...base, fetchImpl: async () => response }, definitions), (error) => error.code === code);
   }
   for (const options of [{ apiKey: "" }, { model: "other" }, { state: undefined }, { timeoutMs: 0 }]) {
     await assert.rejects(evaluateOpenAiDecisions({ ...base, ...mock(), ...options }, definitions), (error) => typeof error.code === "string");

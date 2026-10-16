@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { badRequest, normalizeUrl } from "../util.mjs";
-import { fetchJson } from "./transport.mjs";
+import { MAX_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, fetchJson, cappedFetch, openAiClient, callOptions, sdkJson, providerError } from "./transport.mjs";
 
 export const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -258,7 +258,13 @@ function unconfiguredProviderMessage(context, provider) {
 
 async function loadMimoModels(context) {
   const provider = context.modelCatalog.providers.mimo;
-  const data = await fetchJson(context.fetchImpl, `${context.config.providers.mimo.baseUrl}/models`, { "api-key": context.credentials.MIMO_API_KEY }, "MiMo models");
+  const apiKey = context.credentials.MIMO_API_KEY;
+  let data;
+  try {
+    data = await sdkJson(openAiClient({ baseURL: context.config.providers.mimo.baseUrl, apiKey, headers: { Authorization: null, "api-key": apiKey }, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, "MiMo models") }).get("/models", callOptions(MODEL_TIMEOUT_MS)), "MiMo models");
+  } catch (error) {
+    throw providerError(error, "MiMo models", "MIMO_API_KEY", MODEL_TIMEOUT_MS);
+  }
   const models = Array.isArray(data?.data) ? data.data : [];
   provider.discoveredModels = models.filter((model) => typeof model.id === "string" && !model.id.includes("-asr")).map((model) => ({
     id: model.id,
@@ -350,12 +356,10 @@ async function loadChatGptModels(context) {
 async function loadCompatibleModels(context, connection, provider) {
   const apiKey = context.credentials[connection.apiKeyEnv];
   if (connection.requiresApiKey && !apiKey) throw new Error("API key is not configured.");
-  const requests = await Promise.allSettled(modelDiscoveryUrls(connection).map((url) => fetchJson(
-    context.fetchImpl,
-    url,
-    apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    `${connection.name} models`
-  )));
+  const label = `${connection.name} models`;
+  const client = openAiClient({ baseURL: connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) });
+  const requests = await Promise.allSettled(modelDiscoveryUrls(connection).map((url) => sdkJson(client.get(url, callOptions(MODEL_TIMEOUT_MS)), label)
+    .catch((error) => { throw providerError(error, label, apiKeyName(connection), MODEL_TIMEOUT_MS); })));
   const successful = requests.filter((result) => result.status === "fulfilled");
   if (successful.length === 0) throw requests[0]?.reason || new Error(`${connection.name} models request failed.`);
   const models = [...new Map(successful.flatMap((result) => Array.isArray(result.value?.data) ? result.value.data : [])
@@ -458,6 +462,8 @@ function builtInOpenCodeGoConnection(config) {
 export function builtInChatterboxConnection(config) {
   return { id: "chatterbox", name: "Chatterbox", apiKeyEnv: "CHATTERBOX_API_KEY", kind: "chatterbox", ttsBaseUrl: "", llmBaseUrl: "", ...config.providers.chatterbox };
 }
+
+export const apiKeyName = (connection) => connection.kind === "opencodeGo" ? "OPENCODE_GO_API_KEY (or the OpenCode login)" : connection.apiKeyEnv;
 
 function modelDiscoveryUrls(connection) {
   if (connection.modelsUrl) return [modelsEndpoint(connection.modelsUrl)];

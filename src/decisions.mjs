@@ -1,5 +1,8 @@
+import OpenAI from "openai";
+import { cappedFetch, openAiClient } from "./providers/transport.mjs";
+
 export const DECISIONS_MODEL = "gpt-6-luna";
-const ENDPOINT = "https://api.openai.com/v1/decisions";
+const BASE_URL = "https://api.openai.com/v1";
 const MAX_BYTES = 256 * 1024;
 const DECISIONS_ERROR = Symbol("Decisions error");
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -59,25 +62,6 @@ function answerFor(answer, definition, question) {
   return { option: definition.mapping.get(answer.choice), probability: probabilities.get(answer.choice), confidence };
 }
 
-async function readJson(response) {
-  if (Number(response.headers?.get("content-length")) > MAX_BYTES) throw fail("response_too_large", "OpenAI Decisions returned too much data.");
-  if (!response.body?.getReader) throw fail("invalid_response", "OpenAI Decisions returned no readable response.");
-  const reader = response.body.getReader();
-  const chunks = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > MAX_BYTES) throw fail("response_too_large", "OpenAI Decisions returned too much data.");
-      chunks.push(Buffer.from(value));
-    }
-    try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-    catch { throw fail("invalid_response", "OpenAI Decisions returned invalid JSON."); }
-  } finally { void reader.cancel().catch(() => {}); }
-}
-
 /** Translate the shared bounded decision definitions to the native Decisions API. */
 export async function evaluateOpenAiDecisions({ fetchImpl = globalThis.fetch, apiKey, model = DECISIONS_MODEL, state, timeoutMs = 15_000 } = {}, definitions) {
   if (typeof apiKey !== "string" || !apiKey.trim()) throw fail("missing_api_key", "Set OPENAI_API_KEY on the server to use OpenAI Decisions. ChatGPT sign-in cannot supply this key.");
@@ -93,13 +77,18 @@ export async function evaluateOpenAiDecisions({ fetchImpl = globalThis.fetch, ap
   try {
     return await Promise.race([
       (async () => {
-        const response = await fetchImpl(ENDPOINT, { method: "POST", headers: { Authorization: `Bearer ${apiKey.trim()}`, "Content-Type": "application/json" }, body, signal: controller.signal, redirect: "error" });
-        if (!response.ok) {
-          void response.body?.cancel().catch(() => {});
-          const code = response.status === 429 ? "rate_limited" : [401, 403].includes(response.status) ? "unauthorized" : "upstream_error";
-          throw fail(code, code === "rate_limited" ? "OpenAI Decisions is busy. Try again later." : code === "unauthorized" ? "OpenAI Decisions rejected the server API key." : "OpenAI Decisions could not complete the request.", response.status);
+        let data;
+        try {
+          data = await openAiClient({ baseURL: BASE_URL, apiKey: apiKey.trim(), fetch: cappedFetch(fetchImpl, MAX_BYTES, "OpenAI Decisions"), fetchOptions: { redirect: "error" } })
+            // The SDK timer must exist: without it, a hung fetch keeps the SDK's 10-minute default timer alive. Its body timer can fire before the race timer, so its timeout is mapped below.
+            .decisions.create({ model, input: JSON.stringify(state), questions }, { signal: controller.signal, timeout: timeoutMs });
+        } catch (error) {
+          if (error?.status) { const code = error.status === 429 ? "rate_limited" : [401, 403].includes(error.status) ? "unauthorized" : "upstream_error"; throw fail(code, code === "rate_limited" ? "OpenAI Decisions is rate-limited (HTTP 429). Try again later." : code === "unauthorized" ? `OpenAI Decisions rejected OPENAI_API_KEY (HTTP ${error.status}). Check the key.` : "OpenAI Decisions could not complete the request.", error.status); }
+          if (error instanceof OpenAI.APIConnectionTimeoutError) throw fail("timeout", "OpenAI Decisions did not answer in time. Try again.");
+          if (error?.code === "response_too_large") throw fail("response_too_large", "OpenAI Decisions returned too much data.");
+          if (error instanceof SyntaxError) throw fail("invalid_response", "OpenAI Decisions returned invalid JSON.");
+          throw error;
         }
-        const data = await readJson(response);
         if (!record(data) || !Array.isArray(data.answers) || data.answers.length !== questions.length || data.model !== model) throw fail("invalid_response", "OpenAI Decisions returned unexpected or missing answers.");
         const answers = new Map();
         for (const answer of data.answers) {

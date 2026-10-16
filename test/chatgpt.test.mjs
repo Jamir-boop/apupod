@@ -787,7 +787,7 @@ test("Responses payload has only supported fields and accepts split UTF-8/CRLF f
   const result = await h.client.respond({ model: "model-a", system: "System instructions", prompt: "User input", effort: "xhigh", maxTokens: 100, temperature: 0.5 });
   assert.deepEqual(result, { choices: [{ message: { content: "Héllo 🌎" } }] });
   assert.deepEqual(JSON.parse(h.requests.at(-1).body), { model: "model-a", input: [{ role: "user", content: "User input" }], store: false, stream: true, instructions: "System instructions", reasoning: { effort: "xhigh" } });
-  assert.equal(h.requests.at(-1).headers.authorization, "Bearer access-oaiapp_a");
+  assert.equal(new Headers(h.requests.at(-1).headers).get("authorization"), "Bearer access-oaiapp_a");
   assert.equal(h.requests.at(-1).url, `${RESOURCE}/responses`);
 });
 
@@ -816,6 +816,17 @@ for (const [name, events, code] of [
   await h.login();
   h.handlers.respond = () => sse(events, name === "done without completion" ? { raw: "data: [DONE]\n\n" } : {});
   await assert.rejects(h.client.respond({ model: "model-a", prompt: "Hello" }), { code, requestId: "req-stream" });
+});
+
+test("a never-settling Responses request leaves no pending timer after the stream timeout", async (t) => {
+  const h = await harness(t, { clientOptions: { streamTimeoutMs: 50 } });
+  await h.login();
+  const timers = () => process.getActiveResourcesInfo().filter((resource) => resource === "Timeout").length;
+  const before = timers();
+  h.handlers.respond = () => new Promise(() => {});
+  h.client.respond({ model: "model-a", prompt: "Hello" }).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(timers() - before, 0, "a ChatGPT plan request must not leave the SDK default timer");
 });
 
 test("stream byte limits and invalid frames fail without partial output", async (t) => {
