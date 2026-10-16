@@ -208,7 +208,7 @@ Navigation retains line icons and short labels. Default items use muted text. Ho
 
 ### Progress and Status
 
-Progress retains the tape-counter layout. Completed steps use checkmarks and gold connectors. The current step uses a filled marker; pending steps use muted text and empty markers. Job labels, icons, and edge patterns retain their meaning without green or red. On narrow screens the current counter remains visible and opens the complete track on demand. Values always come from real application state.
+Progress retains the tape-counter layout. Completed steps use checkmarks and gold connectors. The current step uses a filled marker; pending steps use muted text and empty markers. Job labels, icons, and edge patterns retain their meaning without green or red. On narrow screens the current counter remains visible and opens the complete track on demand; the hidden desktop counter stays available to assistive technology. The header job status (Ready, active, queued) stays visible at every width and updates whenever jobs change. Values always come from real application state.
 
 Existing motion uses 120ms control feedback, 180ms control or menu changes, and 240ms panel entrances with `cubic-bezier(.16, 1, .3, 1)`. Loading markers and spinners retain their existing motion owners. The next-action cue is a static three-second outline, not a glow. Reduced-motion preferences retain effectively instant state changes. No navigation glide was added.
 
@@ -216,7 +216,7 @@ Existing motion uses 120ms control feedback, 180ms control or menu changes, and 
 
 Use native disclosure for advanced settings and provider detail. A contextual tool region should explain what is open, keep its close action obvious, and never sever the creator from the production stage that opened it.
 
-Activity notification and job summaries use an inset gold focus outline (-4px offset). This keeps all four sides visible inside scrolling regions while dashed error boundaries remain visible.
+Activity notification and job summaries, and the progress tape stages, use an inset gold focus outline (-4px offset). This keeps all four sides visible inside scrolling regions while dashed error boundaries remain visible.
 
 ## Do's and Don'ts
 

@@ -37,13 +37,13 @@ function episodeContext() {
     currentEpisode: { id: "a", name: "Episode A", episodeProfileId: "f", speakerProfileId: "s", knowledgeBaseId: "kb", transcript: "Host: saved" },
     state: { profiles: { speakerProfiles: [{ id: "s", name: "Hosts" }], episodeProfiles: [{ id: "f", name: "Format" }] }, knowledgeBases: [{ id: "kb", name: "Source", characters: 10 }], episodes: [], plans: [] },
     configState: {}, configDirty: false, profilesDirty: false, episodeDraftDirty: false, transcriptDirty: false, transcriptPromptDirty: false,
-    chatGptPollTimer: null, activeViewName: () => "transcript", validateControls: () => true,
+    chatGptPollTimer: null, TRANSCRIPT_DRAFT_PREFIX: "draft.", activeViewName: () => "transcript", validateControls: () => true,
     syncSpeakerForm: noop, syncFormatForm: noop, syncConfigForm: noop, notify: noop,
     effortOptions: () => "", effortLevelsForModel: () => [], resolveTranscriptPrompt: async () => {}, confirm: () => true,
     $: (id) => { if (!controls.has(id)) controls.set(id, new Control()); return controls.get(id); },
     controls,
   };
-  install(["option", "escapeHtml", "icon", "saveEditor", "renderBuildOptions", "renderEpisodeSettingsFields", "captureEpisodeDraft", "restoreEpisodeDraft", "hasUnsavedEpisodeChanges", "selectEpisode", "refreshState", "saveEpisode", "saveTranscript"], context);
+  install(["option", "escapeHtml", "icon", "notifyError", "saveEditor", "renderBuildOptions", "renderEpisodeSettingsFields", "storeTranscriptDraft", "restoreTranscriptDraft", "captureEpisodeDraft", "restoreEpisodeDraft", "hasUnsavedEpisodeChanges", "selectEpisode", "refreshState", "saveEpisode", "saveTranscript"], context);
   Object.assign(context.state, { episodes: [context.currentEpisode] });
   for (const [id, value] of Object.entries({ episodeName: "Episode A", buildEpisodeProfile: "f", episodeHosts: "s", buildKnowledge: "kb", transcriptText: "Host: saved" })) context.$(id).value = value;
   return context;
@@ -731,4 +731,392 @@ test("Apply keeps an updatedAt that a same-tab save adopted during the request, 
   context.profilesDirty = true;
   await context.saveProfiles();
   assert.equal(context.state.profiles.updatedAt, "v1++++");
+});
+
+const statusHelper = script.match(/    const setStatus = [^\n]*/)[0];
+
+function listStub() {
+  const list = { writes: 0, inserted: [], _html: "", contains: () => false, querySelectorAll: () => [], querySelector: () => null,
+    insertAdjacentHTML(position, value) { this.inserted.push([position, value]); this._html = position === "beforeend" ? this._html + value : value + this._html; } };
+  Object.defineProperty(list, "innerHTML", { get() { return this._html; }, set(value) { this.writes++; this._html = value; } });
+  return list;
+}
+
+test("the job poll does not rebuild an unchanged episode list or Activity panel and keeps job focus", () => {
+  const list = listStub();
+  const activity = listStub();
+  const episode = { id: "e1", name: "One", transcriptWords: 0, episodeProfileId: "f" };
+  const context = { state: { episodes: [episode], profiles: { episodeProfiles: [{ id: "f" }], speakerProfiles: [{ id: "s", name: "Hosts" }] } }, activePlan: null,
+    jobsState: { jobs: [{ id: "j1", episodeId: "e1", type: "transcript", status: "running", message: "1%" }] }, startingEpisodeIds: new Set(), lastEpisodeListHtml: "", lastServerActivityHtml: "",
+    document: { activeElement: null, querySelectorAll: () => [] }, CSS: { escape: (value) => value }, $: (id) => id === "serverActivity" ? activity : list };
+  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "renderEpisodeList", "activeJobs", "renderServerActivity"], context);
+  context.renderEpisodeList();
+  context.jobsState.jobs[0].message = "2%";
+  context.renderEpisodeList();
+  assert.equal(list.writes, 1, "progress-only polls must not replace the rows");
+  context.jobsState.jobs[0].type = "tts";
+  context.renderEpisodeList();
+  assert.equal(list.writes, 2);
+  let focused = "";
+  context.document.activeElement = { closest: () => ({ dataset: { jobId: "j1" } }) };
+  activity.contains = () => true;
+  activity.querySelector = (selector) => ({ focus: () => { focused = selector; } });
+  context.renderServerActivity();
+  assert.equal(focused, '.job-item[data-job-id="j1"] summary');
+  focused = "";
+  context.renderServerActivity();
+  assert.equal(activity.writes, 1, "an identical poll must keep the focused node");
+  assert.equal(focused, "");
+  context.jobsState.jobs[0].message = "3%";
+  context.renderServerActivity();
+  assert.equal(activity.writes, 2);
+  assert.equal(focused, '.job-item[data-job-id="j1"] summary');
+  // Opening a job only changes the DOM, so the next poll keeps the nodes, and a real change reopens it.
+  const item = { open: true, dataset: { jobId: "j1" } };
+  context.document.querySelectorAll = () => [item];
+  context.renderServerActivity();
+  assert.equal(activity.writes, 2, "opening a job disclosure must not rebuild the Activity panel");
+  assert.doesNotMatch(activity.innerHTML, / open/);
+  const rebuilt = { open: false, dataset: { jobId: "j1" } };
+  activity.querySelectorAll = () => [rebuilt];
+  context.jobsState.jobs[0].message = "4%";
+  context.renderServerActivity();
+  assert.equal(activity.writes, 3);
+  assert.equal(rebuilt.open, true);
+});
+
+test("a failed job poll shows its error until a later poll succeeds with the same jobs", async () => {
+  const activity = listStub();
+  const retry = { hidden: true };
+  const jobs = { jobs: [{ id: "j1", episodeId: "e1", type: "transcript", status: "running", message: "1%" }] };
+  let fail = false;
+  const context = { jobsState: { jobs: [] }, lastServerActivityHtml: "", jobsInitialized: false, notifiedJobIds: new Set(), jobPollTimer: null, currentEpisode: null,
+    clearTimeout: noop, setTimeout: noop, renderJobIndicators: noop, notifyJobResult: noop, notify: noop, CSS: { escape: (value) => value },
+    document: { activeElement: null, querySelectorAll: () => [] }, api: async () => { if (fail) throw new Error("down"); return structuredClone(jobs); },
+    $: (id) => id === "retryJobs" ? retry : activity };
+  install(["escapeHtml", "icon", "activeJobs", "renderServerActivity", "refreshJobs"], context);
+  await context.refreshJobs();
+  const ok = activity.innerHTML;
+  fail = true;
+  await assert.rejects(context.refreshJobs(), /down/);
+  assert.match(activity.innerHTML, /Could not load jobs/);
+  assert.equal(retry.hidden, false);
+  fail = false;
+  await context.refreshJobs();
+  assert.equal(activity.innerHTML, ok);
+  assert.equal(retry.hidden, true);
+});
+
+test("a real episode list change keeps open row menus and refocuses the same row control", () => {
+  const list = listStub();
+  const episode = { id: "e1", name: "One", transcriptWords: 0, episodeProfileId: "f" };
+  const opened = [];
+  let focused = "";
+  const control = { matches: () => false, attributes: [{ name: "data-start-episode" }, { name: "class" }], closest: () => ({ dataset: { episodeRow: "e1" } }) };
+  const menu = { closest: () => ({ dataset: { episodeRow: "e1" } }) };
+  const context = { state: { episodes: [episode], profiles: { episodeProfiles: [{ id: "f" }], speakerProfiles: [] } }, activePlan: null,
+    jobsState: { jobs: [] }, startingEpisodeIds: new Set(), lastEpisodeListHtml: "stale", document: { activeElement: control }, CSS: { escape: (value) => value }, $: () => list };
+  list.contains = (node) => node === control;
+  list.querySelectorAll = (selector) => selector === "details.episode-more[open]" ? [menu] : [];
+  list.querySelector = (selector) => {
+    if (selector.endsWith("details.episode-more")) return { setAttribute: (name) => opened.push([selector, name]) };
+    return { disabled: false, focus: () => { focused = selector; } };
+  };
+  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "renderEpisodeList"], context);
+  context.renderEpisodeList();
+  assert.equal(list.writes, 1);
+  assert.deepEqual(opened, [['[data-episode-row="e1"] details.episode-more', "open"]]);
+  assert.equal(focused, '[data-episode-row="e1"] [data-start-episode]');
+});
+
+test("Start stays disabled while its POST runs, across list re-renders, and re-enables after", async () => {
+  for (const outcome of ["resolve", "reject"]) {
+    const request = pending();
+    const rendered = [];
+    let calls = 0;
+    const episode = { id: "e1", transcriptWords: 0, episodeProfileId: "f" };
+    const context = { state: { profiles: { episodeProfiles: [], speakerProfiles: [] } }, jobsState: { jobs: [] }, startingEpisodeIds: new Set(),
+      api: () => { calls++; return request.promise; }, trackJob: noop, notify: noop };
+    context.renderEpisodeList = () => rendered.push(context.episodeRowHtml(episode, "One"));
+    install(["option", "escapeHtml", "icon", "episodeRowHtml", "startEpisode"], context);
+    const starting = context.startEpisode("e1");
+    // Not awaited: without the re-entry guard this second call would wait on the same pending request.
+    const second = context.startEpisode("e1");
+    assert.equal(calls, 1);
+    context.renderEpisodeList();
+    assert.match(rendered.at(-1), /data-start-episode="e1" disabled>/);
+    if (outcome === "resolve") request.resolve({ job: {} }); else request.reject(new Error("Server error"));
+    await (outcome === "resolve" ? starting : assert.rejects(starting, /Server error/));
+    await second;
+    assert.equal(context.startingEpisodeIds.size, 0);
+    assert.match(rendered.at(-1), /data-start-episode="e1">/);
+  }
+});
+
+test("status regions are written only when their text changes", () => {
+  const writes = {};
+  class Counted extends Control {
+    constructor(id) { super(); this.id = id; this._text = ""; this.childNodes = []; this.parentElement = { dataset: {} }; }
+    get textContent() { return this._text; }
+    set textContent(value) { writes[this.id] = (writes[this.id] || 0) + 1; this._text = value; }
+  }
+  const controls = new Map();
+  const job = { id: "j", episodeId: "a", type: "tts", status: "running", message: "Rendering 1/3", total: 3, completed: 1 };
+  const context = { jobsState: { jobs: [job] }, currentEpisode: { id: "a", transcript: "Host: hi" }, configDirty: false, profilesDirty: false, episodeDraftDirty: false, transcriptDirty: false, transcriptPromptDirty: false,
+    Node: { TEXT_NODE: 3 }, episodeProfilesAreCurrent: () => true, ttsCompatibilityErrors: () => [], renderEpisodeList: noop, renderTranscriptPrompt: noop,
+    $: (id) => { if (!controls.has(id)) controls.set(id, new Counted(id)); return controls.get(id); } };
+  runInNewContext([statusHelper, ...["currentJob", "episodeIsBusy", "updateSaveButtons", "renderJobIndicators"].map(source)].join("\n"), context);
+  context.renderJobIndicators();
+  context.renderJobIndicators();
+  assert.deepEqual([writes.renderStatus, writes.workspaceStatusValue, writes.transcriptSaveStatus, writes.transcriptJobStatus], [1, 1, 1, undefined]);
+  assert.equal(context.$("workspaceStatusValue").textContent, "1 active");
+  assert.equal(context.$("workspaceStatusValue").parentElement.dataset.state, "active");
+  job.status = "completed";
+  context.renderJobIndicators();
+  assert.equal(context.$("workspaceStatusValue").textContent, "Ready");
+});
+
+test("a hand-edited transcript draft is restored only over its own saved base and cleared after save", async () => {
+  const stored = new Map();
+  const storage = { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) };
+  const context = episodeContext();
+  const notices = [];
+  Object.assign(context, { localStorage: storage, notify: (message, type) => notices.push(type) });
+  context.$("transcriptText").value = "Host: unsaved edit";
+  context.transcriptDirty = true;
+  context.storeTranscriptDraft();
+  assert.deepEqual(JSON.parse(stored.get("draft.a")), { base: "Host: saved", text: "Host: unsaved edit" });
+  context.$("transcriptText").value = "Host: saved";
+  context.transcriptDirty = false;
+  context.restoreTranscriptDraft();
+  assert.equal(context.$("transcriptText").value, "Host: unsaved edit");
+  assert.equal(context.transcriptDirty, true);
+  assert.deepEqual(notices, ["warning"]);
+  const asked = [];
+  context.confirm = (question) => { asked.push(question); return false; };
+  for (const [base, text] of [["Host: regenerated", "Host: unsaved edit"], ["Host: saved", "Host: saved"]]) {
+    stored.set("draft.a", JSON.stringify({ base, text }));
+    context.$("transcriptText").value = "Host: saved";
+    context.transcriptDirty = false;
+    context.restoreTranscriptDraft();
+    assert.equal(context.$("transcriptText").value, "Host: saved");
+    assert.equal(context.transcriptDirty, false);
+    assert.equal(stored.has("draft.a"), false, "a draft that is not restored must not stay in storage");
+  }
+  assert.equal(asked.length, 1, "only a draft of an older transcript asks before it replaces the current one");
+  assert.match(asked[0], /older version/);
+  assert.equal(notices.length, 1);
+  context.confirm = () => true;
+  stored.set("draft.a", JSON.stringify({ base: "Host: older", text: "Host: unsaved edit" }));
+  context.restoreTranscriptDraft();
+  assert.equal(context.$("transcriptText").value, "Host: unsaved edit");
+  assert.equal(context.transcriptDirty, true);
+  assert.deepEqual(JSON.parse(stored.get("draft.a")), { base: "Host: saved", text: "Host: unsaved edit" }, "an accepted old draft is kept against the current base");
+  assert.equal(notices.length, 2);
+  stored.set("draft.a", JSON.stringify({ base: "Host: saved", text: "Host: unsaved edit" }));
+  context.$("transcriptText").value = "Host: unsaved edit";
+  context.transcriptDirty = true;
+  context.refreshState = async () => {};
+  context.transcriptLengthMessage = () => "";
+  context.api = async () => ({ ...context.currentEpisode, transcript: "Host: unsaved edit" });
+  await context.saveTranscript();
+  assert.equal(stored.has("draft.a"), false);
+  Object.defineProperty(context, "localStorage", { get() { throw new Error("blocked"); } });
+  context.transcriptDirty = true;
+  context.storeTranscriptDraft();
+  context.restoreTranscriptDraft();
+});
+
+test("selecting an episode restores its draft, and a confirmed discard removes it", async () => {
+  assert.match(script, /\$\("transcriptText"\)\.addEventListener\("input", \(\) => \{ transcriptDirty = true; storeTranscriptDraft\(\);/);
+  const stored = new Map();
+  const context = episodeContext();
+  const episodes = { a: { ...context.currentEpisode }, b: { ...context.currentEpisode, id: "b", name: "Episode B", transcript: "Host: b" } };
+  const notices = [];
+  Object.assign(context, { localStorage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
+    notify: (message, type) => notices.push(type), api: async (path) => structuredClone(episodes[path.split("/").pop()]) });
+  context.state.episodes = Object.values(episodes);
+  stored.set("draft.a", JSON.stringify({ base: "Host: saved", text: "Host: unsaved edit" }));
+  assert.equal(await context.selectEpisode("a"), true);
+  assert.equal(context.$("transcriptText").value, "Host: unsaved edit");
+  assert.equal(context.transcriptDirty, true);
+  assert.deepEqual(notices, ["warning"]);
+  context.confirm = () => false;
+  assert.equal(await context.selectEpisode("b"), false);
+  assert.equal(stored.has("draft.a"), true, "a cancelled discard keeps the draft");
+  context.confirm = () => true;
+  assert.equal(await context.selectEpisode("b"), true);
+  assert.equal(stored.has("draft.a"), false);
+  assert.equal(await context.selectEpisode("a"), true);
+  assert.equal(context.$("transcriptText").value, "Host: saved");
+  assert.equal(context.transcriptDirty, false);
+  assert.deepEqual(notices, ["warning"]);
+});
+
+test("a new chat keeps the model and effort selected for its first message", async () => {
+  const context = episodeContext();
+  let created;
+  context.state.plans = [];
+  context.state.knowledgeBases = [];
+  Object.assign(context, { activePlanId: "", activePlan: null, plannerChatThread: null, renderPlannerChatHistory: noop, updateChatPills: noop, loadPlan: async () => {}, queueMicrotask,
+    textModelOptions: (value) => `<option value="${value}" selected>${value}</option>`, effortLevelsForModel: () => ["medium", "high"],
+    api: async (path, options) => {
+      if (options?.method === "POST") { created = JSON.parse(options.body); return { plan: { id: "p", episodes: [], planningModel: created.planningModel || "default-model", planningEffort: created.planningEffort || "" } }; }
+      return { plans: [{ id: "p" }] };
+    } });
+  install(["effortOptions", "renderChatControls", "loadPlanForm", "capturePlanDraft", "refreshPlanIndex", "createNewPlan"], context);
+  context.$("plannerChatModel").value = "chosen-model";
+  context.$("plannerChatEffort").value = "high";
+  await context.createNewPlan();
+  assert.deepEqual(created, { planningModel: "chosen-model", planningEffort: "high" });
+  assert.equal(context.$("plannerChatEffort").value, "high");
+  assert.equal(context.capturePlanDraft().planningEffort, "high");
+  assert.equal(context.capturePlanDraft().planningModel, "chosen-model");
+
+  // The reply gives the new chat its first thread id; the controls must keep the chosen effort, not the plan's saved one.
+  for (const effort of ["high", "medium"]) {
+    Object.assign(context, { activePlan: { id: "p", episodes: [], planningModel: "chosen-model", planningEffort: "" }, plannerChatThread: null, plannerChatThreadId: "", plannerChatBusy: false, plannerChatThreads: [], setChatHistoryOpen: noop, renderPlannerChatMessages: noop,
+      assistantContext: () => ({}), assistantWorkspaceDraft: () => ({}) });
+    context.$("plannerChatEffort").value = effort;
+    context.$("plannerChatInput").value = "Make a show";
+    let sent;
+    context.api = async (path, options) => {
+      if (path === "/api/plans/chat") { sent = JSON.parse(options.body); return { threadId: "t" }; }
+      if (path.startsWith("/api/chats")) return { chats: [{ threadId: "t" }] };
+      return { threadId: "t", lastModel: "chosen-model", messages: [{ role: "user", content: "Make a show" }] };
+    };
+    install(["loadPlannerChatThread", "sendPlannerChat"], context);
+    await context.sendPlannerChat();
+    assert.equal(sent.planDraft.planningEffort, effort);
+    assert.equal(context.plannerChatThread.threadId, "t");
+    assert.equal(context.$("plannerChatEffort").value, effort);
+  }
+});
+
+test("the chat log appends new messages with author labels instead of rebuilding the thread", () => {
+  const log = listStub();
+  const thread = { threadId: "t", messages: [{ role: "user", content: "Hello" }, { role: "assistant", content: "not json" }] };
+  const context = { plannerChatThread: thread, renderedChat: { threadId: "", items: [] }, $: () => log };
+  install(["escapeHtml", "icon", "renderPlannerChatMessages"], context);
+  context.renderPlannerChatMessages();
+  thread.messages.push({ role: "user", content: "More" });
+  context.renderPlannerChatMessages();
+  context.renderPlannerChatMessages();
+  assert.equal(log.writes, 1);
+  assert.deepEqual(log.inserted.map(([position]) => position), ["beforeend", "beforeend"]);
+  assert.match(log.inserted[0][1], /sr-only">You: <\/span>More/);
+  assert.match(log.innerHTML, /sr-only">You: <\/span>Hello/);
+  assert.match(log.innerHTML, /sr-only">Assistant: <\/span>not json/);
+  context.plannerChatThread = { threadId: "other", messages: [{ role: "user", content: "Other" }] };
+  context.renderPlannerChatMessages();
+  assert.equal(log.writes, 2);
+  Object.assign(context, { plannerChatThread: null, activePlan: null, planEpisodeRows: () => [] });
+  context.renderPlannerChatMessages();
+  context.renderPlannerChatMessages();
+  assert.equal(log.writes, 3, "the same empty-chat prompt must not be written again");
+  assert.match(log.innerHTML, /Describe the podcast you want/);
+});
+
+test("notifications and toasts add and remove single nodes in their live regions", () => {
+  const region = () => {
+    const node = { children: [], writes: 0,
+      get lastElementChild() { return this.children.at(-1); },
+      set textContent(value) { this.writes++; this.children = []; },
+      insertAdjacentHTML(position, html) {
+        const child = { html, dataset: { toastId: html.match(/data-toast-id="([^"]*)"/)?.[1] }, remove: () => { node.children = node.children.filter((item) => item !== child); } };
+        if (position === "afterbegin") this.children.unshift(child); else this.children.push(child);
+      },
+      querySelector: (selector) => selector === ".notice-item" ? node.children.find((item) => item.html.includes("notice-item")) || null : null,
+      querySelectorAll: () => node.children.filter((item) => item.dataset.toastId) };
+    return node;
+  };
+  const nodes = { notificationFeed: region(), toasts: region(), rightbarBadge: new Control() };
+  let id = 0;
+  const context = { notifications: [], toastEntries: [], toastOverflow: 0, rightbarOpen: false, crypto: { randomUUID: () => `n${++id}` }, setTimeout: noop,
+    TOAST_ICONS: {}, TOAST_LABELS: {}, $: (name) => nodes[name] };
+  install(["escapeHtml", "icon", "notify", "renderNotificationBadge", "showToast", "removeToastNode", "dismissToast", "renderToastOverflow"], context);
+  context.notify("first", "ok");
+  const [firstNotice] = nodes.notificationFeed.children;
+  const [firstToast] = nodes.toasts.children;
+  context.notify("second", "warning");
+  assert.equal(nodes.notificationFeed.writes, 1, "only the empty-feed placeholder is cleared");
+  assert.equal(nodes.notificationFeed.children.length, 2);
+  assert.equal(nodes.notificationFeed.children[1], firstNotice);
+  assert.match(nodes.notificationFeed.children[0].html, /second/);
+  assert.deepEqual(nodes.toasts.children.map((item) => item.dataset.toastId), ["n1", "n2"]);
+  context.dismissToast("n1");
+  assert.equal(nodes.toasts.writes, 0);
+  assert.deepEqual(nodes.toasts.children.map((item) => item.dataset.toastId), ["n2"]);
+  assert.notEqual(nodes.toasts.children[0], firstToast);
+});
+
+test("episode chips, removal confirms, and the shared accent list", () => {
+  const context = { state: { profiles: { episodeProfiles: [], speakerProfiles: [] } }, jobsState: { jobs: [] }, startingEpisodeIds: new Set() };
+  install(["option", "escapeHtml", "icon", "episodeRowHtml"], context);
+  assert.match(context.episodeRowHtml({ id: "e", transcriptWords: 0 }, "E"), /Script<svg[^]*?<\/svg><span class="sr-only"> not ready<\/span>/);
+  assert.match(context.episodeRowHtml({ id: "e", transcriptWords: 9, audioReady: true }, "E"), /Script<svg[^]*?<\/svg><span class="sr-only"> ready<\/span>[^]*Audio<svg[^]*?<\/svg><span class="sr-only"> ready<\/span>/);
+
+  const profile = { id: "s", speakers: [{ name: "Ana" }, { name: "Ben" }] };
+  const speakers = { activeSpeakerProfileId: "s", activeSpeakerIndex: 0, state: { profiles: { speakerProfiles: [profile] } }, syncSpeakerForm: noop, confirm: () => false };
+  install(["removeSpeaker"], speakers);
+  speakers.removeSpeaker(0);
+  assert.equal(profile.speakers.length, 2);
+  assert.match(script, /\$\("clearPlayerQueue"\)\.addEventListener\("click", \(\) => \{\n\s+if \(!confirm\(/);
+  assert.match(script, /if \(!confirm\(`Remove "\$\{connection\?\.name[^\n]*\n\s+configState\.compatibleConnections = configState\.compatibleConnections\.filter/);
+
+  let accentCalls = 0;
+  const cards = { $: (id) => (cards[id] ||= new Control()), activeSpeakerIndex: 0, accentOptions: () => { accentCalls++; return '<option value="x"></option>'; },
+    modelLabel: (id) => id, voiceSelector: () => "", providerTtsFields: () => "", modelOptions: () => "", ensureProviderVoices: noop, document: { querySelectorAll: () => [] } };
+  install(["escapeHtml", "icon", "renderSpeakerCards"], cards);
+  cards.renderSpeakerCards({ voiceModel: "m", speakers: [{ name: "A" }, { name: "B" }, { name: "C" }] });
+  assert.equal(accentCalls, 1);
+  assert.equal(cards.$("speakerCards").innerHTML.split('<datalist id="accent-list">').length - 1, 1);
+  assert.equal(cards.$("speakerCards").innerHTML.split('list="accent-list"').length - 1, 3);
+  assert.match(cards.$("speakerSidebar").innerHTML, /data-speaker-nav="0" class="active" aria-current="true"/);
+});
+
+test("page markup and CSS keep the accessibility and layout fixes", () => {
+  assert.match(html, /<dialog id="modelDialog"[^>]*aria-labelledby="modelDialogTitle"/);
+  assert.match(html, /<textarea id="transcriptText"[^>]*aria-describedby="transcriptLengthWarning"/);
+  assert.match(html, /<select id="savedEpisodeSelect" aria-describedby="savedEpisodeHint">/);
+  assert.match(html, /id="savedEpisodeHint"/);
+  assert.doesNotMatch(script, /label\.title = label\.dataset\.help/);
+  assert.match(html, /<div id="speakerSidebar"[^>]*role="group"/);
+  assert.doesNotMatch(html, /role="navigation"/);
+  assert.doesNotMatch(html, /id="chatHistoryPanel"[^>]*aria-modal/);
+  assert.match(source("setChatHistoryOpen"), /parentElement\.children\) if \(node\.id !== "chatHistoryPanel"\) node\.inert = open/);
+  assert.match(source("visibleFocusable"), /!node\.closest\("\[inert\]"\)/, "the mobile chat Tab trap must skip controls that chat history made inert");
+  assert.doesNotMatch(source("activeModal"), /chatHistoryPanel/, "chat history uses inert, not the modal Tab trap");
+  assert.match(source("removeSpeaker"), /updateSaveButtons\(\);\n\s+\$\("addSpeaker"\)\.focus\(\);/);
+  assert.match(script, /configState\.compatibleConnections = configState\.compatibleConnections\.filter[^\n]*\n\s+configDirty = true;\n\s+renderConfigView\(\);\n\s+return \$\("addCompatibleConnection"\)\.focus\(\);/);
+  assert.match(source("deleteEpisode"), /localStorage\.removeItem\(TRANSCRIPT_DRAFT_PREFIX \+ id\)/);
+  const leave = script.match(/window\.addEventListener\("beforeunload", \(event\) => \{[^]*?\n    \}\);/)[0];
+  assert.match(leave, /!transcriptDirty/);
+  assert.match(leave, /if \(navigator\.userActivation && !navigator\.userActivation\.hasBeenActive\) return;\n\s+event\.preventDefault\(\);/);
+  assert.match(script, /changeEpisodeHosts\(select\.dataset\.episodeHost, select\.value\)\.catch\(\(error\) => \{[^]*?lastEpisodeListHtml = "";\s+renderEpisodeList\(\);\s+throw error;/);
+  assert.match(html, /<div class="workspace-status" role="status">/);
+  assert.doesNotMatch(source("renderPodcastAssistant").match(/\$\("workspaceProgress"\)\.innerHTML = [^\n]*/)[0], /aria-pressed/);
+  assert.match(source("renderPodcastAssistant"), /' class="active" aria-current="page"'/);
+  assert.doesNotMatch(source("renderSpeakerCards"), /aria-pressed/);
+  assert.equal(script.split('notify(error.message || String(error), "error")').length - 1, 1);
+  assert.equal(script.split("if (open) setChatControlsOpen(false); else { setChatControlsOpen(true);").length - 1, 1);
+  const css = html.match(/<style[^>]*>([\s\S]*?)<\/style>/)[1];
+  const mobileChat = Number(script.match(/const mobileChatQuery = matchMedia\("\(max-width: (\d+)px\)"\)/)[1]);
+  assert.equal(mobileChat, 1024, "the chat becomes a mobile overlay at 1024 px, so 1025-1200 px keeps the sidebar chat");
+  // Brace-depth scan, so blocks with nested @keyframes are checked too.
+  const mediaBlocks = [];
+  for (const match of css.matchAll(/@media ([^{]+)\{/g)) {
+    let depth = 1, end = match.index + match[0].length;
+    while (depth) depth += { "{": 1, "}": -1 }[css[end++]] || 0;
+    mediaBlocks.push([match[1], css.slice(match.index + match[0].length, end - 1)]);
+  }
+  assert.ok(mediaBlocks.filter(([query]) => /max-width: 820px/.test(query)).some(([, body]) => /\.workspace-counter \{/.test(body)), "the 820 px block with the counter rule is scanned");
+  for (const [query, body] of mediaBlocks) {
+    if (/\.assistant-chat \{ display: none; \}/.test(body)) assert.ok(Number(query.match(/max-width: (\d+)px/)?.[1]) <= mobileChat && !/min-width/.test(query), query);
+    if (/max-width: (?:1024|820)px/.test(query)) {
+      assert.doesNotMatch(body, /\.workspace-(?:status|counter) \{[^}]*display: none/, query);
+      assert.doesNotMatch(body, /\.workspace-(?:status|counter) \{[^}]*visibility: hidden/, query);
+    }
+  }
+  assert.match(css, /\.workspace-progress button:focus-visible \{ outline-offset: -4px; \}/);
 });
