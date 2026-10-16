@@ -29,7 +29,7 @@ Run with automatic environment loading:
 npm run dev
 ```
 
-`server.mjs` is the runtime entrypoint. The implementation lives in `src/app.mjs` and `src/defaults.mjs`; the root `app.mjs` and `defaults.mjs` are one-line re-export shims kept for existing imports.
+`server.mjs` is the runtime entrypoint. The implementation lives in `src/app.mjs` (server, routing, startup), `src/util.mjs`, `src/store.mjs`, `src/config.mjs`, `src/episodes.mjs`, `src/plans.mjs`, `src/jobs.mjs`, `src/chat.mjs`, `src/providers/`, `src/chatgpt.mjs`, `src/decisions.mjs`, `src/jev.mjs`, and `src/defaults.mjs`; the root `app.mjs` and `defaults.mjs` are one-line re-export shims kept for existing imports.
 
 ## Views
 
