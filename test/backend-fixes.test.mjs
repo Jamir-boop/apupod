@@ -9,6 +9,9 @@ import { createPodcastServer, writeAudioAsWav } from "../src/app.mjs";
 import { ChatGptError } from "../src/chatgpt.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
 
+// A key in the developer's shell would start Anthropic discovery against the stubs.
+delete process.env.ANTHROPIC_API_KEY;
+
 for (const name of ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "OPENCODE_GO_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY"]) process.env[name] = `backend-test-${name}`;
 
 function deferred() {
@@ -204,7 +207,7 @@ test("deletion commits before a later chat registers, without a provider call or
 test("new reserved connection IDs are rejected and a saved custom ChatGPT connection keeps its routing and references", async (t) => {
   const first = await start(t);
   const config = (await first.api("/api/config")).value;
-  for (const id of ["chatgpt", "openai", "opencode-go", "chatterbox"]) {
+  for (const id of ["chatgpt", "anthropic", "openai", "opencode-go", "chatterbox"]) {
     const result = await first.api("/api/config", { ...config, compatibleConnections: [{ id, name: "Custom", baseUrl: "https://custom.invalid/v1", activeModels: {} }] }, "PUT");
     assert.equal(result.status, 400);
     assert.match(result.value.error, /reserved/);
@@ -263,7 +266,7 @@ test("new reserved connection IDs are rejected and a saved custom ChatGPT connec
 });
 
 test("other saved reserved connection IDs use their custom endpoints and activation maps", async (t) => {
-  for (const [id, textModel, ttsModel] of [["openai", "gpt-5.6", "tts-1"], ["opencode-go", "minimax-m2.7", "custom-tts"], ["chatterbox", "gpt-5.6", "chatterbox-turbo"]]) {
+  for (const [id, textModel, ttsModel] of [["openai", "gpt-5.6", "tts-1"], ["opencode-go", "minimax-m2.7", "custom-tts"], ["chatterbox", "gpt-5.6", "chatterbox-turbo"], ["anthropic", "claude-custom", "custom-tts"]]) {
     const calls = [];
     const { api } = await start(t, { fetchImpl: async (url, options = {}) => {
       const target = String(url);

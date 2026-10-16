@@ -8,6 +8,10 @@ import test from "node:test";
 import { createPodcastServer } from "../src/app.mjs";
 import { ChatGptError } from "../src/chatgpt.mjs";
 import { DECISIONS_MODEL } from "../src/decisions.mjs";
+
+// A key in the developer's shell would start Anthropic discovery against the stubs.
+delete process.env.ANTHROPIC_API_KEY;
+
 const header = (options, name) => new Headers(options.headers).get(name);
 
 process.env.OPENCODE_GO_API_KEY = "test-opencode-go-key";

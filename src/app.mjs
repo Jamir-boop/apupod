@@ -229,6 +229,7 @@ function normalizeConfig(value) {
         activeModels: normalizeCapabilityMap(providers.openai?.activeModels || providers.openai?.modelCapabilities),
       },
       chatgpt: { enabled: providers.chatgpt?.enabled === true, activeModels: normalizeTextCapabilityMap(providers.chatgpt?.activeModels) },
+      anthropic: { enabled: providers.anthropic?.enabled !== false, activeModels: normalizeTextCapabilityMap(providers.anthropic?.activeModels) },
       opencodeGo: {
         enabled: providers.opencodeGo?.enabled !== false,
         activeModels: normalizeOpenCodeGoCapabilityMap(providers.opencodeGo?.activeModels),
@@ -301,6 +302,8 @@ function activateReferencedModels(config, profiles) {
       ? config.providers.openai.activeModels
       : builtInId === "chatgpt"
         ? type === "text" ? config.providers.chatgpt.activeModels : null
+      : builtInId === "anthropic"
+        ? type === "text" ? config.providers.anthropic.activeModels : null
       : builtInId === "opencode-go"
         ? config.providers.opencodeGo.activeModels
         : builtInId === "chatterbox"
@@ -339,6 +342,7 @@ async function redactConfig(config) {
         hasApiKey: Boolean(process.env.OPENAI_API_KEY?.trim()),
       },
       chatgpt: { ...config.providers.chatgpt },
+      anthropic: { ...config.providers.anthropic, hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY?.trim()) },
       opencodeGo: {
         ...config.providers.opencodeGo,
         hasApiKey: Boolean(openCodeGoCredential.key),
@@ -2469,6 +2473,10 @@ function validateConfigPayload(value, current) {
   const chatGptInput = providers.chatgpt || {};
   const chatgpt = { enabled: Object.hasOwn(chatGptInput, "enabled") ? chatGptInput.enabled === true : current.providers.chatgpt.enabled,
     activeModels: normalizeTextCapabilityMap(chatGptInput.activeModels ?? current.providers.chatgpt.activeModels) };
+  const anthropicInput = providers.anthropic && typeof providers.anthropic === "object" ? providers.anthropic : {};
+  const anthropic = { enabled: Object.hasOwn(anthropicInput, "enabled") ? anthropicInput.enabled !== false : current.providers.anthropic.enabled !== false,
+    activeModels: normalizeTextCapabilityMap(anthropicInput.activeModels ?? current.providers.anthropic.activeModels) };
+  applyApiKeyPatch(envPatch, "ANTHROPIC_API_KEY", anthropicInput, "Anthropic");
   const decisionInput = body.assistantDecision || {};
   const decisionProvider = decisionInput.provider ?? current.assistantDecision.provider ?? "typesafe";
   if (!["typesafe", "openai"].includes(decisionProvider)) throw badRequest("Unsupported assistant decision provider.");
@@ -2498,7 +2506,7 @@ function validateConfigPayload(value, current) {
     const existing = currentById.get(item.id);
     const id = typeof item.id === "string" && item.id.trim() ? item.id.trim() : randomUUID();
     validateId(id, "Compatible connection");
-    if (!existing && ["chatgpt", "openai", "opencode-go", "chatterbox"].includes(id)) throw badRequest(`Compatible connection ID "${id}" is reserved for a built-in provider.`);
+    if (!existing && ["chatgpt", "anthropic", "openai", "opencode-go", "chatterbox"].includes(id)) throw badRequest(`Compatible connection ID "${id}" is reserved for a built-in provider.`);
     const name = String(item.name || "").trim();
     if (!name) throw badRequest("Compatible connection name is required.");
     const connection = {
@@ -2524,7 +2532,7 @@ function validateConfigPayload(value, current) {
 
   return {
     config: {
-      providers: { mimo, elevenlabs, openai, chatgpt, opencodeGo, chatterbox },
+      providers: { mimo, elevenlabs, openai, chatgpt, anthropic, opencodeGo, chatterbox },
       compatibleConnections,
       assistantDecision,
     },
@@ -2617,6 +2625,8 @@ function modelIsActive(config, modelId, type) {
       ? config.providers.openai
       : builtInId === "chatgpt"
         ? config.providers.chatgpt
+      : builtInId === "anthropic"
+        ? config.providers.anthropic
       : builtInId === "opencode-go"
         ? config.providers.opencodeGo
       : builtInId === "chatterbox"
@@ -2678,7 +2688,7 @@ function disablesCapabilities(current, next) {
   const disabled = (before, after) => before?.enabled !== false && after?.enabled === false
     || Object.entries(before?.activeModels || {}).some(([id, capability]) =>
       capability.text && !after?.activeModels?.[id]?.text || capability.tts && !after?.activeModels?.[id]?.tts);
-  if (["mimo", "elevenlabs", "openai", "chatgpt", "opencodeGo", "chatterbox"].some((id) => disabled(current.providers[id], next.providers[id]))) return true;
+  if (["mimo", "elevenlabs", "openai", "chatgpt", "anthropic", "opencodeGo", "chatterbox"].some((id) => disabled(current.providers[id], next.providers[id]))) return true;
   const nextById = new Map(next.compatibleConnections.map((connection) => [connection.id, connection]));
   return current.compatibleConnections.some((connection) => !nextById.has(connection.id) || disabled(connection, nextById.get(connection.id)));
 }

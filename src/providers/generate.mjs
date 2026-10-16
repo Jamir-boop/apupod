@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { ChatGptError } from "../chatgpt.mjs";
 import { badRequest, oneLine, normalizeDelivery } from "../util.mjs";
-import { MAX_JSON_RESPONSE_BYTES, MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, LLM_TIMEOUT_MS, TTS_TIMEOUT_MS, LLM_RETRIES, fetchJsonWithBody, fetchBytes, cappedFetch, openAiClient, anthropicClient, callOptions, sdkJson, providerError } from "./transport.mjs";
-import { openCodeGoProtocol, resolveOpenCodeGoCredential, awaitLatestModelCatalog, parseCompatibleModelId, builtInConnectionId, effortLevelsForModel, usesResponsesApi, compatibleConnection, builtInChatterboxConnection, availableModelIds, isElevenLabsModel, modelLanguageError, elevenLabsCapabilities, apiKeyName } from "./catalog.mjs";
+import { MAX_JSON_RESPONSE_BYTES, MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, LLM_TIMEOUT_MS, TTS_TIMEOUT_MS, LLM_RETRIES, MAX_STREAM_RESPONSE_BYTES, fetchJsonWithBody, fetchBytes, cappedFetch, openAiClient, anthropicClient, callOptions, sdkJson, providerError } from "./transport.mjs";
+import { ANTHROPIC_BASE_URL, openCodeGoProtocol, resolveOpenCodeGoCredential, awaitLatestModelCatalog, parseCompatibleModelId, builtInConnectionId, effortLevelsForModel, usesResponsesApi, compatibleConnection, builtInChatterboxConnection, availableModelIds, isElevenLabsModel, modelLanguageError, elevenLabsCapabilities, apiKeyName } from "./catalog.mjs";
 
 const ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
@@ -104,6 +104,7 @@ export async function callTextModel({ context, model, system, prompt, maxTokens,
       if (!context.chatgptAccountId) throw new ChatGptError("chatgpt_sign_in_required", { status: 401 });
       return context.chatgptClient.respond({ accountId: context.chatgptAccountId, model: compatible.modelId, system, prompt, ...(effort ? { effort } : {}) });
     }
+    if (builtInId === "anthropic") return callAnthropicMessages(context, model, { system, prompt, effort });
     // ponytail: Responses API only for the built-in openai connection; compatible connections stay on chat/completions
     if (builtInId === "openai" && usesResponsesApi(compatible.modelId)) {
       return callOpenAiResponses(context, model, { system, prompt, maxTokens, effort }, LLM_TIMEOUT_MS);
@@ -460,6 +461,37 @@ async function callOpenCodeGoMessages(context, compositeModelId, { system, promp
     ? data.content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n")
     : "";
   if (!text) throw new Error(`${connection.name} messages did not include text content.`);
+  return { choices: [{ message: { content: text } }] };
+}
+
+async function callAnthropicMessages(context, compositeModelId, { system, prompt, effort }) {
+  const parsed = parseCompatibleModelId(compositeModelId);
+  const apiKey = runtimeCredential(context, "ANTHROPIC_API_KEY");
+  if (!apiKey) throw badRequest("ANTHROPIC_API_KEY is required in .env.");
+  const entry = context.modelCatalog.providers.anthropic?.textModels.find((model) => model.id === compositeModelId);
+  const label = "Anthropic messages";
+  // Adaptive thinking counts against max_tokens, so the callers' visible-output budgets would cut answers short. Billing counts only generated tokens.
+  const maxTokens = Math.min(entry?.maxTokens || 64_000, 64_000);
+  let message;
+  try {
+    // No thinking, temperature, top_p or top_k: current Claude models think adaptively and reject explicit settings.
+    message = await anthropicClient({ baseURL: ANTHROPIC_BASE_URL, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_STREAM_RESPONSE_BYTES, label) }).beta.messages.stream({
+      model: parsed.modelId,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content: prompt }],
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      ...(effort && entry?.effortLevels?.includes(effort) ? { output_config: { effort } } : {}),
+    }, callOptions(LLM_TIMEOUT_MS, LLM_RETRIES)).finalMessage();
+  } catch (error) {
+    throw providerError(error, label, "ANTHROPIC_API_KEY", LLM_TIMEOUT_MS);
+  }
+  if (message.stop_reason === "refusal") throw new Error(`Anthropic model ${parsed.modelId} declined this request (category: ${message.stop_details?.category ?? "none"}). Change the request or select another model.`);
+  if (message.stop_reason === "max_tokens") throw new Error(`Anthropic model ${parsed.modelId} stopped at its ${maxTokens}-token output limit before it finished. Lower the effort or shorten the request.`);
+  // A mid-stream fallback keeps the partial text and the fallback model continues it, so join every text block. Thinking and fallback blocks are not the answer.
+  const text = (message.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
+  if (!text) throw new Error("Anthropic messages did not include text content.");
   return { choices: [{ message: { content: text } }] };
 }
 

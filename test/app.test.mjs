@@ -24,6 +24,9 @@ import {
 import { DEFAULT_DATA } from "../defaults.mjs";
 import { applyWrites } from "../scripts/update-version.mjs";
 
+// A key in the developer's shell would start Anthropic discovery against the stubs.
+delete process.env.ANTHROPIC_API_KEY;
+
 const speakers = DEFAULT_DATA.speakerProfiles[0].speakers;
 const execFileAsync = promisify(execFile);
 const header = (options, name) => new Headers(options.headers).get(name);

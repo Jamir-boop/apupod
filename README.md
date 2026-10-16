@@ -78,6 +78,15 @@ The `Podcast Assistant` is a pane beside every view, not a view itself: describe
   - Usage or access errors stop the request. There is no automatic API-key billing fallback. Use `Manage usage` or select another provider yourself.
   - Prompts and selected context go to OpenAI. Local storage does not mean offline inference.
   - This flow is for eligible local and open-source clients. Paid or remotely hosted distribution needs a separate access review. [Official local-app guide](https://developers.openai.com/siwc/token-sharing-open-source)
+- `Anthropic`
+  - Built-in text provider for Claude models using `ANTHROPIC_API_KEY`. It does not provide TTS.
+  - The API root is fixed at `https://api.anthropic.com`. `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` in the environment are not used.
+  - Discovers models from `/v1/models` after Config save. Effort levels come from each model's capabilities. Models stay inactive until you activate them as LLM models.
+  - Requests stream from `/v1/messages` with an output ceiling of 64,000 tokens (or the model's lower limit) and the 240 s request deadline.
+  - Uses server-side refusal fallback with `fallbacks: "default"`: if a model declines, another Claude model can continue the request, billed at the fallback model's rate. A mid-stream refusal, or a refusal in a billed category, is billed too.
+  - A refusal gives a clear error. Change the request or select another model.
+  - A `max_tokens` stop gives an error that names the output limit. Lower the effort or shorten the request.
+  - [Messages API](https://platform.claude.com/docs/en/api/messages) · [Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)
 - `Jev configuration decisions`
   - Optional assistant decision layer using `TYPESAFE_API_KEY` and the pinned model `jev-1.13.0`. It is disabled by default and is not a script or TTS model.
   - Jev selects typed settings from valid model, language, profile, voice, and delivery-preset choices. The text model writes prose.
@@ -108,7 +117,7 @@ The `Podcast Assistant` is a pane beside every view, not a view itself: describe
 
 Config discovers models but exposes only models explicitly activated as LLM, TTS, or both. Saved profile models are activated during legacy migration so existing profiles keep working. Custom compatible connections may omit API keys for local unauthenticated servers.
 
-New custom connections cannot use the reserved IDs `chatgpt`, `openai`, `opencode-go`, or `chatterbox`. Legacy connections with these IDs keep their saved references and custom routing. The matching built-in provider reports an ID conflict.
+New custom connections cannot use the reserved IDs `chatgpt`, `anthropic`, `openai`, `opencode-go`, or `chatterbox`. Legacy connections with these IDs keep their saved references and custom routing. The matching built-in provider reports an ID conflict.
 
 Saved API keys can be staged for removal with `Clear saved key`, then deleted by `Save config`. Blank key fields continue to mean “keep existing.”
 
