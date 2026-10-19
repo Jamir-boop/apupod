@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { createPodcastServer } from "../src/app.mjs";
 import { createModelCatalog } from "../src/providers/catalog.mjs";
 import { callTextModel, synthesizeTurn, turnClipDescriptor } from "../src/providers/generate.mjs";
 import { anthropicClient, callOptions, cappedFetch, openAiClient, providerError } from "../src/providers/transport.mjs";
+import { chatgptStub, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const header = (init, name) => new Headers(init.headers).get(name);
 const LANGUAGE = { id: "en-US", apiCode: "en", name: "English (United States)" };
@@ -38,12 +37,6 @@ function context(fetchImpl, { apiKey = "sk-custom" } = {}) {
 
 const text = (ctx, model = "compat:custom:chat-model") => callTextModel({ context: ctx, model, system: "s", prompt: "p", maxTokens: 100, temperature: 0.5, topP: 1 });
 const speak = (ctx) => synthesizeTurn(ctx, { voiceModel: "compat:custom:tts-1" }, { voiceId: "alloy" }, "Hello", "", LANGUAGE);
-
-function withEnv(t, values) {
-  const saved = Object.fromEntries(Object.keys(values).map((name) => [name, process.env[name]]));
-  Object.assign(process.env, values);
-  t.after(() => { for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value; });
-}
 
 test("SDK clients ignore OPENAI_* and ANTHROPIC_* environment variables", async (t) => {
   withEnv(t, {
@@ -162,20 +155,15 @@ test("a retry-after over 60 s does not hold an Anthropic-format call until its d
 });
 
 test("model discovery does not retry", async (t) => {
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-providers-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  await mkdir(join(rootDir, "data"), { recursive: true });
-  await writeFile(join(rootDir, "data", "config.json"), JSON.stringify({ compatibleConnections: [{ id: "custom", name: "Custom", baseUrl: "https://custom.test/v1", activeModels: {} }] }));
   const { calls, fetchImpl } = recorder((url) => url.startsWith("https://custom.test/") ? fail(503, { error: { message: "down" } }, { "retry-after-ms": "0" }) : Response.json({ data: [] }));
-  const server = await createPodcastServer({ rootDir, chatgptClient: { status: () => ({ accounts: [] }), close: async () => {} }, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  let custom;
-  for (let attempt = 0; attempt < 250 && custom?.status !== "error"; attempt += 1) {
-    custom = (await (await fetch(`${base}/api/models`)).json()).providers.compatible.find((provider) => provider.id === "custom");
-    if (custom?.status !== "error") await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+  const { baseUrl } = await startTestServer(t, { chatgptClient: chatgptStub(), fetchImpl }, async (rootDir) => {
+    await mkdir(join(rootDir, "data"), { recursive: true });
+    await writeFile(join(rootDir, "data", "config.json"), JSON.stringify({ compatibleConnections: [{ id: "custom", name: "Custom", baseUrl: "https://custom.test/v1", activeModels: {} }] }));
+  });
+  const custom = await waitFor(async () => {
+    const provider = (await (await fetch(`${baseUrl}/api/models`)).json()).providers.compatible.find((item) => item.id === "custom");
+    return provider?.status === "error" && provider;
+  });
   assert.equal(custom.error, "Custom models request failed: HTTP 503 down");
   assert.equal(calls.filter((call) => call.url.startsWith("https://custom.test/")).length, 1);
 });

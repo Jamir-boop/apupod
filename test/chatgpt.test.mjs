@@ -19,15 +19,9 @@ const discovery = {
   jwks_uri: `${ISSUER}/.well-known/jwks.json`, revocation_endpoint: `${ISSUER}/api/accounts/oauth/revoke`,
 };
 const json = (value, options = {}) => new Response(JSON.stringify(value), { headers: { "content-type": "application/json", ...options.headers }, status: options.status || 200 });
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
-  return { promise, resolve, reject };
-}
 function pauseSignInWrite(t, stage) {
-  const entered = deferred();
-  const release = deferred();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
   let directory;
   let paused = false;
   let failRestore = false;
@@ -195,8 +189,8 @@ test("state mismatch, declined consent, and callback replay never redeem another
   assert.equal((await h.finish(denied, { error: "access_denied" })).status, 401);
   assert.equal(h.client.status().lastSignIn.error.code, "access_denied");
   const replay = await h.start();
-  const entered = deferred();
-  const release = deferred();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
   h.handlers.code = async (request, token) => {
     entered.resolve();
     await release.promise;
@@ -354,8 +348,8 @@ test("refresh is singleflight, rotates atomically, and omits scopes", async (t) 
   const h = await harness(t);
   await h.login();
   h.advance(3_550_000);
-  const entered = deferred();
-  const release = deferred();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
   h.handlers.refresh = async () => { entered.resolve(); await release.promise; return json({ access_token: "rotated-access", refresh_token: "rotated-refresh", expires_in: 3600, token_type: "Bearer" }); };
   const first = h.client.models();
   await entered.promise;
@@ -393,8 +387,8 @@ test("account switch during refresh cannot infer or replace the new selection", 
   const second = await h.login("oaiapp_b");
   await h.client.select(first);
   h.advance(3_550_000);
-  const entered = deferred();
-  const release = deferred();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
   h.handlers.refresh = async () => { entered.resolve(); await release.promise; return json({ access_token: "new-a", refresh_token: "refresh-a-new", token_type: "Bearer", expires_in: 3600 }); };
   const generation = h.client.respond({ accountId: first, model: "model-a", prompt: "Hello" });
   const rejected = assert.rejects(generation, { code: "chatgpt_account_changed" });
@@ -425,8 +419,8 @@ test("sign-out waits for refresh, revokes the latest rotation, and cannot resurr
   const h = await harness(t);
   const id = await h.login();
   h.advance(3_550_000);
-  const entered = deferred();
-  const release = deferred();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
   h.handlers.refresh = async () => { entered.resolve(); await release.promise; return json({ access_token: "new-access", refresh_token: "new-refresh", token_type: "Bearer", expires_in: 3600 }); };
   const models = h.client.models();
   const rejected = assert.rejects(models, { code: "chatgpt_account_changed" });
@@ -465,7 +459,7 @@ test("account changes cancel pending sign-in and an in-flight stream", async (t)
   await assert.rejects(h.finish(attempt));
   assert.equal(h.client.status().pending, null);
   assert.equal(h.client.status().lastSignIn.status, "cancelled");
-  const entered = deferred();
+  const entered = Promise.withResolvers();
   let cancelled = false;
   h.handlers.respond = () => new Response(new ReadableStream({ start() { entered.resolve(); }, cancel() { cancelled = true; } }), { headers: { "content-type": "text/event-stream" } });
   const generation = h.client.respond({ model: "model-a", prompt: "Hello", accountId: first });
@@ -481,8 +475,8 @@ test("explicit cancel during code exchange cannot replace existing credentials",
   const id = await h.login();
   const original = await readFile(join(h.storageDir, "accounts.json"), "utf8");
   const attempt = await h.start(id);
-  const entered = deferred();
-  const release = deferred();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
   h.handlers.code = async (req, idToken) => {
     entered.resolve();
     await release.promise;
@@ -532,8 +526,8 @@ test("cancelled sign-in restores before queued selection, sign-out, and refresh 
   const second = await h.login("oaiapp_b");
   await h.client.select(first);
   h.advance(3_550_000);
-  const refreshEntered = deferred();
-  const refreshRelease = deferred();
+  const refreshEntered = Promise.withResolvers();
+  const refreshRelease = Promise.withResolvers();
   h.handlers.refresh = async () => {
     refreshEntered.resolve();
     await refreshRelease.promise;
@@ -748,8 +742,8 @@ test("shutdown saves an already successful refresh before releasing storage", as
   const h = await harness(t);
   await h.login();
   h.advance(3_550_000);
-  const entered = deferred();
-  const release = deferred();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
   h.handlers.refresh = async () => {
     entered.resolve();
     await release.promise;

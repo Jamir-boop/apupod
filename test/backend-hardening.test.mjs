@@ -4,55 +4,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 import { runInNewContext } from "node:vm";
-import { createPodcastServer, writeAudioAsWav } from "../src/app.mjs";
+import { writeAudioAsWav } from "../src/app.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
 import { createModelCatalog, openCodeGoProtocol } from "../src/providers/catalog.mjs";
 import { callTextModel, synthesizeTurn } from "../src/providers/generate.mjs";
 import { fetchBytes, fetchJsonWithBody } from "../src/providers/transport.mjs";
+import { chatgptStub, script, setEnv, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 // Keys in the developer's shell would start discovery against the stubs.
 const CLEARED_ENV = ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENCODE_GO_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY"];
 const savedEnv = Object.fromEntries(CLEARED_ENV.map((name) => [name, process.env[name]]));
 for (const name of CLEARED_ENV) delete process.env[name];
-after(() => restoreEnv(savedEnv));
+after(() => setEnv(savedEnv));
 
 const LANGUAGE = { id: "en-US", apiCode: "en", name: "English (United States)" };
 const chat = (content = "{\"ok\":true}") => Response.json({ choices: [{ message: { content } }] });
 
-function restoreEnv(values) {
-  for (const [name, value] of Object.entries(values)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
-}
-
-// An undefined value deletes the variable; every variable is restored after the test.
-function withEnv(t, values) {
-  const saved = Object.fromEntries(Object.keys(values).map((name) => [name, process.env[name]]));
-  restoreEnv(values);
-  t.after(() => restoreEnv(saved));
-}
-
-async function start(t, options = {}, prepare) {
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-hardening-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  await prepare?.(rootDir);
-  const server = await createPodcastServer({ rootDir, chatgptClient: { status: () => ({ accounts: [] }), close: async () => {} }, fetchImpl: async () => Response.json({ data: [] }), ...options });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const api = async (path, body, method = body === undefined ? "GET" : "POST") => {
-    const response = await fetch(base + path, { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
-    return { status: response.status, value: await response.json() };
-  };
-  return { rootDir, api };
-}
-
-async function waitFor(check) {
-  for (let attempt = 0; attempt < 250; attempt += 1) {
-    const result = await check();
-    if (result) return result;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("Test condition was not reached.");
-}
+const start = (t, options = {}, prepare) => startTestServer(t, { chatgptClient: chatgptStub(), fetchImpl: async () => Response.json({ data: [] }), ...options }, prepare);
 
 function unitContext(fetchImpl, { apiKey = "sk-custom-secret" } = {}) {
   const modelCatalog = createModelCatalog({});
@@ -218,9 +186,6 @@ test("B4: every profiles.json writer advances updatedAt, so single-tab save, add
 });
 
 test("B4: the page sends the loaded updatedAt and adopts the saved one, so a second save is not stale", async () => {
-  const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
-  const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
-  const source = (name) => script.match(new RegExp(`    (?:async )?function ${name}\\([^]*?\\n    }`))[0];
   const noop = () => {};
   const sent = [];
   let serverUpdatedAt = "v1";
@@ -246,9 +211,6 @@ test("B4: the page sends the loaded updatedAt and adopts the saved one, so a sec
 });
 
 test("B4: the page adopts updatedAt after host delete and Apply only when it held the replaced one", async () => {
-  const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
-  const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
-  const source = (name) => script.match(new RegExp(`    (?:async )?function ${name}\\([^]*?\\n    }`))[0];
   const deleteListener = script.match(/\$\("deleteSpeakerProfile"\)\.addEventListener\("click", (guard\([^]*?\}\))\);\n    \$\("saveProfiles"\)/)[1];
   const noop = () => {};
   const hosts = () => [{ id: "s", name: "Hosts" }, { id: "x", name: "Host X" }];

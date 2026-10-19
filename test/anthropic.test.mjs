@@ -1,29 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { createPodcastServer } from "../src/app.mjs";
+import { chatgptStub, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const TOUCHED_ENV = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "OPENCODE_GO_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY", "MIMO_BASE_URL"];
 
 // Each test sets its own environment and restores the previous values afterwards, also on failure.
-// Save only once per test: a later save would capture this test's own values, and its restore runs last.
-const isolated = new WeakSet();
 function isolateEnv(t) {
-  if (!isolated.has(t)) {
-    isolated.add(t);
-    const saved = Object.fromEntries(TOUCHED_ENV.map((name) => [name, process.env[name]]));
-    t.after(() => {
-      for (const [name, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[name];
-        else process.env[name] = value;
-      }
-    });
-  }
-  for (const name of TOUCHED_ENV) delete process.env[name];
   // The explicit base URL and key must win over these.
-  Object.assign(process.env, { ANTHROPIC_BASE_URL: "http://env-proxy.invalid", ANTHROPIC_AUTH_TOKEN: "env-anthropic-token" });
+  withEnv(t, { ...Object.fromEntries(TOUCHED_ENV.map((name) => [name, null])), ANTHROPIC_BASE_URL: "http://env-proxy.invalid", ANTHROPIC_AUTH_TOKEN: "env-anthropic-token" });
 }
 
 const KEY = "sk-ant-test-key";
@@ -71,16 +57,7 @@ function answerWithFallback(answer) {
 
 async function startServer(t, { respond, activeModels = { "claude-test": { text: true } }, apiKey = KEY } = {}) {
   isolateEnv(t);
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-anthropic-"));
-  let server;
-  t.after(async () => {
-    if (server) await new Promise((resolve) => server.close(resolve));
-    await rm(rootDir, { recursive: true, force: true });
-  });
-  if (apiKey) process.env.ANTHROPIC_API_KEY = apiKey;
-  else delete process.env.ANTHROPIC_API_KEY;
-  await mkdir(join(rootDir, "data"), { recursive: true });
-  await writeFile(join(rootDir, "data", "config.json"), JSON.stringify({ providers: { anthropic: { enabled: true, activeModels } } }));
+  withEnv(t, { ANTHROPIC_API_KEY: apiKey || null });
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
     const target = String(url);
@@ -89,25 +66,18 @@ async function startServer(t, { respond, activeModels = { "claude-test": { text:
     if (target === MESSAGES_URL) return respond(JSON.parse(init.body), calls.filter((call) => call.url === MESSAGES_URL).length);
     return Response.json({ data: [] });
   };
-  server = await createPodcastServer({ rootDir, chatgptClient: { status: () => ({ accounts: [] }), close: async () => {} }, fetchImpl });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const api = async (path, body, method = body === undefined ? "GET" : "POST") => {
-    const response = await fetch(base + path, { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
-    return { status: response.status, value: await response.json() };
-  };
+  const { rootDir, baseUrl, api } = await startTestServer(t, { chatgptClient: chatgptStub(), fetchImpl }, async (root) => {
+    await mkdir(join(root, "data"), { recursive: true });
+    await writeFile(join(root, "data", "config.json"), JSON.stringify({ providers: { anthropic: { enabled: true, activeModels } } }));
+  });
   const messageCalls = () => calls.filter((call) => call.url === MESSAGES_URL);
-  return { rootDir, api, calls, messageCalls, models: () => settledModels(base) };
+  return { rootDir, api, calls, messageCalls, models: () => settledModels(baseUrl) };
 }
 
-async function settledModels(base) {
-  for (let attempt = 0; attempt < 250; attempt += 1) {
-    const catalog = await (await fetch(`${base}/api/models`)).json();
-    if (catalog.status !== "loading") return catalog;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("The model catalog did not settle.");
-}
+const settledModels = (base) => waitFor(async () => {
+  const catalog = await (await fetch(`${base}/api/models`)).json();
+  return catalog.status !== "loading" && catalog;
+});
 
 async function chatWith(api, planningEffort) {
   const plan = (await api("/api/plans", { name: "Claude plan", planningModel: "compat:anthropic:claude-test", planningEffort })).value.plan;
@@ -136,14 +106,10 @@ test("config save writes ANTHROPIC_API_KEY to .env with mode 0600 and reports on
 
 test("an old config.json without an anthropic entry still loads with the provider enabled and no models", async (t) => {
   isolateEnv(t);
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-anthropic-legacy-"));
-  t.after(() => rm(rootDir, { recursive: true, force: true }));
-  await mkdir(join(rootDir, "data"), { recursive: true });
-  await writeFile(join(rootDir, "data", "config.json"), JSON.stringify({ providers: { chatgpt: { enabled: false, activeModels: {} } }, compatibleConnections: [] }));
-  const server = await createPodcastServer({ rootDir, chatgptClient: { status: () => ({ accounts: [] }), close: async () => {} }, fetchImpl: async () => Response.json({ data: [] }) });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const { baseUrl: base } = await startTestServer(t, { chatgptClient: chatgptStub(), fetchImpl: async () => Response.json({ data: [] }) }, async (rootDir) => {
+    await mkdir(join(rootDir, "data"), { recursive: true });
+    await writeFile(join(rootDir, "data", "config.json"), JSON.stringify({ providers: { chatgpt: { enabled: false, activeModels: {} } }, compatibleConnections: [] }));
+  });
   const config = await (await fetch(`${base}/api/config`)).json();
   assert.deepEqual(config.providers.anthropic, { enabled: true, activeModels: {}, hasApiKey: false });
   const anthropic = (await settledModels(base)).providers.anthropic;

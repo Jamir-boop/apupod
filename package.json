@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env server.mjs",
     "start": "node --env-file-if-exists=.env server.mjs",
-    "test": "node --test --test-force-exit"
+    "test": "node --test --test-force-exit test/*.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",

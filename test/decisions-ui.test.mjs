@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash, webcrypto } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
+import { source } from "./helpers.mjs";
 
-const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
-const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
-const source = (name) => script.match(new RegExp(`    (?:async )?function ${name}\\([^]*?\\n    }`))[0];
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 test("settings provider switches preserve the typed TypeSafe key, checkbox, and separate OpenAI key", () => {
@@ -61,8 +58,7 @@ test("draft Apply does not pre-save, keeps unrelated profile edits, and rejects 
   const button = { disabled: false };
   let saveCalls = 0;
   let applyCalls = 0;
-  let resolveApply;
-  const pendingApply = new Promise((resolve) => { resolveApply = resolve; });
+  const { promise: pendingApply, resolve: resolveApply } = Promise.withResolvers();
   const context = { state: { profiles: local }, uiRequests: { state: 0 }, profilesDirty: true, activeSpeakerProfileId: "hosts", activeEpisodeProfileId: "format", plannerChatThread: { threadId: "thread", messages: [message] }, plannerChatThreadId: "thread", activePlanId: "",
     currentEpisode: null, activePlan: null, structuredClone, TextEncoder, crypto: webcrypto, Uint8Array,
     $: (id) => id === "view-speakers" ? hostsView : formatView,

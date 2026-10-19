@@ -5,52 +5,17 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createPodcastServer, writeAudioAsWav } from "../src/app.mjs";
+import { writeAudioAsWav } from "../src/app.mjs";
 import { ChatGptError } from "../src/chatgpt.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
+import { chatgptStub, silentWav, startTestServer, waitFor } from "./helpers.mjs";
 
 // A key in the developer's shell would start Anthropic discovery against the stubs.
 delete process.env.ANTHROPIC_API_KEY;
 
 for (const name of ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "OPENCODE_GO_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY"]) process.env[name] = `backend-test-${name}`;
 
-function deferred() {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
-}
-
-async function start(t, options = {}, prepare) {
-  const rootDir = await mkdtemp(join(tmpdir(), "podcast-backend-fixes-"));
-  await prepare?.(rootDir);
-  const server = await createPodcastServer({ rootDir, chatgptClient: { status: () => ({ accounts: [] }), close: async () => {} }, fetchImpl: async () => Response.json({ data: [] }), ...options });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(async () => { await new Promise((resolve) => server.close(resolve)); await rm(rootDir, { recursive: true, force: true }); });
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const api = async (path, body, method = body === undefined ? "GET" : "POST") => {
-    const response = await fetch(base + path, { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
-    return { status: response.status, value: response.headers.get("content-type")?.includes("json") ? await response.json() : Buffer.from(await response.arrayBuffer()) };
-  };
-  return { rootDir, api };
-}
-
-async function waitFor(check) {
-  for (let attempt = 0; attempt < 250; attempt += 1) {
-    const result = await check();
-    if (result) return result;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("Test condition was not reached.");
-}
-
-function wav(frames = 240) {
-  const bytes = Buffer.alloc(44 + frames * 2);
-  bytes.write("RIFF", 0); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write("WAVE", 8);
-  bytes.write("fmt ", 12); bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
-  bytes.writeUInt32LE(24_000, 24); bytes.writeUInt32LE(48_000, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
-  bytes.write("data", 36); bytes.writeUInt32LE(frames * 2, 40);
-  return bytes;
-}
+const start = (t, options = {}, prepare) => startTestServer(t, { chatgptClient: chatgptStub(), fetchImpl: async () => Response.json({ data: [] }), ...options }, prepare);
 
 function accountClient(respond) {
   let active = "account-a";
@@ -100,8 +65,8 @@ test("Hosts deletion returns pre-delete revision evidence for a safe own-tab For
 });
 
 test("queued ChatGPT jobs stay pinned to the enqueue account even with identical model catalogs", async (t) => {
-  const entered = deferred();
-  const gate = deferred();
+  const entered = Promise.withResolvers();
+  const gate = Promise.withResolvers();
   t.after(() => gate.resolve());
   const calls = [];
   const client = accountClient(async (request, active) => {
@@ -136,8 +101,8 @@ test("queued ChatGPT jobs stay pinned to the enqueue account even with identical
 });
 
 test("plan and Knowledge Base deletion cannot race a new unsaved assistant thread", async (t) => {
-  const entered = deferred();
-  const gate = deferred();
+  const entered = Promise.withResolvers();
+  const gate = Promise.withResolvers();
   t.after(() => gate.resolve());
   const { api } = await start(t, { fetchImpl: async (url) => {
     if (String(url).endsWith("/chat/completions")) { entered.resolve(); await gate.promise; return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Saved answer", proposal: null }) } }] }); }
@@ -161,8 +126,8 @@ test("plan and Knowledge Base deletion cannot race a new unsaved assistant threa
 
 test("deletion commits before a later chat registers, without a provider call or restored references", async (t) => {
   for (const kind of ["plan", "knowledge", "chat"]) {
-    const entered = deferred();
-    const gate = deferred();
+    const entered = Promise.withResolvers();
+    const gate = Promise.withResolvers();
     t.after(() => gate.resolve());
     let providerCalls = 0;
     const { api, rootDir } = await start(t, { fetchImpl: async (url) => {
@@ -214,8 +179,8 @@ test("new reserved connection IDs are rejected and a saved custom ChatGPT connec
   }
   const calls = [];
   let nativeCalls = 0;
-  const entered = deferred();
-  const gate = deferred();
+  const entered = Promise.withResolvers();
+  const gate = Promise.withResolvers();
   let pause = false;
   t.after(() => gate.resolve());
   const client = accountClient(async () => { nativeCalls += 1; throw new Error("Custom IDs cannot call ChatGPT plan usage."); });
@@ -224,7 +189,7 @@ test("new reserved connection IDs are rejected and a saved custom ChatGPT connec
     calls.push(target);
     if (target === "https://custom.invalid/v1/models") return Response.json({ data: [{ id: "shared-model" }, { id: "custom-tts", capabilities: { tts: true } }] });
     if (target === "https://custom.invalid/v1/chat/completions") { if (pause) { entered.resolve(); await gate.promise; } return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Custom response", proposal: null }) } }] }); }
-    if (target === "https://custom.invalid/v1/audio/speech") { assert.equal(JSON.parse(options.body).model, "custom-tts"); return new Response(wav(), { headers: { "Content-Type": "audio/wav" } }); }
+    if (target === "https://custom.invalid/v1/audio/speech") { assert.equal(JSON.parse(options.body).model, "custom-tts"); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
     if (target === "https://api.xiaomimimo.com/v1/models") return Response.json({ data: [{ id: "mimo-v2.5-tts" }] });
     return Response.json({ data: [] });
   } }, async (root) => {
@@ -272,7 +237,7 @@ test("other saved reserved connection IDs use their custom endpoints and activat
       const target = String(url);
       if (target === "https://custom.invalid/v1/models") return Response.json({ data: [{ id: textModel }, { id: ttsModel, capabilities: { tts: true } }] });
       if (target === "https://custom.invalid/v1/chat/completions") { calls.push(target); const body = JSON.parse(options.body); assert.equal(body.max_tokens, 8_000); assert.equal(body.max_completion_tokens, undefined); return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Custom response", proposal: null }) } }] }); }
-      if (target === "https://custom.invalid/v1/audio/speech") { calls.push(target); const body = JSON.parse(options.body); assert.equal(body.response_format, "mp3"); assert.equal(body.exaggeration, undefined); return new Response(wav(), { headers: { "Content-Type": "audio/wav" } }); }
+      if (target === "https://custom.invalid/v1/audio/speech") { calls.push(target); const body = JSON.parse(options.body); assert.equal(body.response_format, "mp3"); assert.equal(body.exaggeration, undefined); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
       return Response.json({ data: [] });
     } }, async (root) => {
       await mkdir(join(root, "data"), { recursive: true });
@@ -327,7 +292,7 @@ test("ElevenLabs honors discovered legacy limits without cutting tags or SSML br
   const requests = [];
   const { api } = await start(t, { fetchImpl: async (url, options = {}) => {
     if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json(["eleven_v4", "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"].map((model_id) => ({ model_id, can_do_text_to_speech: true, maximum_text_length_per_request: 60, languages: [{ language_id: "es", name: "Spanish" }] })));
-    if (String(url).includes("/text-to-speech/")) { const body = JSON.parse(options.body); requests.push(body); assert.ok(body.text.length <= 60); return new Response(wav(), { headers: { "Content-Type": "audio/wav" } }); }
+    if (String(url).includes("/text-to-speech/")) { const body = JSON.parse(options.body); requests.push(body); assert.ok(body.text.length <= 60); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
     return Response.json({ data: [] });
   } });
   const state = (await api("/api/state")).value;
@@ -372,10 +337,10 @@ test("empty normalized WAV frames fail conversion, preview, and a multi-turn job
   const calls = [];
   const { api, rootDir } = await start(t, { fetchImpl: async (url, options = {}) => {
     if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json([{ model_id: "eleven_v3", can_do_text_to_speech: true, languages: [{ language_id: "es", name: "Spanish" }] }]);
-    if (String(url).includes("/text-to-speech/")) { const text = JSON.parse(options.body).text; calls.push(text); return new Response(wav(returnEmpty && text.includes("EMPTY") ? 0 : 240), { headers: { "Content-Type": "audio/wav" } }); }
+    if (String(url).includes("/text-to-speech/")) { const text = JSON.parse(options.body).text; calls.push(text); return new Response(silentWav(24_000, 1, returnEmpty && text.includes("EMPTY") ? 0 : 0.01), { headers: { "Content-Type": "audio/wav" } }); }
     return Response.json({ data: [] });
   } });
-  await assert.rejects(writeAudioAsWav({ bytes: wav(0), extension: "wav" }, join(rootDir, "empty.wav")), /empty WAV audio.*audio frame/);
+  await assert.rejects(writeAudioAsWav({ bytes: silentWav(24_000, 1, 0), extension: "wav" }, join(rootDir, "empty.wav")), /empty WAV audio.*audio frame/);
   await assert.rejects(readFile(join(rootDir, "empty.wav")), { code: "ENOENT" });
   const state = (await api("/api/state")).value;
   state.config.providers.elevenlabs.activeModels = { eleven_v3: { tts: true } };
@@ -404,7 +369,7 @@ test("empty normalized WAV frames fail conversion, preview, and a multi-turn job
   const clips = join(rootDir, "data", "episodes", episode.id, "clips");
   const turnClips = (await readdir(clips)).filter((name) => /^[a-f0-9]+\.wav$/.test(name));
   assert.equal(turnClips.length, 2);
-  for (const name of turnClips) await writeFile(join(clips, name), wav(0));
+  for (const name of turnClips) await writeFile(join(clips, name), silentWav(24_000, 1, 0));
   returnEmpty = true;
   const before = calls.length;
   const retry = await api(`/api/episodes/${episode.id}/render`, {});
@@ -422,7 +387,7 @@ test("single-clip normalization checks the normalized byte limit before publishi
   t.mock.method(fs, "stat", (path, ...options) => String(path) === `${output}.tmp.wav` ? Promise.resolve({ size: 128 * 1024 * 1024 + 1 }) : originalStat(path, ...options));
   syncBuiltinESMExports();
   try {
-    await assert.rejects(writeAudioAsWav({ bytes: wav(), extension: "wav" }, output), /Normalized TTS turn exceeds 134217728 byte limit/);
+    await assert.rejects(writeAudioAsWav({ bytes: silentWav(), extension: "wav" }, output), /Normalized TTS turn exceeds 134217728 byte limit/);
     await assert.rejects(readFile(output), { code: "ENOENT" });
   } finally {
     t.mock.restoreAll();
@@ -435,7 +400,7 @@ test("legacy ElevenLabs models use their documented request limits when discover
   const requests = [];
   const { api } = await start(t, { fetchImpl: async (url, options = {}) => {
     if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json(Object.keys(limits).map((model_id) => ({ model_id, can_do_text_to_speech: true, languages: [{ language_id: "es", name: "Spanish" }] })));
-    if (String(url).includes("/text-to-speech/")) { const body = JSON.parse(options.body); requests.push(body); assert.ok(body.text.length <= limits[body.model_id]); return new Response(wav(), { headers: { "Content-Type": "audio/wav" } }); }
+    if (String(url).includes("/text-to-speech/")) { const body = JSON.parse(options.body); requests.push(body); assert.ok(body.text.length <= limits[body.model_id]); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
     return Response.json({ data: [] });
   } });
   const state = (await api("/api/state")).value;

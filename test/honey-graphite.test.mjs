@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { html } from "./helpers.mjs";
 
-const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
 const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((match) => match[1]).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 const theme = css.match(/\[data-theme=["']honey-graphite["']\]\s*\{([^}]+)\}/)?.[1] || "";
 const expected = {

@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
-import { createPodcastServer } from "../src/app.mjs";
 import { ChatGptError } from "../src/chatgpt.mjs";
 import { DECISIONS_MODEL } from "../src/decisions.mjs";
+import { chatgptStub, html, source, startTestServer, withEnv } from "./helpers.mjs";
 
 // A key in the developer's shell would start Anthropic discovery against the stubs.
 delete process.env.ANTHROPIC_API_KEY;
@@ -16,18 +15,7 @@ const header = (options, name) => new Headers(options.headers).get(name);
 
 process.env.OPENCODE_GO_API_KEY = "test-opencode-go-key";
 
-async function start(t, options = {}) {
-  const rootDir = await mkdtemp(join(tmpdir(), "pod-god-integrations-"));
-  const server = await createPodcastServer({ rootDir, chatgptClient: { status: () => ({ accounts: [] }), close: async () => {} }, ...options });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(async () => { await new Promise((resolve) => server.close(resolve)); await rm(rootDir, { recursive: true, force: true }); });
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const api = async (path, value, method = value === undefined ? "GET" : "POST") => {
-    const response = await fetch(baseUrl + path, { method, ...(value === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }) });
-    return { status: response.status, value: await response.json() };
-  };
-  return { rootDir, baseUrl, api };
-}
+const start = (t, options = {}) => startTestServer(t, { chatgptClient: chatgptStub(), ...options });
 
 function chatGptMock() {
   let active = null;
@@ -143,11 +131,7 @@ function jevMock() {
 }
 
 async function jevSetup(t, mock) {
-  const previous = { mimo: process.env.MIMO_API_KEY, eleven: process.env.ELEVENLABS_API_KEY, typesafe: process.env.TYPESAFE_API_KEY };
-  process.env.MIMO_API_KEY = "test-mimo-key";
-  process.env.ELEVENLABS_API_KEY = "test-eleven-key";
-  process.env.TYPESAFE_API_KEY = "test-typesafe-key";
-  t.after(() => { for (const [key, value] of [["MIMO_API_KEY", previous.mimo], ["ELEVENLABS_API_KEY", previous.eleven], ["TYPESAFE_API_KEY", previous.typesafe]]) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  withEnv(t, { MIMO_API_KEY: "test-mimo-key", ELEVENLABS_API_KEY: "test-eleven-key", TYPESAFE_API_KEY: "test-typesafe-key" });
   const result = await start(t, { fetchImpl: mock.fetchImpl });
   const state = (await result.api("/api/state")).value;
   state.config.providers.elevenlabs.activeModels = { eleven_v4: { tts: true }, eleven_flash_v2_5: { tts: true } };
@@ -191,9 +175,7 @@ function decisionsMock() {
 }
 
 async function decisionsSetup(t, mock) {
-  const previous = process.env.OPENAI_API_KEY;
-  process.env.OPENAI_API_KEY = "test-openai-decisions-key";
-  t.after(() => { if (previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous; });
+  withEnv(t, { OPENAI_API_KEY: "test-openai-decisions-key" });
   const fixture = await jevSetup(t, mock);
   const config = (await fixture.api("/api/config")).value;
   config.assistantDecision = { ...config.assistantDecision, provider: "openai", model: "unsupported-model" };
@@ -205,7 +187,7 @@ async function decisionsSetup(t, mock) {
   return fixture;
 }
 
-test("OpenAI native Hosts suggestion uses the full current draft, no text model, manual Apply, locks, and transcript direction", { concurrency: false }, async (t) => {
+test("OpenAI native Hosts suggestion uses the full current draft, no text model, manual Apply, locks, and transcript direction", async (t) => {
   const mock = decisionsMock();
   const { api, state, plan } = await decisionsSetup(t, mock);
   const saved = structuredClone((await api("/api/state")).value.profiles.speakerProfiles[0]);
@@ -259,7 +241,7 @@ test("OpenAI native Hosts suggestion uses the full current draft, no text model,
   assert.match(JSON.stringify(prompt.value), /Delivery setup: guide/);
 });
 
-test("OpenAI trait refusal, malformed score, or uncertainty makes no profile change or partial proposal", { concurrency: false }, async (t) => {
+test("OpenAI trait refusal, malformed score, or uncertainty makes no profile change or partial proposal", async (t) => {
   const mock = decisionsMock();
   const { api, plan } = await decisionsSetup(t, mock);
   const draft = (await api("/api/state")).value.profiles.speakerProfiles[0];
@@ -280,7 +262,7 @@ test("OpenAI trait refusal, malformed score, or uncertainty makes no profile cha
   }
 });
 
-test("OpenAI delivery chat locks current persona, model, voice, and count; numeric user tuning needs clarification", { concurrency: false }, async (t) => {
+test("OpenAI delivery chat locks current persona, model, voice, and count; numeric user tuning needs clarification", async (t) => {
   const mock = decisionsMock();
   const { api, chat } = await decisionsSetup(t, mock);
   const saved = (await api("/api/state")).value.profiles.speakerProfiles[0];
@@ -299,7 +281,7 @@ test("OpenAI delivery chat locks current persona, model, voice, and count; numer
   assert.equal(mock.generations.length, before);
 });
 
-test("OpenAI exact host model, voice, and count pins remain authoritative in a generated profile", { concurrency: false }, async (t) => {
+test("OpenAI exact host model, voice, and count pins remain authoritative in a generated profile", async (t) => {
   const mock = decisionsMock();
   Object.assign(mock.choices, { profileAction: "create", deliveryOnly: 0, voiceModel: "eleven_v4", "speakers.0.voiceId": "es-voice", "speakers.1.voiceId": "second-voice" });
   mock.generated = { message: "Two new hosts", proposal: { speakerProfile: { mode: "update", targetId: "wrong", value: { name: "Duo", voiceModel: "mimo-v2.5-tts", speakers: ["Ana", "Luis"].map((name) => ({ name, backstory: `FULL proposed ${name} backstory`, personality: `FULL proposed ${name} personality`, style: `FULL proposed ${name} style`, voiceId: "wrong" })) } } } };
@@ -321,7 +303,7 @@ test("OpenAI exact host model, voice, and count pins remain authoritative in a g
   assert.equal(result.value.message.decisionReceipt.status, "unavailable");
 });
 
-test("OpenAI focused profile routing and source guards reject a saved-profile edit before Apply", { concurrency: false }, async (t) => {
+test("OpenAI focused profile routing and source guards reject a saved-profile edit before Apply", async (t) => {
   const mock = decisionsMock();
   const { api, plan } = await decisionsSetup(t, mock);
   let profiles = (await api("/api/state")).value.profiles;
@@ -344,7 +326,7 @@ test("OpenAI focused profile routing and source guards reject a saved-profile ed
   assert.deepEqual((await api("/api/state")).value.profiles, saved.value.profiles);
 });
 
-test("OpenAI action routing pins the focused episode and cannot start generation", { concurrency: false }, async (t) => {
+test("OpenAI action routing pins the focused episode and cannot start generation", async (t) => {
   const mock = decisionsMock();
   Object.assign(mock.choices, { route: "nextStep", nextAction: "generateTranscript" });
   const { api, state, plan, chat } = await decisionsSetup(t, mock);
@@ -371,7 +353,7 @@ test("OpenAI action routing pins the focused episode and cannot start generation
   assert.equal((await api(`/api/plans/${plan.id}`)).value.plan.episodes[0].createdEpisodeId, episode.id);
 });
 
-test("decision provider settings retain separate blank keys and reject unsupported providers", { concurrency: false }, async (t) => {
+test("decision provider settings retain separate blank keys and reject unsupported providers", async (t) => {
   const mock = decisionsMock();
   const { api } = await decisionsSetup(t, mock);
   const config = (await api("/api/config")).value;
@@ -397,7 +379,7 @@ test("decision provider settings retain separate blank keys and reject unsupport
   assert.doesNotMatch(JSON.stringify(saved.value.config), /test-openai-decisions-key|test-typesafe-key/);
 });
 
-test("Jev keeps old two-host profiles unchanged and maps a new solo Charlie to supported Spanish v4 choices", { concurrency: false }, async (t) => {
+test("Jev keeps old two-host profiles unchanged and maps a new solo Charlie to supported Spanish v4 choices", async (t) => {
   const mock = jevMock();
   const { api, rootDir, state, plan, chat } = await jevSetup(t, mock);
   const before = structuredClone(state.profiles.speakerProfiles[0]);
@@ -437,7 +419,7 @@ test("Jev keeps old two-host profiles unchanged and maps a new solo Charlie to s
   assert.deepEqual((await api("/api/state")).value.profiles.speakerProfiles[0], { ...before, revision: 0 });
 });
 
-test("Jev stops before generation on uncertainty or service failure; disabled Jev preserves the old assistant", { concurrency: false }, async (t) => {
+test("Jev stops before generation on uncertainty or service failure; disabled Jev preserves the old assistant", async (t) => {
   const mock = jevMock();
   const { api, chat } = await jevSetup(t, mock);
   mock.lowConfidence = true;
@@ -463,7 +445,7 @@ test("Jev stops before generation on uncertainty or service failure; disabled Je
   assert.equal(result.value.message.decisionReceipt, undefined);
 });
 
-test("Jev rejects a voice from another provider and blocks stale Apply after selected model deactivation", { concurrency: false }, async (t) => {
+test("Jev rejects a voice from another provider and blocks stale Apply after selected model deactivation", async (t) => {
   const mock = jevMock();
   const { api, chat } = await jevSetup(t, mock);
   mock.choices["speakers.0.voiceId"] = "alloy";
@@ -483,7 +465,7 @@ test("Jev rejects a voice from another provider and blocks stale Apply after sel
   assert.match(result.value.error, /not active|no longer active/);
 });
 
-test("Jev resolves all four new hosts without creating old-profile slots", { concurrency: false }, async (t) => {
+test("Jev resolves all four new hosts without creating old-profile slots", async (t) => {
   const mock = jevMock();
   mock.choices.speakerCount = "4";
   for (let index = 0; index < 4; index += 1) mock.choices[`speakers.${index}.voiceId`] = index % 2 ? "second-voice" : "es-voice";
@@ -499,7 +481,7 @@ test("Jev resolves all four new hosts without creating old-profile slots", { con
   for (let index = 0; index < 4; index += 1) assert.ok(mock.requests.some((request) => request.questions[`speakers.${index}.voiceId`]));
 });
 
-test("Jev cannot override exact user IDs and respects negative model phrasing", { concurrency: false }, async (t) => {
+test("Jev cannot override exact user IDs and respects negative model phrasing", async (t) => {
   const mock = jevMock();
   const { chat } = await jevSetup(t, mock);
   mock.choices.voiceModel = "eleven_flash_v2_5";
@@ -513,7 +495,7 @@ test("Jev cannot override exact user IDs and respects negative model phrasing", 
   assert.equal(result.value.message.proposal.speakerProfile.value.speakers[0].ttsModelOverride, "", "a default model request must not add an override");
 });
 
-test("named Jev presets keep unrelated legacy tuning and new Apply checks fresh voice membership", { concurrency: false }, async (t) => {
+test("named Jev presets keep unrelated legacy tuning and new Apply checks fresh voice membership", async (t) => {
   const mock = jevMock();
   mock.choices["speakers.0.deliveryPreset"] = "expressive";
   const { api, state, chat } = await jevSetup(t, mock);
@@ -530,7 +512,7 @@ test("named Jev presets keep unrelated legacy tuning and new Apply checks fresh 
   assert.deepEqual((await api("/api/state")).value.profiles, before);
 });
 
-test("Jev effort sentinels work and unrelated duration and model settings stay unchanged", { concurrency: false }, async (t) => {
+test("Jev effort sentinels work and unrelated duration and model settings stay unchanged", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { route: "episodeFormat", profileAction: "update", language: "es-419", outlineEffort: "default_effort" });
   mock.generated = { message: "Spanish format", proposal: { episodeFormat: { mode: "create", targetId: "invented", value: { name: "Updated format", language: "en-US", targetMinutes: 59, outlineModel: "invented-model", transcriptModel: "invented-model", outlineEffort: "ultra" } } } };
@@ -546,7 +528,7 @@ test("Jev effort sentinels work and unrelated duration and model settings stay u
   assert.equal(format.value.transcriptModel, state.profiles.episodeProfiles[0].transcriptModel);
 });
 
-test("Jev episode changes cannot retarget a generated proposal to another podcast", { concurrency: false }, async (t) => {
+test("Jev episode changes cannot retarget a generated proposal to another podcast", async (t) => {
   const mock = jevMock();
   const { api, state, plan, chat } = await jevSetup(t, mock);
   await api(`/api/plans/${plan.id}`, { ...plan, audience: "Parents", goal: "Explain", episodes: [] }, "PUT");
@@ -568,7 +550,7 @@ test("Jev episode changes cannot retarget a generated proposal to another podcas
   assert.equal((await api(`/api/episodes/${foreign.id}`)).value.name, "Other podcast");
 });
 
-test("Jev Apply bypasses cached Chatterbox voices and rejects a deleted voice", { concurrency: false }, async (t) => {
+test("Jev Apply bypasses cached Chatterbox voices and rejects a deleted voice", async (t) => {
   const mock = jevMock();
   const originalFetch = mock.fetchImpl;
   let available = true;
@@ -598,7 +580,7 @@ test("Jev Apply bypasses cached Chatterbox voices and rejects a deleted voice", 
   assert.deepEqual((await api("/api/state")).value.profiles, before);
 });
 
-test("focused Format edits lock the selected target and reject a stale target revision", { concurrency: false }, async (t) => {
+test("focused Format edits lock the selected target and reject a stale target revision", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { route: "episodeFormat", profileAction: "update" });
   const { api, state, chat } = await jevSetup(t, mock);
@@ -636,7 +618,7 @@ test("focused Format edits lock the selected target and reject a stale target re
   assert.match(missing.value.error, /selected Episode Format no longer exists/);
 });
 
-test("focused Hosts edits use the selected profile and preserve shared-profile copy-on-write", { concurrency: false }, async (t) => {
+test("focused Hosts edits use the selected profile and preserve shared-profile copy-on-write", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { profileAction: "update", speakerCount: "2", voiceModel: "keep_current", "speakers.0.voiceId": "keep_current" });
   const { api, state, chat } = await jevSetup(t, mock);
@@ -673,7 +655,7 @@ test("focused Hosts edits use the selected profile and preserve shared-profile c
   assert.match(missing.value.error, /selected Hosts profile no longer exists/);
 });
 
-test("exact dotted model IDs cannot be shortened to a prefix or overridden by Jev", { concurrency: false }, async (t) => {
+test("exact dotted model IDs cannot be shortened to a prefix or overridden by Jev", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { route: "planPatch", planningModel: "mimo-v2.5" });
   mock.generated = { message: "Use pro", proposal: { planPatch: { planningModel: "mimo-v2.5-pro" } } };
@@ -694,7 +676,7 @@ test("exact dotted model IDs cannot be shortened to a prefix or overridden by Je
   assert.equal(result.value.message.proposal.planPatch.planningModel, "mimo-v2.5-pro");
 });
 
-test("a positive model choice stays locked beside a negative voice choice in the same clause", { concurrency: false }, async (t) => {
+test("a positive model choice stays locked beside a negative voice choice in the same clause", async (t) => {
   const mock = jevMock();
   const { chat } = await jevSetup(t, mock);
   let result = await chat("Create solo Charlie: use eleven_v4 but do not use es-voice.");
@@ -712,7 +694,7 @@ test("a positive model choice stays locked beside a negative voice choice in the
   assert.equal(result.value.message.proposal.speakerProfile.value.speakers[0].voiceId, "second-voice");
 });
 
-test("a Jev planned-row retarget cannot carry the original row's kept format into another row", { concurrency: false }, async (t) => {
+test("a Jev planned-row retarget cannot carry the original row's kept format into another row", async (t) => {
   const mock = jevMock();
   const { api, state, plan, chat } = await jevSetup(t, mock);
   state.profiles.episodeProfiles.push({ ...state.profiles.episodeProfiles[0], id: "other-format", name: "Other format" });
@@ -742,14 +724,10 @@ test("a Jev planned-row retarget cannot carry the original row's kept format int
 });
 
 test("async ChatGPT status renders keep edits, focus, and caret made during the request", async () => {
-  const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
-  const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
-  const source = (name) => script.match(new RegExp(`    (?:async )?function ${name}\\([^]*?\\n    }`))[0];
   let field;
   let row;
   let rendered = [];
-  let resolveStatus;
-  const request = new Promise((resolve) => { resolveStatus = resolve; });
+  const { promise: request, resolve: resolveStatus } = Promise.withResolvers();
   const configState = { providers: { openai: { enabled: true, apiKey: "before-poll" } }, compatibleConnections: [] };
   const document = {
     activeElement: null,
@@ -791,7 +769,7 @@ test("async ChatGPT status renders keep edits, focus, and caret made during the 
   assert.equal(getContext().speakerProfileId, "selected-hosts");
 });
 
-test("Jev Format creation uses a checked source without treating it as the new destination", { concurrency: false }, async (t) => {
+test("Jev Format creation uses a checked source without treating it as the new destination", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { route: "episodeFormat", profileAction: "create" });
   const { api, state, plan, chat } = await jevSetup(t, mock);
@@ -819,7 +797,7 @@ test("Jev Format creation uses a checked source without treating it as the new d
   assert.equal(destination.targetMinutes, 12);
 });
 
-for (const change of ["edited", "removed"]) test(`Jev Format creation rejects a source profile that was ${change}`, { concurrency: false }, async (t) => {
+for (const change of ["edited", "removed"]) test(`Jev Format creation rejects a source profile that was ${change}`, async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { route: "episodeFormat", profileAction: "create" });
   const { api, state, chat } = await jevSetup(t, mock);
@@ -840,7 +818,7 @@ for (const change of ["edited", "removed"]) test(`Jev Format creation rejects a 
   assert.deepEqual((await api("/api/state")).value.profiles, changed.value.profiles);
 });
 
-test("named-host clauses keep each exact voice and reject swapped Jev decisions", { concurrency: false }, async (t) => {
+test("named-host clauses keep each exact voice and reject swapped Jev decisions", async (t) => {
   const mock = jevMock();
   mock.choices.speakerCount = "2";
   const { chat } = await jevSetup(t, mock);
@@ -859,7 +837,7 @@ test("named-host clauses keep each exact voice and reject swapped Jev decisions"
   }
 });
 
-test("named-host model overrides and voice negation stay scoped to their host", { concurrency: false }, async (t) => {
+test("named-host model overrides and voice negation stay scoped to their host", async (t) => {
   const mock = jevMock();
   mock.choices.speakerCount = "2";
   Object.assign(mock.choices, { "speakers.0.ttsModelOverride": "eleven_v4", "speakers.1.ttsModelOverride": "eleven_flash_v2_5", "speakers.0.voiceId": "es-voice", "speakers.1.voiceId": "second-voice" });
@@ -878,7 +856,7 @@ test("named-host model overrides and voice negation stay scoped to their host", 
   assert.equal(result.value.message.proposal, null);
 });
 
-test("episode-specific Jev steps stay pinned after the UI selects a different episode", { concurrency: false }, async (t) => {
+test("episode-specific Jev steps stay pinned after the UI selects a different episode", async (t) => {
   const mock = jevMock();
   const { api, rootDir, plan, chat } = await jevSetup(t, mock);
   await api(`/api/plans/${plan.id}`, { ...plan, audience: "Parents", goal: "Explain", episodes: [] }, "PUT");
@@ -888,7 +866,6 @@ test("episode-specific Jev steps stay pinned after the UI selects a different ep
   const created = await api(`/api/plans/${plan.id}/create-episodes`, { plannedEpisodeIds: generated.value.plan.episodes.map((item) => item.id) });
   assert.equal(created.status, 200);
   const [first, second] = created.value.episodes;
-  const html = await readFile(join(process.cwd(), "public", "index.html"), "utf8");
   const source = html.match(/    async function runAssistantStep\([^]*?\n    }/)[0];
   let calls = [];
   const ui = {
@@ -932,7 +909,7 @@ test("episode-specific Jev steps stay pinned after the UI selects a different ep
   assert.deepEqual(calls, [["plan"]]);
 });
 
-test("voice-first for and para clauses bind each voice to its named host in either order", { concurrency: false }, async (t) => {
+test("voice-first for and para clauses bind each voice to its named host in either order", async (t) => {
   const mock = jevMock();
   mock.choices.speakerCount = "2";
   const { chat } = await jevSetup(t, mock);
@@ -953,7 +930,7 @@ test("voice-first for and para clauses bind each voice to its named host in eith
   }
 });
 
-test("voice-first model overrides honor for and para associations", { concurrency: false }, async (t) => {
+test("voice-first model overrides honor for and para associations", async (t) => {
   const mock = jevMock();
   mock.choices.speakerCount = "2";
   Object.assign(mock.choices, { "speakers.0.ttsModelOverride": "eleven_v4", "speakers.1.ttsModelOverride": "eleven_flash_v2_5", "speakers.0.voiceId": "es-voice", "speakers.1.voiceId": "second-voice" });
@@ -968,7 +945,7 @@ test("voice-first model overrides honor for and para associations", { concurrenc
   assert.equal(result.value.message.proposal, null);
 });
 
-test("unknown, ambiguous, or unassigned voice-first hosts cannot produce a configuration", { concurrency: false }, async (t) => {
+test("unknown, ambiguous, or unassigned voice-first hosts cannot produce a configuration", async (t) => {
   const mock = jevMock();
   mock.choices.speakerCount = "2";
   mock.generated = { message: "Two hosts", proposal: { speakerProfile: { value: { name: "Hosts", speakers: ["Ana", "Beto"].map((name) => ({ name, backstory: "Host", personality: "Calm", style: "Natural" })) } } } };
@@ -981,7 +958,7 @@ test("unknown, ambiguous, or unassigned voice-first hosts cannot produce a confi
   }
 });
 
-test("a stale Hosts draft cannot receive a current revision receipt or overwrite newer work", { concurrency: false }, async (t) => {
+test("a stale Hosts draft cannot receive a current revision receipt or overwrite newer work", async (t) => {
   const mock = decisionsMock();
   const { api, plan } = await decisionsSetup(t, mock);
   const profiles = (await api("/api/state")).value.profiles;
@@ -997,7 +974,7 @@ test("a stale Hosts draft cannot receive a current revision receipt or overwrite
   assert.deepEqual((await api(`/api/chats?planId=${plan.id}`)).value.chats, []);
 });
 
-test("renaming a Format preserves kept inactive models but cannot select a different inactive model", { concurrency: false }, async (t) => {
+test("renaming a Format preserves kept inactive models but cannot select a different inactive model", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { route: "episodeFormat", profileAction: "update" });
   const { api, state, plan } = await jevSetup(t, mock);
@@ -1024,7 +1001,7 @@ test("renaming a Format preserves kept inactive models but cannot select a diffe
   assert.equal((await api("/api/state")).value.profiles.episodeProfiles[0].outlineModel, "mimo-v2.5-pro");
 });
 
-test("reordered generated hosts keep their own voice, accent, overrides, and delivery tuning", { concurrency: false }, async (t) => {
+test("reordered generated hosts keep their own voice, accent, overrides, and delivery tuning", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { profileAction: "update", speakerCount: "2", voiceModel: "keep_current", "speakers.0.voiceId": "keep_current" });
   const { api, state, chat } = await jevSetup(t, mock);
@@ -1045,7 +1022,7 @@ test("reordered generated hosts keep their own voice, accent, overrides, and del
   for (const [index, host] of persisted.entries()) for (const key of ["name", "voiceId", "accent", "mimoTemperature", "elevenlabsStability", "ttsModelOverride"]) assert.equal(host[key], original.speakers.toReversed()[index][key] ?? "");
 });
 
-test("Apply locks the thread during fresh voice discovery and releases it after success or failure", { concurrency: false }, async (t) => {
+test("Apply locks the thread during fresh voice discovery and releases it after success or failure", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { route: "episodeFormat", profileAction: "update" });
   let release;
@@ -1083,9 +1060,8 @@ test("Apply locks the thread during fresh voice discovery and releases it after 
   assert.equal(thread.messages.length, 5);
 });
 
-test("legacy OpenAI TTS assistant choices include all nine owned voices for both models", { concurrency: false }, async (t) => {
-  process.env.OPENAI_API_KEY = "test-openai-voices-key";
-  t.after(() => { delete process.env.OPENAI_API_KEY; });
+test("legacy OpenAI TTS assistant choices include all nine owned voices for both models", async (t) => {
+  withEnv(t, { OPENAI_API_KEY: "test-openai-voices-key" });
   const mock = jevMock();
   const originalFetch = mock.fetchImpl;
   mock.fetchImpl = (url, options) => String(url) === "https://api.openai.com/v1/models" ? Promise.resolve(Response.json({ data: [{ id: "tts-1" }, { id: "tts-1-hd" }] })) : originalFetch(url, options);
@@ -1107,7 +1083,7 @@ test("legacy OpenAI TTS assistant choices include all nine owned voices for both
   }
 });
 
-test("kept inactive Hosts and plan models survive unrelated assistant edits", { concurrency: false }, async (t) => {
+test("kept inactive Hosts and plan models survive unrelated assistant edits", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { profileAction: "update", speakerCount: "2", voiceModel: "keep_current", "speakers.0.voiceId": "keep_current" });
   const { api, state, plan } = await jevSetup(t, mock);
@@ -1134,7 +1110,7 @@ test("kept inactive Hosts and plan models survive unrelated assistant edits", { 
   assert.equal(applied.value.plan.name, "Renamed plan");
 });
 
-test("case-distinct host names keep exact voice and tuning matches when reordered", { concurrency: false }, async (t) => {
+test("case-distinct host names keep exact voice and tuning matches when reordered", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { profileAction: "update", speakerCount: "2", voiceModel: "keep_current", "speakers.0.voiceId": "keep_current" });
   const { api, state, chat } = await jevSetup(t, mock);
@@ -1151,7 +1127,7 @@ test("case-distinct host names keep exact voice and tuning matches when reordere
   assert.deepEqual(applied.value.profiles.speakerProfiles[0].speakers.map(({ name, voiceId, mimoTemperature }) => ({ name, voiceId, mimoTemperature })), original.speakers.toReversed().map(({ name, voiceId, mimoTemperature }) => ({ name, voiceId, mimoTemperature })));
 });
 
-test("a rename chain cannot reuse one saved host as the source for two proposed hosts", { concurrency: false }, async (t) => {
+test("a rename chain cannot reuse one saved host as the source for two proposed hosts", async (t) => {
   const mock = jevMock();
   Object.assign(mock.choices, { profileAction: "update", speakerCount: "2", voiceModel: "keep_current", "speakers.0.voiceId": "keep_current" });
   const { api, state, chat } = await jevSetup(t, mock);

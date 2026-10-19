@@ -1,19 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { html, script, source } from "./helpers.mjs";
 
-const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
-const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
-const source = (name) => script.match(new RegExp(`    (?:async )?function ${name}\\([^]*?\\n    }`))[0];
 const install = (names, context) => runInNewContext(names.map(source).join("\n"), context);
 const handler = (id, event) => script.match(new RegExp(`\\$\\("${id}"\\)\\.addEventListener\\("${event}", guard\\((async \\((?:event)?\\) => \\{[^]*?\\n    })\\)\\);`))[1];
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-const pending = () => {
-  let resolve, reject;
-  const promise = new Promise((accept, fail) => { resolve = accept; reject = fail; });
-  return { promise, resolve, reject };
-};
 const noop = () => {};
 const renders = Object.fromEntries(["renderModelStatus", "renderProfileOptions", "renderChatControls", "renderFormatView", "renderConfigView", "renderTtsView", "renderJobIndicators", "renderPlayer", "renderEpisodeList", "updateWordCount", "renderPodcastAssistant", "updateSaveButtons", "rememberViewSelection", "renderTranscriptPrompt"].map((name) => [name, noop]));
 
@@ -73,7 +65,7 @@ test("option refresh retains saved and unsaved format, source, and Hosts selecti
 
 test("profile save keeps later Hosts and Format edits and the new saved revisions", async () => {
   const context = episodeContext();
-  const request = pending();
+  const request = Promise.withResolvers();
   const input = { value: "First host edit" };
   context.state.profiles.speakerProfiles[0].revision = 1;
   context.state.profiles.episodeProfiles[0].revision = 1;
@@ -100,7 +92,7 @@ test("profile save keeps later Hosts and Format edits and the new saved revision
 
 test("config save keeps input typed during discovery and leaves it dirty", async () => {
   const context = episodeContext();
-  const request = pending();
+  const request = Promise.withResolvers();
   const input = { value: "https://first.example/v1" };
   context.configState = { providers: { openai: { baseUrl: input.value } } };
   context.configDirty = true;
@@ -127,7 +119,7 @@ test("config save keeps input typed during discovery and leaves it dirty", async
 test("transcript and settings saves keep edits made during the request", async () => {
   for (const kind of ["transcript", "settings"]) {
     const context = episodeContext();
-    const request = pending();
+    const request = Promise.withResolvers();
     const field = kind === "transcript" ? "transcriptText" : "episodeName";
     context.$(field).value = "First edit";
     context.transcriptDirty = kind === "transcript";
@@ -147,7 +139,7 @@ test("transcript and settings saves keep edits made during the request", async (
 
 test("refresh captures the live draft after fetch and does not replace newer episode navigation", async () => {
   const context = episodeContext();
-  const request = pending();
+  const request = Promise.withResolvers();
   const saved = structuredClone(context.currentEpisode);
   context.episodeDraftDirty = true;
   context.$("episodeName").value = "Before refresh";
@@ -158,7 +150,7 @@ test("refresh captures the live draft after fetch and does not replace newer epi
   await refreshing;
   assert.equal(context.$("episodeName").value, "During refresh");
   assert.equal(context.episodeDraftDirty, true);
-  const later = pending();
+  const later = Promise.withResolvers();
   context.api = async (path) => path === "/api/state" ? later.promise : { accounts: [], pending: null };
   const nextRefresh = context.refreshState("a");
   context.currentEpisode = { id: "b", name: "B" };
@@ -173,7 +165,7 @@ test("refresh captures the live draft after fetch and does not replace newer epi
 test("old selection cannot replace a newer episode or its later transcript edit", async () => {
   const context = episodeContext();
   context.currentEpisode = null;
-  const requests = { a: pending(), b: pending() };
+  const requests = { a: Promise.withResolvers(), b: Promise.withResolvers() };
   context.api = (path) => requests[path.split("/").at(-1)].promise;
   const choosingA = context.selectEpisode("a");
   const choosingB = context.selectEpisode("b");
@@ -190,7 +182,7 @@ test("old selection cannot replace a newer episode or its later transcript edit"
 
 test("an episode response from an old state refresh cannot replace the current draft", async () => {
   const context = episodeContext();
-  const request = pending();
+  const request = Promise.withResolvers();
   context.api = () => request.promise;
   const selecting = context.selectEpisode("a", null, context.uiRequests.state);
   ++context.uiRequests.state;
@@ -203,7 +195,7 @@ test("an episode response from an old state refresh cannot replace the current d
 
 test("editing the current episode during a different episode load stops the selection", async () => {
   const context = episodeContext();
-  const request = pending();
+  const request = Promise.withResolvers();
   context.api = () => request.promise;
   const selecting = context.selectEpisode("b");
   context.$("episodeName").value = "New A draft";
@@ -216,7 +208,7 @@ test("editing the current episode during a different episode load stops the sele
 
 test("queued episode saves keep their original target and payload after navigation", async () => {
   const context = episodeContext();
-  const first = pending();
+  const first = Promise.withResolvers();
   const submitted = [];
   context.api = async (_, options) => { const body = JSON.parse(options.body); submitted.push(body); return submitted.length === 1 ? first.promise : body; };
   context.refreshState = async () => {};
@@ -237,7 +229,7 @@ test("queued episode saves keep their original target and payload after navigati
 
 test("Generate pins the saved episode and auto-TTS choice before waiting", async () => {
   const context = episodeContext();
-  const request = pending();
+  const request = Promise.withResolvers();
   context.$("autoGenerateTts").checked = true;
   context.saveEpisode = () => request.promise;
   context.trackJob = noop;
@@ -304,7 +296,7 @@ test("deleting Hosts without pre-delete revision evidence keeps draft revisions 
 
 test("old voice success and error do not alter new provider requests or catalogs", async () => {
   for (const provider of ["elevenlabs", "chatterbox"]) for (const outcome of ["resolve", "reject"]) {
-    const old = pending(), next = pending();
+    const old = Promise.withResolvers(), next = Promise.withResolvers();
     const context = episodeContext();
     context.voiceRequests = {};
     context.voiceProvider = () => provider;
@@ -339,7 +331,7 @@ test("plan save sends the loaded version, retains later edits, and preserves a c
   context.$("plannerChatEffort").value = "medium";
   context.refreshPlanIndex = async () => {};
   context.loadPlanForm = (plan) => { context.activePlan = plan; };
-  const request = pending();
+  const request = Promise.withResolvers();
   let submitted;
   context.api = async (_, options) => { submitted = JSON.parse(options.body); return request.promise; };
   install(["capturePlanDraft", "saveActivePlan"], context);
@@ -447,7 +439,7 @@ test("a state snapshot from before a successful Hosts save cannot restore the ol
   context.currentEpisode = null;
   context.state.profiles.speakerProfiles[0] = { id: "s", name: "Old name", revision: 1 };
   const oldState = structuredClone({ ...context.state, config: {} });
-  const status = pending();
+  const status = Promise.withResolvers();
   const input = { value: "Old name" };
   context.syncSpeakerForm = () => { context.state.profiles.speakerProfiles[0].name = input.value; };
   context.renderProfileOptions = () => { input.value = context.state.profiles.speakerProfiles[0].name; };
@@ -485,7 +477,7 @@ const proposalThread = (id, name = id) => ({ threadId: id, messages: [{ role: "a
 
 test("chat loads guard the selected thread at both history and message response boundaries", async () => {
   const context = chatContext();
-  const a = pending(), b = pending();
+  const a = Promise.withResolvers(), b = Promise.withResolvers();
   context.api = async (path) => path.startsWith("/api/chats?") ? { chats: [{ threadId: "a" }, { threadId: "b" }] } : path.endsWith("=a") ? a.promise : b.promise;
   const loadingA = context.loadPlannerChatThread();
   await tick();
@@ -498,7 +490,7 @@ test("chat loads guard the selected thread at both history and message response 
   await loadingA;
   assert.equal(context.plannerChatThreadId, "b");
   assert.equal(context.plannerChatThread.threadId, "b");
-  const history = pending();
+  const history = Promise.withResolvers();
   context.api = () => history.promise;
   const oldPlanLoad = context.loadPlannerChatThread();
   context.activePlanId = "q";
@@ -520,7 +512,7 @@ test("Apply rejects a mismatched rendered thread, changed message, or navigation
   const oldContent = context.plannerChatThread.messages[0].content;
   context.plannerChatThread = proposalThread("a", "New proposal");
   await assert.rejects(context.applyAssistantProposal(0, false, "a", oldContent), /proposal changed/);
-  const preSave = pending();
+  const preSave = Promise.withResolvers();
   context.profilesDirty = true;
   context.plannerChatThread.messages[0].content = JSON.stringify({ proposal: { speakerProfile: { value: { name: "Hosts" } } } });
   context.saveProfiles = () => preSave.promise;
@@ -536,7 +528,7 @@ test("Apply rejects a mismatched rendered thread, changed message, or navigation
 
 test("a reply to an old chat cannot change the current selected thread", async () => {
   const context = chatContext();
-  const reply = pending();
+  const reply = Promise.withResolvers();
   context.plannerChatBusy = false;
   context.$("plannerChatInput").value = "Composed request";
   context.$("plannerChatModel").value = "model";
@@ -561,7 +553,7 @@ test("a reply to an old chat cannot change the current selected thread", async (
 test("new-chat replies survive a history refresh but not explicit chat or plan selection", async () => {
   for (const change of ["refresh", "new", "thread", "plan"]) {
     const context = chatContext();
-    const reply = pending();
+    const reply = Promise.withResolvers();
     context.plannerChatThreadId = "";
     context.plannerChatBusy = false;
     context.$("plannerChatInput").value = "New chat request";
@@ -610,7 +602,7 @@ test("KB deletion refreshes only its plan version and retains later local plan e
   context.$("plannerChatModel").value = "model";
   context.$("plannerChatEffort").value = "medium";
   const savedPlan = { ...context.activePlan, knowledgeBaseId: "", updatedAt: "v2" };
-  const getPlan = pending();
+  const getPlan = Promise.withResolvers();
   let submitted;
   context.api = async (path, options) => {
     if (path === "/api/knowledge/kb") return { cleared: { plans: 1, episodes: 0, chats: 0 } };
@@ -645,7 +637,7 @@ test("KB deletion refreshes only its plan version and retains later local plan e
 test("a late transcript import cannot replace another episode or a later local edit", async () => {
   for (const change of ["episode", "text"]) {
     const context = episodeContext();
-    const request = pending();
+    const request = Promise.withResolvers();
     context.event = { target: { files: [{ name: "A.txt", text: () => request.promise }], value: "A.txt" } };
     const importing = runInNewContext(`(${handler("transcriptFile", "change")})(event)`, context);
     if (change === "episode") { context.currentEpisode = { id: "b" }; ++context.uiRequests.episode; }
@@ -705,7 +697,7 @@ test("Apply keeps an updatedAt that a same-tab save adopted during the request, 
   let server = "v1";
   let apply;
   context.api = async (path, options) => {
-    if (path === "/api/plans/chat/apply") return (apply = pending()).promise;
+    if (path === "/api/plans/chat/apply") return (apply = Promise.withResolvers()).promise;
     if (path === "/api/profiles") {
       const { expectedUpdatedAt, ...profiles } = JSON.parse(options.body);
       assert.equal(expectedUpdatedAt, server);
@@ -831,7 +823,7 @@ test("a real episode list change keeps open row menus and refocuses the same row
 
 test("Start stays disabled while its POST runs, across list re-renders, and re-enables after", async () => {
   for (const outcome of ["resolve", "reject"]) {
-    const request = pending();
+    const request = Promise.withResolvers();
     const rendered = [];
     let calls = 0;
     const episode = { id: "e1", transcriptWords: 0, episodeProfileId: "f" };
