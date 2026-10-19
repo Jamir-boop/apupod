@@ -85,12 +85,15 @@ function requireBaseURL(baseURL) {
   if (!baseURL) throw new Error("Provider base URL is not configured.");
 }
 
+// An empty apiKey makes the Anthropic SDK fall back to ANTHROPIC_API_KEY or its credential chain and send that to the configured host.
+function requireApiKey(apiKey) {
+  if (!apiKey) throw new Error("Provider API key is not configured.");
+}
+
 // fetch drops only Authorization on a cross-origin redirect, so a client that sends the key in another header must not follow one.
 const NO_REDIRECT = { redirect: "error" };
-const rawOptions = (options, signal) => {
-  const headers = new Headers(options?.headers ?? undefined);
-  return { ...(KEY_HEADERS.some((name) => name !== "authorization" && headers.has(name)) ? NO_REDIRECT : {}), ...options, signal };
-};
+const sendsKeyHeader = (headers) => KEY_HEADERS.some((name) => name !== "authorization" && headers.has(name));
+const rawOptions = (options, signal) => ({ ...(sendsKeyHeader(new Headers(options?.headers ?? undefined)) ? NO_REDIRECT : {}), ...options, signal });
 
 export function openAiClient({ baseURL, apiKey, headers, fetch, fetchOptions }) {
   requireBaseURL(baseURL);
@@ -100,13 +103,14 @@ export function openAiClient({ baseURL, apiKey, headers, fetch, fetchOptions }) 
     adminAPIKey: null, organization: null, project: null, webhookSecret: null,
     // "none" only satisfies the constructor. The null header removes it, so a keyless server gets no Authorization.
     defaultHeaders: { ...(apiKey ? {} : { Authorization: null }), ...headers },
-    fetch, fetchOptions: headers?.["api-key"] ? { ...NO_REDIRECT, ...fetchOptions } : fetchOptions, maxRetries: 0, logLevel: "off",
+    fetch, fetchOptions: sendsKeyHeader(new Headers(headers ?? undefined)) ? { ...NO_REDIRECT, ...fetchOptions } : fetchOptions, maxRetries: 0, logLevel: "off",
   }));
 }
 
 export function anthropicClient({ baseURL, apiKey, fetch }) {
   // Explicit baseURL, apiKey and authToken stop the SDK reading ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and profiles.
   requireBaseURL(baseURL);
+  requireApiKey(apiKey);
   return withoutEnv("ANTHROPIC_CUSTOM_HEADERS", () => new Anthropic({ baseURL, apiKey, authToken: null, fetch, fetchOptions: NO_REDIRECT, maxRetries: 0, logLevel: "off" }));
 }
 

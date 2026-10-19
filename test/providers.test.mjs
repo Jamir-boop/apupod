@@ -86,6 +86,23 @@ test("an empty base URL sends nothing instead of falling back to the SDK default
   assert.equal(calls.length, 0);
 });
 
+test("an empty Anthropic API key throws instead of using the SDK credential fallback", (t) => {
+  withEnv(t, { ANTHROPIC_API_KEY: "env-key" });
+  assert.throws(() => anthropicClient({ baseURL: "https://messages.test", apiKey: "", fetch: async () => chat() }), /^Error: Provider API key is not configured\.$/);
+});
+
+test("an OpenAI client that sends a key header of any case refuses redirects", async () => {
+  const { calls, fetchImpl } = recorder(() => Response.json({ data: [] }));
+  await openAiClient({ baseURL: "https://mimo.test/v1", apiKey: "k", headers: { Authorization: null, "Api-Key": "k" }, fetch: fetchImpl }).get("/models");
+  assert.equal(calls[0].init.redirect, "error");
+});
+
+test("withEnv restores the original environment when the test ends", async (t) => {
+  delete process.env.POD_GOD_PROBE;
+  await t.test("sets twice", (st) => { withEnv(st, { POD_GOD_PROBE: "a" }); withEnv(st, { POD_GOD_PROBE: "b" }); });
+  assert.equal(process.env.POD_GOD_PROBE, undefined);
+});
+
 test("compatible TTS clips keep the /audio/speech endpoint in their cache descriptor", () => {
   const descriptor = turnClipDescriptor(context(async () => chat()), { voiceModel: "compat:custom:tts-1" }, { voiceId: "alloy" }, { text: "Hello", delivery: "" }, LANGUAGE);
   assert.equal(descriptor.provider.endpoint, "https://custom.test/v1/audio/speech");

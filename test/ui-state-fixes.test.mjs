@@ -725,7 +725,7 @@ test("Apply keeps an updatedAt that a same-tab save adopted during the request, 
   assert.equal(context.state.profiles.updatedAt, "v1++++");
 });
 
-const statusHelper = script.match(/    const setStatus = [^\n]*/)[0];
+const statusHelper = script.match(/    const statusHtml = [^]*?\n    };/)[0];
 
 function listStub() {
   const list = { writes: 0, inserted: [], _html: "", contains: () => false, querySelectorAll: () => [], querySelector: () => null,
@@ -809,7 +809,7 @@ test("a real episode list change keeps open row menus and refocuses the same row
   const context = { state: { episodes: [episode], profiles: { episodeProfiles: [{ id: "f" }], speakerProfiles: [] } }, activePlan: null,
     jobsState: { jobs: [] }, startingEpisodeIds: new Set(), lastEpisodeListHtml: "stale", document: { activeElement: control }, CSS: { escape: (value) => value }, $: () => list };
   list.contains = (node) => node === control;
-  list.querySelectorAll = (selector) => selector === "details.episode-more[open]" ? [menu] : [];
+  list.querySelectorAll = (selector) => selector === "details.episode-more[open]" ? [menu] : [list.querySelector(selector)];
   list.querySelector = (selector) => {
     if (selector.endsWith("details.episode-more")) return { setAttribute: (name) => opened.push([selector, name]) };
     return { disabled: false, focus: () => { focused = selector; } };
@@ -819,6 +819,103 @@ test("a real episode list change keeps open row menus and refocuses the same row
   assert.equal(list.writes, 1);
   assert.deepEqual(opened, [['[data-episode-row="e1"] details.episode-more', "open"]]);
   assert.equal(focused, '[data-episode-row="e1"] [data-start-episode]');
+});
+
+test("a rebuilt episode list refocuses the same control when several in the row share its data attribute", () => {
+  const list = listStub();
+  const episode = { id: "e1", name: "One", transcriptWords: 1, transcript: "Host: hi", episodeProfileId: "f" };
+  const row = () => ({ dataset: { episodeRow: "e1" } });
+  const node = (name) => ({ name, disabled: false, matches: () => false, attributes: [{ name: "data-open-episode" }], closest: row, focus() { focused = name; } });
+  let focused = "";
+  const before = [node("primary"), node("more-open")];
+  const after = [node("new primary"), node("new more-open")];
+  const context = { state: { episodes: [episode], profiles: { episodeProfiles: [{ id: "f" }], speakerProfiles: [] } }, activePlan: null,
+    jobsState: { jobs: [] }, startingEpisodeIds: new Set(), lastEpisodeListHtml: "stale", document: { activeElement: before[1] }, CSS: { escape: (value) => value }, $: () => list };
+  list.contains = () => true;
+  list.querySelectorAll = (selector) => selector === '[data-episode-row="e1"] [data-open-episode]' ? (list.writes ? after : before) : [];
+  list.querySelector = () => null;
+  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "renderEpisodeList"], context);
+  context.renderEpisodeList();
+  assert.equal(list.writes, 1);
+  assert.equal(focused, "new more-open");
+});
+
+test("setStatus compares markup with the last string written, not the browser's serialization", () => {
+  let writes = 0;
+  let html = "";
+  // A browser reads escapeHtml's &#39; back as an apostrophe.
+  const element = { get innerHTML() { return html.replaceAll("&#39;", "'"); }, set innerHTML(value) { writes++; html = value; } };
+  const context = { $: () => element };
+  runInNewContext(statusHelper, context);
+  runInNewContext('setStatus("modelStatus", "Can&#39;t load models", "innerHTML"); setStatus("modelStatus", "Can&#39;t load models", "innerHTML");', context);
+  assert.equal(writes, 1, "an unchanged status must not be rewritten and announced again");
+});
+
+test("a saved Claude effort survives Format and plan saves while the Anthropic catalog is empty", () => {
+  const model = "compat:anthropic:claude-test";
+  const context = episodeContext();
+  context.modelCatalog = { providers: { anthropic: { discoveredModels: [] } } };
+  install(["effortLevelsForModel", "effortOptions", "renderFormatEffortFields", "syncFormatForm", "renderChatControls", "capturePlanDraft"], context);
+  const format = Object.assign(context.state.profiles.episodeProfiles[0], { outlineModel: model, transcriptModel: model, outlineEffort: "high", transcriptEffort: "max" });
+  context.formatFormId = "f";
+  for (const id of ["fmtOutlineModel", "fmtTranscriptModel"]) context.$(id).value = model;
+  for (const id of ["fmtOutlineEffort", "fmtTranscriptEffort"]) context.$(id).closest = () => ({});
+  context.renderFormatEffortFields(format);
+  assert.match(context.$("fmtOutlineEffort").innerHTML, /selected disabled>high · saved — currently unavailable/);
+  context.syncFormatForm();
+  assert.equal(format.outlineEffort, "high");
+  assert.equal(format.transcriptEffort, "max");
+  Object.assign(context, { activePlanId: "p", activePlan: { id: "p", planningModel: model, planningEffort: "high" }, plannerChatThread: null, renderPlannerChatHistory: noop, updateChatPills: noop,
+    textModelOptions: (value) => `<option value="${value}" selected>${value}</option>` });
+  context.state.plans = [{ id: "p" }];
+  context.renderChatControls({ model, effort: "high" });
+  context.renderChatControls();
+  assert.equal(context.capturePlanDraft().planningEffort, "high");
+});
+
+test("a saved effort that a known model does not support falls back to the default on a Format save", () => {
+  const claude = "compat:anthropic:claude-test";
+  for (const model of [claude, "compat:openai:gpt-5.5-pro"]) {
+    const context = episodeContext();
+    context.modelCatalog = { providers: { anthropic: { discoveredModels: [{ id: claude, effortLevels: ["low", "medium", "high"] }] } } };
+    install(["effortLevelsForModel", "effortOptions", "renderFormatEffortFields", "syncFormatForm"], context);
+    const format = Object.assign(context.state.profiles.episodeProfiles[0], { outlineModel: model, transcriptModel: model, transcriptEffort: "max" });
+    context.formatFormId = "f";
+    for (const id of ["fmtOutlineModel", "fmtTranscriptModel"]) context.$(id).value = model;
+    for (const id of ["fmtOutlineEffort", "fmtTranscriptEffort"]) context.$(id).closest = () => ({});
+    context.renderFormatEffortFields(format);
+    assert.doesNotMatch(context.$("fmtTranscriptEffort").innerHTML, /currently unavailable/, model);
+    context.syncFormatForm();
+    assert.equal(format.transcriptEffort, "", model);
+  }
+});
+
+test("a transcript edit keeps its draft base, so a restore after a regeneration still asks", async () => {
+  const stored = new Map();
+  const context = episodeContext();
+  const asked = [];
+  Object.assign(context, { localStorage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
+    confirm: (question) => { asked.push(question); return false; } });
+  context.transcriptDirty = true;
+  context.$("transcriptText").value = "Host: edit 1";
+  context.storeTranscriptDraft();
+  context.currentEpisode.transcript = "Host: regenerated";
+  context.$("transcriptText").value = "Host: edit 2";
+  context.storeTranscriptDraft();
+  assert.deepEqual(JSON.parse(stored.get("draft.a")), { base: "Host: saved", text: "Host: edit 2" });
+  context.$("transcriptText").value = "Host: regenerated";
+  context.restoreTranscriptDraft();
+  assert.equal(asked.length, 1);
+  assert.match(asked[0], /older version/);
+  // A successful save moves the base to the saved transcript, even when later edits keep the draft.
+  stored.set("draft.a", JSON.stringify({ base: "Host: old", text: "Host: edit 3" }));
+  context.$("transcriptText").value = "Host: edit 3";
+  context.transcriptDirty = true;
+  context.refreshState = async () => {};
+  context.transcriptLengthMessage = () => "";
+  context.api = async () => { context.$("transcriptText").value = "Host: edit 4"; return { ...context.currentEpisode, transcript: "Host: edit 3" }; };
+  await context.saveTranscript();
+  assert.deepEqual(JSON.parse(stored.get("draft.a")), { base: "Host: edit 3", text: "Host: edit 4" });
 });
 
 test("Start stays disabled while its POST runs, across list re-renders, and re-enables after", async () => {

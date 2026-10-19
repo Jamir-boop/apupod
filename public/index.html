@@ -1000,7 +1000,14 @@
     const ttsCueRe = /\[[^\]\r\n]{1,80}\]|<break\b[^>]*\/?>/gi;
     const $ = (id) => document.getElementById(id);
     // Rewriting a live region with the same content makes screen readers announce it again.
-    const setStatus = (id, value, property = "textContent") => { if ($(id)[property] !== value) $(id)[property] = value; };
+    // The browser serializes escapeHtml's &#39; back as an apostrophe, so markup is compared with the last string written, not read back.
+    const statusHtml = new WeakMap();
+    const setStatus = (id, value, property = "textContent") => {
+      const element = $(id);
+      if ((property === "innerHTML" ? statusHtml.get(element) : element[property]) === value) return;
+      if (property === "innerHTML") statusHtml.set(element, value);
+      element[property] = value;
+    };
     const TRANSCRIPT_DRAFT_PREFIX = "pod-god.transcript-draft.v1.";
     const VIEW_SELECTIONS_KEY = "pod-god.view-selections.v1";
     const viewSelections = loadViewSelections();
@@ -2178,7 +2185,12 @@
     }
 
     function effortOptions(modelId, selected) {
-      return option("", "(default)", !selected) + effortLevelsForModel(modelId).map((level) => option(level, level, level === selected)).join("");
+      const levels = effortLevelsForModel(modelId);
+      // Claude levels come only from discovery: while a Claude model is not discovered (loading, failed, no key) its levels are unknown, so a saved effort stays.
+      // A known model that lacks the saved level falls back to "(default)".
+      const unknown = String(modelId || "").startsWith("compat:anthropic:") && !modelCatalog.providers?.anthropic?.discoveredModels?.some((model) => model.id === modelId);
+      return option("", "(default)", !selected) + levels.map((level) => option(level, level, level === selected)).join("")
+        + (selected && unknown ? option(selected, `${selected} · saved — currently unavailable`, true, true) : "");
     }
 
     function renderFormatEffortFields(format) {
@@ -2782,11 +2794,13 @@
       const openRows = [...list.querySelectorAll("details.episode-more[open]")].map(rowSelector);
       const active = list.contains(document.activeElement) ? document.activeElement : null;
       const focusRow = active?.closest("[data-episode-row]")?.dataset.episodeRow ? rowSelector(active) : "";
-      const focusTarget = !active ? "" : active.matches("summary") ? "summary" : [...active.attributes].filter((attribute) => attribute.name.startsWith("data-")).map((attribute) => `[${attribute.name}]`).join("");
+      const focusTarget = `${focusRow} ${!active ? "" : active.matches("summary") ? "summary" : [...active.attributes].filter((attribute) => attribute.name.startsWith("data-")).map((attribute) => `[${attribute.name}]`).join("") || ".episode-primary button"}`;
+      // Several controls in a row share a data attribute (primary and more-menu Open), so the position among matches picks the same one.
+      const focusIndex = focusRow ? [...list.querySelectorAll(focusTarget)].indexOf(active) : -1;
       list.innerHTML = html;
       for (const row of openRows) list.querySelector(`${row} details.episode-more`)?.setAttribute("open", "");
-      if (focusRow) [`${focusRow} ${focusTarget || ".episode-primary button"}`, `${focusRow} .episode-primary button:not(:disabled)`, `${focusRow} summary`]
-        .map((selector) => list.querySelector(selector)).find((node) => node && !node.disabled)?.focus({ preventScroll: true });
+      if (focusRow) [list.querySelectorAll(focusTarget)[Math.max(focusIndex, 0)], ...[`${focusRow} .episode-primary button:not(:disabled)`, `${focusRow} summary`].map((selector) => list.querySelector(selector))]
+        .find((node) => node && !node.disabled)?.focus({ preventScroll: true });
     }
 
     async function startEpisode(id) {
@@ -2920,12 +2934,15 @@
       return true;
     }
 
-    function storeTranscriptDraft() {
+    // An edit keeps the base of the existing draft, so a restore after a regeneration still asks; only a save or an accepted restore moves it.
+    function storeTranscriptDraft(rebase = false) {
       if (!currentEpisode) return;
       const key = TRANSCRIPT_DRAFT_PREFIX + currentEpisode.id;
       try {
-        if (transcriptDirty) localStorage.setItem(key, JSON.stringify({ base: currentEpisode.transcript || "", text: $("transcriptText").value }));
-        else localStorage.removeItem(key);
+        if (!transcriptDirty) { localStorage.removeItem(key); return; }
+        let base = currentEpisode.transcript || "";
+        if (!rebase) try { base = JSON.parse(localStorage.getItem(key))?.base ?? base; } catch {}
+        localStorage.setItem(key, JSON.stringify({ base, text: $("transcriptText").value }));
       } catch {}
     }
 
@@ -2943,7 +2960,7 @@
       }
       $("transcriptText").value = draft.text;
       transcriptDirty = true;
-      if (!sameBase) storeTranscriptDraft();
+      if (!sameBase) storeTranscriptDraft(true);
       notify("Restored unsaved transcript changes from this browser. Save transcript to keep them.", "warning");
     }
 
@@ -3025,7 +3042,7 @@
         if (currentEpisode?.id === id && selection === uiRequests.episode) {
           transcriptDirty = $("transcriptText").value !== transcript;
           currentEpisode = saved;
-          storeTranscriptDraft();
+          storeTranscriptDraft(true);
           await refreshState(id);
         }
         const warning = [segmentWarning, transcriptLengthMessage(saved.transcriptWords, saved.episodeProfile)].filter(Boolean).join(" ");
