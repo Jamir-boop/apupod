@@ -163,6 +163,8 @@ function ttsReadiness(context, config) {
 const jobView = (job) => job ? { id: job.id, type: job.type, status: job.status, phase: job.phase, completed: job.completed, total: job.total, message: job.message, error: job.error, queuedAt: job.queuedAt, finishedAt: job.finishedAt } : null;
 
 async function workspaceOverview(context, origin) {
+  // Right after a daemon start the catalog is still loading; without this wait TTS reads as not ready.
+  await awaitLatestModelCatalog(context);
   const state = await readWorkspaceState(context);
   return {
     uiUrl: `${origin}/`,
@@ -271,7 +273,7 @@ export function createMcpServer(context, origin) {
     _meta: widget(WORKSPACE_WIDGET_URI),
   }, async () => {
     const data = await workspaceOverview(context, origin);
-    return result(`apupod workspace: ${data.hosts.length} host profiles, ${data.formats.length} formats, ${data.knowledgeBases.length} knowledge bases, ${data.plans.length} plans, ${data.episodes.length} episodes. TTS ${data.tts.ready ? "ready" : `not ready: ${data.tts.hint}`}. UI: ${data.uiUrl}`, data);
+    return result(`apupod workspace: ${data.hosts.length} host profiles, ${data.formats.length} formats, ${data.knowledgeBases.length} knowledge bases, ${data.plans.length} plans, ${data.episodes.length} episodes. TTS ${data.tts.ready ? "ready." : `not ready: ${data.tts.hint}`} UI: ${data.uiUrl}`, data);
   });
 
   tool("open_ui", {

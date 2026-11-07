@@ -2,7 +2,7 @@
   "mcpServers": {
     "apupod": {
       "command": "npx",
-      "args": ["-y", "github:Jamir-boop/apupod#v1.2.2", "mcp"]
+      "args": ["-y", "github:Jamir-boop/apupod#v1.2.3", "mcp"]
     }
   }
 }
