@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createPodcastServer, loadEnvFile, resolveDirs } from "../src/app.mjs";
-import { newestBin } from "../src/system.mjs";
+import { compareVersions, newestBin } from "../src/system.mjs";
 
 const HOST = "127.0.0.1";
 const START_TIMEOUT_MS = 30_000;
@@ -49,6 +49,20 @@ async function liveDaemon(configDir) {
     return null;
   }
   return Number.isInteger(daemon?.pid) && alive(daemon.pid) && typeof daemon.url === "string" && await isApupod(daemon.url) ? daemon : null;
+}
+
+// A missing or invalid daemon version counts as older.
+const older = (daemon, target) => !(compareVersions(daemon.version, target) >= 0);
+
+// Idle means no queued or running job; a failed request counts as busy.
+async function isIdle(url) {
+  try {
+    const response = await fetch(`${url}/api/jobs`, { signal: AbortSignal.timeout(2_000) });
+    const { activeJobId, jobs } = await response.json();
+    return response.ok && !activeJobId && Array.isArray(jobs) && !jobs.some((job) => ["queued", "running"].includes(job.status));
+  } catch {
+    return false;
+  }
 }
 
 async function listen(server, port) {
@@ -108,17 +122,22 @@ export async function serve() {
 }
 
 // Start the newest apupod: this code or a newer one that an update installed into the data-dir runtime.
-async function startDaemon({ dataDir, configDir }, deadline) {
+// With `replaced`, the new daemon waits for that one to exit, and the old daemon (still alive for a moment) is not returned.
+async function startDaemon({ dataDir, configDir }, deadline, replaced = null) {
   const logPath = join(configDir, "daemon.log");
   const log = openSync(logPath, "a", 0o600);
-  const child = spawn(process.execPath, [newestBin(dataDir).bin, "serve"], { detached: true, stdio: ["ignore", log, log], env: process.env, windowsHide: true });
+  const { bin, version: target } = newestBin(dataDir);
+  const env = replaced ? { ...process.env, APUPOD_REPLACES_PID: String(replaced.pid) } : process.env;
+  const child = spawn(process.execPath, [bin, "serve"], { detached: true, stdio: ["ignore", log, log], env, windowsHide: true });
   closeSync(log);
   let exitCode = null;
   child.once("exit", (code) => { exitCode = code ?? 1; });
   child.unref();
+  // shortcut: a job queued between the idle check and this SIGTERM is interrupted (interruptStaleJobs keeps cached turns), add a daemon-side drain if that happens in practice.
+  if (replaced) try { process.kill(replaced.pid, "SIGTERM"); } catch {}
   while (Date.now() < deadline) {
     const daemon = await liveDaemon(configDir);
-    if (daemon) return daemon;
+    if (daemon && (!replaced || daemon.pid === child.pid || !older(daemon, target))) return daemon;
     if (exitCode !== null) throw new Error(`apupod daemon exited with code ${exitCode}. See ${logPath}.`);
     await sleep(100);
   }
@@ -126,10 +145,18 @@ async function startDaemon({ dataDir, configDir }, deadline) {
 }
 
 // The start lock makes concurrent bridges start one daemon; a lock left by a dead process is taken over.
+// A daemon older than the newest apupod is replaced when it is idle (never downgraded); a busy one is used until a later connect.
 async function ensureDaemon(dirs) {
-  const { configDir } = dirs;
+  const { dataDir, configDir } = dirs;
+  const target = newestBin(dataDir).version;
+  const replace = async (daemon) => {
+    if (!older(daemon, target)) return false;
+    if (await isIdle(daemon.url)) return true;
+    console.error(`apupod bridge: daemon ${daemon.version || "(unknown version)"} is older than ${target}; it is busy, the upgrade waits for the next connect.`);
+    return false;
+  };
   const running = await liveDaemon(configDir);
-  if (running) return running;
+  if (running && !await replace(running)) return running;
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   const lock = join(configDir, "daemon.lock");
   const deadline = Date.now() + START_TIMEOUT_MS;
@@ -144,13 +171,16 @@ async function ensureDaemon(dirs) {
       try {
         await handle.writeFile(String(process.pid));
         await handle.close();
-        return await liveDaemon(configDir) || await startDaemon(dirs, deadline);
+        // Re-read: another bridge may have started or upgraded the daemon meanwhile.
+        const current = await liveDaemon(configDir);
+        if (current && !await replace(current)) return current;
+        return await startDaemon(dirs, deadline, current);
       } finally {
         await rm(lock, { force: true });
       }
     }
     const daemon = await liveDaemon(configDir);
-    if (daemon) return daemon;
+    if (daemon && !older(daemon, target)) return daemon;
     const holder = Number(await readFile(lock, "utf8").catch(() => ""));
     if (holder && !alive(holder)) await rm(lock, { force: true });
     await sleep(100);
@@ -160,7 +190,7 @@ async function ensureDaemon(dirs) {
 
 // Pass JSON-RPC messages unchanged between the harness (stdio) and the daemon's /mcp endpoint.
 // A 401 (the token was rotated) or a connection error (the daemon restarted on a new port or new code) reconnects once:
-// re-read daemon.json and mcp-token, start a daemon if none answers, and send the message again.
+// re-read daemon.json and mcp-token, start a daemon if none answers (or replace an idle older one), and send the message again.
 async function bridge() {
   const dirs = resolveDirs();
   const { configDir } = dirs;
