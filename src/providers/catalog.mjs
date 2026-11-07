@@ -1,14 +1,8 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { badRequest, normalizeUrl } from "../util.mjs";
-import { MAX_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, fetchJson, cappedFetch, openAiClient, anthropicClient, callOptions, sdkJson, providerError } from "./transport.mjs";
+import { MAX_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, fetchJson, cappedFetch, openAiClient, callOptions, sdkJson, providerError } from "./transport.mjs";
 
 export const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
-const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
-// Fixed and explicit, so the SDK never reads ANTHROPIC_BASE_URL from the environment.
-export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 
 const ELEVENLABS_MODELS_URL = "https://api.elevenlabs.io/v1/models";
 
@@ -20,7 +14,6 @@ export const MIMO_VOICES = ["mimo_default", "冰糖", "茉莉", "苏打", "白�
 export const OPENAI_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar"];
 export const ELEVENLABS_MODELS = ["eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_v3", "eleven_v4"];
 export const TTS_MODELS = ["mimo-v2.5-tts", ...ELEVENLABS_MODELS];
-export const TEXT_MODELS = ["mimo-v2.5-pro", "mimo-v2.5"];
 export const LANGUAGE_OPTIONS = [
   ["en-US", "en", "English (United States)", "American"],
   ["ja-JP", "ja", "Japanese (Japan)", "Japanese"],
@@ -58,37 +51,6 @@ export const LANGUAGE_OPTIONS = [
 const MIMO_LANGUAGE_CODES = new Set(["en", "zh"]);
 const ELEVEN_LANGUAGE_CODES = new Map(`afr:af amh:am ara:ar hye:hy asm:as aze:az bel:be ben:bn bos:bs bul:bg mya:my cat:ca hrv:hr ces:cs dan:da nld:nl eng:en est:et fin:fi fra:fr ful:ff glg:gl kat:ka deu:de ell:el guj:gu hau:ha heb:he hin:hi hun:hu isl:is ind:id ita:it jpn:ja jav:jv kan:kn kaz:kk kor:ko kir:ky lao:lo lav:lv lin:ln lit:lt lug:lg ltz:lb mkd:mk msa:ms mal:ml mlt:mt cmn:zh zho:zh mri:mi mar:mr mon:mn nep:ne nob:no nor:no oci:oc ori:or pus:ps fas:fa pol:pl por:pt pan:pa ron:ro rus:ru srp:sr sna:sn snd:sd slk:sk slv:sl som:so spa:es swa:sw swe:sv tgk:tg tam:ta tel:te tha:th tur:tr ukr:uk urd:ur uzb:uz vie:vi cym:cy wol:wo zul:zu gle:ga nya:ny`.split(" ").map((pair) => pair.split(":")));
 
-// OpenCode Go serves the MiniMax and Qwen families over /messages and its other known families over chat/completions.
-// An id outside these families has no known protocol, so it stays unsupported.
-export function openCodeGoProtocol(rawModelId) {
-  const modelId = String(rawModelId || "");
-  if (/^(minimax|qwen)/i.test(modelId)) return "messages";
-  return /^(grok|glm|kimi|deepseek|mimo|hy\d)/i.test(modelId) ? "chat" : null;
-}
-
-export async function resolveOpenCodeGoCredential() {
-  const environmentKey = process.env.OPENCODE_GO_API_KEY?.trim();
-  if (environmentKey) return { key: environmentKey, source: "environment", error: null };
-  const dataHome = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share");
-  const authPath = join(dataHome, "opencode", "auth.json");
-  let auth;
-  try {
-    auth = await readFile(authPath, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") return { key: "", source: null, error: "OpenCode Go login was not found. Run /connect in OpenCode or set OPENCODE_GO_API_KEY." };
-    return { key: "", source: null, error: "OpenCode Go auth file could not be read." };
-  }
-  let entry;
-  try {
-    entry = JSON.parse(auth)?.["opencode-go"];
-  } catch {
-    return { key: "", source: null, error: "OpenCode Go auth file contains invalid JSON." };
-  }
-  const key = entry?.type === "api" && typeof entry.key === "string" ? entry.key.trim() : "";
-  if (key) return { key, source: "opencode-login", error: null };
-  return { key: "", source: null, error: "OpenCode Go login was not found. Run /connect in OpenCode or set OPENCODE_GO_API_KEY." };
-}
-
 export function createModelCatalog(credentials = null) {
   const credential = (name) => credentials ? credentials[name] || "" : process.env[name]?.trim() || "";
   return {
@@ -96,41 +58,26 @@ export function createModelCatalog(credentials = null) {
     updatedAt: null,
     languages: structuredClone(LANGUAGE_OPTIONS),
     providers: {
-      mimo: { configured: Boolean(credential("MIMO_API_KEY")), status: "loading", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
+      mimo: { configured: Boolean(credential("MIMO_API_KEY")), status: "loading", error: null, discoveredModels: [], ttsModels: [] },
       elevenlabs: { configured: Boolean(credential("ELEVENLABS_API_KEY")), status: "loading", error: null, discoveredModels: [], ttsModels: [] },
-      openai: { id: "openai", name: "OpenAI", configured: Boolean(credential("OPENAI_API_KEY")), status: "loading", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
-      chatgpt: { id: "chatgpt", name: "ChatGPT plan", configured: false, status: "unconfigured", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
-      anthropic: { id: "anthropic", name: "Anthropic", configured: Boolean(credential("ANTHROPIC_API_KEY")), status: "loading", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
-      opencodeGo: { id: "opencode-go", name: "OpenCode Go", configured: Boolean(credential("OPENCODE_GO_API_KEY")), status: "loading", error: null, credentialSource: null, discoveredModels: [], textModels: [], ttsModels: [] },
-      chatterbox: { id: "chatterbox", name: "Chatterbox", configured: false, status: "unconfigured", error: null, discoveredModels: [], textModels: [], ttsModels: [] },
+      openai: { id: "openai", name: "OpenAI", configured: Boolean(credential("OPENAI_API_KEY")), status: "loading", error: null, discoveredModels: [], ttsModels: [] },
+      chatterbox: { id: "chatterbox", name: "Chatterbox", configured: false, status: "unconfigured", error: null, discoveredModels: [], ttsModels: [] },
       compatible: [],
     },
   };
 }
 
-function modelDiscoverySnapshot(context) {
+async function modelDiscoverySnapshot(context) {
   const config = structuredClone(context.config);
   const names = new Set([
     "MIMO_API_KEY",
     "ELEVENLABS_API_KEY",
     "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
     "CHATTERBOX_API_KEY",
     "TYPESAFE_API_KEY",
     ...config.compatibleConnections.map((connection) => connection.apiKeyEnv),
   ]);
-  const credentials = Object.fromEntries([...names].map((name) => [name, process.env[name]?.trim() || ""]));
-  return resolveOpenCodeGoCredential().then((openCodeGoCredential) => ({
-    config,
-    credentials: {
-      ...credentials,
-      OPENCODE_GO_API_KEY: openCodeGoCredential.key,
-    },
-    openCodeGoCredentialSource: openCodeGoCredential.source,
-    openCodeGoCredentialError: openCodeGoCredential.error,
-    chatgptClient: context.chatgptClient,
-    chatgptAccountId: chatGptCatalogAccount(context),
-  }));
+  return { config, credentials: Object.fromEntries([...names].map((name) => [name, process.env[name]?.trim() || ""])) };
 }
 
 export function queueModelCatalogRefresh(context, { force = false } = {}) {
@@ -184,11 +131,7 @@ async function buildModelCatalog(fetchImpl, snapshot) {
   const mimo = catalog.providers.mimo;
   const elevenlabs = catalog.providers.elevenlabs;
   const openai = catalog.providers.openai;
-  const chatgpt = catalog.providers.chatgpt;
-  const anthropic = catalog.providers.anthropic;
   const openaiConnection = builtInOpenAiConnection(context.config);
-  const opencodeGo = catalog.providers.opencodeGo;
-  const openCodeGoConnection = builtInOpenCodeGoConnection(context.config);
   const chatterbox = catalog.providers.chatterbox;
   const chatterboxConnection = builtInChatterboxConnection(context.config);
   const compatible = context.config.compatibleConnections.map((connection) => ({
@@ -197,7 +140,6 @@ async function buildModelCatalog(fetchImpl, snapshot) {
     configured: Boolean(connection.enabled && connection.baseUrl),
     status: "loading",
     error: null,
-    textModels: [],
     ttsModels: [],
     discoveredModels: [],
   }));
@@ -205,16 +147,12 @@ async function buildModelCatalog(fetchImpl, snapshot) {
   mimo.configured = Boolean(context.config.providers.mimo.enabled && context.credentials.MIMO_API_KEY);
   elevenlabs.configured = Boolean(context.config.providers.elevenlabs.enabled && context.credentials.ELEVENLABS_API_KEY);
   openai.configured = Boolean(openaiConnection.enabled && context.credentials.OPENAI_API_KEY && builtInConnectionId(context.config, "openai"));
-  chatgpt.configured = Boolean(context.config.providers.chatgpt.enabled && context.chatgptAccountId && builtInConnectionId(context.config, "chatgpt"));
-  anthropic.configured = Boolean(context.config.providers.anthropic.enabled && context.credentials.ANTHROPIC_API_KEY && builtInConnectionId(context.config, "anthropic"));
-  opencodeGo.configured = Boolean(openCodeGoConnection.enabled && context.credentials.OPENCODE_GO_API_KEY && builtInConnectionId(context.config, "opencode-go"));
-  opencodeGo.credentialSource = snapshot.openCodeGoCredentialSource;
   chatterbox.configured = Boolean(chatterboxConnection.enabled && chatterboxConnection.baseUrl && builtInConnectionId(context.config, "chatterbox"));
-  for (const provider of [mimo, elevenlabs, openai, chatgpt, anthropic, opencodeGo, chatterbox, ...compatible]) {
+  for (const provider of [mimo, elevenlabs, openai, chatterbox, ...compatible]) {
     provider.status = provider.configured ? "loading" : "unconfigured";
     provider.error = provider.configured ? null : unconfiguredProviderMessage(context, provider);
   }
-  for (const provider of [openai, chatgpt, anthropic, opencodeGo, chatterbox]) if (!builtInConnectionId(context.config, provider.id)) {
+  for (const provider of [openai, chatterbox]) if (!builtInConnectionId(context.config, provider.id)) {
     provider.status = "error";
     provider.error = `A saved compatible connection uses the reserved ID "${provider.id}". Its references are preserved. Resolve this connection ID conflict before using built-in ${provider.name}.`;
   }
@@ -223,16 +161,13 @@ async function buildModelCatalog(fetchImpl, snapshot) {
     mimo.configured ? loadMimoModels(context).catch((error) => setProviderError(mimo, error)) : null,
     elevenlabs.configured ? loadElevenLabsModels(context).catch((error) => setProviderError(elevenlabs, error)) : null,
     openai.configured ? loadCompatibleModels(context, openaiConnection, openai).catch((error) => setProviderError(openai, error)) : null,
-    chatgpt.configured ? loadChatGptModels(context).catch((error) => { chatgpt.status = "error"; chatgpt.error = chatGptRecovery(error.code); }) : null,
-    anthropic.configured ? loadAnthropicModels(context).catch((error) => setProviderError(anthropic, error)) : null,
-    opencodeGo.configured ? loadCompatibleModels(context, openCodeGoConnection, opencodeGo).catch((error) => setProviderError(opencodeGo, error)) : null,
     chatterbox.configured ? loadCompatibleModels(context, chatterboxConnection, chatterbox).catch((error) => setProviderError(chatterbox, error)) : null,
     ...context.config.compatibleConnections.map((connection) => {
       const provider = compatible.find((item) => item.id === connection.id);
       return provider?.configured ? loadCompatibleModels(context, connection, provider).catch((error) => setProviderError(provider, error)) : null;
     }),
   ]);
-  const configured = [mimo, elevenlabs, openai, chatgpt, anthropic, opencodeGo, chatterbox, ...compatible].filter((provider) => provider.configured);
+  const configured = [mimo, elevenlabs, openai, chatterbox, ...compatible].filter((provider) => provider.configured);
   const ready = configured.filter((provider) => provider.status === "ready").length;
   mergeDiscoveredLanguages(catalog);
   catalog.status = configured.length === 0 ? "unconfigured" : ready === configured.length ? "ready" : ready > 0 ? "partial" : "error";
@@ -241,12 +176,9 @@ async function buildModelCatalog(fetchImpl, snapshot) {
 }
 
 function unconfiguredProviderMessage(context, provider) {
-  if (provider === context.modelCatalog.providers.chatgpt) return context.config.providers.chatgpt.enabled ? "Sign in to ChatGPT and enable plan usage." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.mimo) return context.config.providers.mimo.enabled ? missingKeyMessage("MiMo", "MIMO_API_KEY") : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.elevenlabs) return context.config.providers.elevenlabs.enabled ? missingKeyMessage("ElevenLabs", "ELEVENLABS_API_KEY") : "Provider is disabled.";
-  if (provider === context.modelCatalog.providers.anthropic) return context.config.providers.anthropic.enabled ? missingKeyMessage("Anthropic", "ANTHROPIC_API_KEY") : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.openai) return context.config.providers.openai.enabled ? missingKeyMessage("OpenAI", "OPENAI_API_KEY") : "Provider is disabled.";
-  if (provider === context.modelCatalog.providers.opencodeGo) return context.config.providers.opencodeGo.enabled ? context.openCodeGoCredentialError || "OpenCode Go login was not found. Run /connect in OpenCode or set OPENCODE_GO_API_KEY." : "Provider is disabled.";
   if (provider === context.modelCatalog.providers.chatterbox) return context.config.providers.chatterbox.enabled ? "Base URL is not configured." : "Provider is disabled.";
   const connection = context.config.compatibleConnections.find((item) => item.id === provider.id);
   return connection?.enabled ? "Base URL is not configured." : "Connection is disabled.";
@@ -264,15 +196,14 @@ async function loadMimoModels(context) {
     throw providerError(error, "MiMo models", "MIMO_API_KEY", MODEL_TIMEOUT_MS, apiKey);
   }
   const models = Array.isArray(data?.data) ? data.data : [];
-  provider.discoveredModels = models.filter((model) => typeof model?.id === "string" && !model.id.includes("-asr")).map((model) => ({
+  provider.discoveredModels = models.filter((model) => typeof model?.id === "string" && model.id.includes("-tts")).map((model) => ({
     id: model.id,
     rawId: model.id,
     name: model.id === "mimo-v2.5-tts" ? "MiMo v2.5 TTS" : model.id,
     provider: "mimo",
-    suggested: model.id.includes("-tts") ? { text: false, tts: true } : { text: true, tts: false },
+    suggested: { tts: true },
   }));
   const active = context.config.providers.mimo.activeModels;
-  provider.textModels = provider.discoveredModels.filter((model) => active[model.rawId]?.text);
   provider.ttsModels = provider.discoveredModels.filter((model) => active[model.rawId]?.tts);
   provider.status = "ready";
   provider.error = null;
@@ -306,81 +237,13 @@ async function loadElevenLabsModels(context) {
   provider.error = null;
 }
 
-export function chatGptRecovery(code, param) {
-  if (/unsupported_capability/.test(code || "")) return `The selected ChatGPT model does not support ${param ? `parameter "${param}"` : "this request capability"}. Remove this setting or select a model that supports it.`;
-  if (/plan_usage_disabled/.test(code || "")) return "ChatGPT plan usage is not allowed. Continue with ChatGPT and allow plan usage.";
-  if (/account_changed/.test(code || "")) return "The ChatGPT account changed. Select an account and try again.";
-  if (/sign_in|required|token|grant|401/.test(code || "")) return "Sign in to ChatGPT again to use this account.";
-  if (/limit|quota|usage|credits|rate/.test(code || "")) return "ChatGPT usage is limited. Check Manage usage or select another provider. API-key billing will not start automatically.";
-  return `ChatGPT could not complete the request (${code || "connection_error"}). Check the connection and try again.`;
-}
-
-export function chatGptStatus(context) {
-  const status = context.chatgptClient.status();
-  return {
-    activeAccountId: status.activeAccountId || null,
-    accounts: (status.accounts || []).map((account) => ({ id: account.id, label: account.label, active: account.active === true, grant: account.grant === true, status: account.status })),
-    pending: status.pending ? { accountId: status.pending.accountId || null, status: status.pending.status } : null,
-    lastSignIn: { status: status.lastSignIn?.status || "idle", ...(status.lastSignIn?.error?.code ? { error: chatGptRecovery(status.lastSignIn.error.code) } : {}) },
-  };
-}
-
-export function chatGptCatalogAccount(context) {
-  const status = context.chatgptClient?.status();
-  return status?.accounts?.some((account) => account.id === status.activeAccountId && account.status === "connected" && account.grant) ? status.activeAccountId : null;
-}
-
-export function refreshChatGptAccount(context, force = false) {
-  const accountId = chatGptCatalogAccount(context);
-  if (force || accountId !== context.chatgptCatalogAccount) {
-    context.chatgptCatalogAccount = accountId;
-    return queueModelCatalogRefresh(context, { force: true });
-  }
-  return null;
-}
-
-async function loadChatGptModels(context) {
-  const provider = context.modelCatalog.providers.chatgpt;
-  const models = await context.chatgptClient.models(context.chatgptAccountId);
-  provider.discoveredModels = models.filter((model) => model?.visibility === "list" && typeof model.slug === "string" && model.slug).map((model) => ({
-    id: compatibleModelId("chatgpt", model.slug), rawId: model.slug, name: model.display_name || model.slug,
-    connectionId: "chatgpt", connectionName: "ChatGPT plan", provider: "chatgpt", suggested: { text: true, tts: false },
-  }));
-  provider.textModels = provider.discoveredModels.filter((model) => context.config.providers.chatgpt.activeModels[model.rawId]?.text);
-  provider.status = "ready";
-  provider.error = null;
-}
-
-async function loadAnthropicModels(context) {
-  const provider = context.modelCatalog.providers.anthropic;
-  const label = "Anthropic models";
-  const models = [];
-  try {
-    // The SDK iterator follows has_more and after_id.
-    for await (const model of anthropicClient({ baseURL: ANTHROPIC_BASE_URL, apiKey: context.credentials.ANTHROPIC_API_KEY, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) })
-      .models.list({ limit: 1000 }, callOptions(MODEL_TIMEOUT_MS))) models.push(model);
-  } catch (error) {
-    throw providerError(error, label, "ANTHROPIC_API_KEY", MODEL_TIMEOUT_MS, context.credentials.ANTHROPIC_API_KEY);
-  }
-  // Retired models stay listed, but inference requests for them fail.
-  provider.discoveredModels = models.filter((model) => typeof model?.id === "string" && model.id && model.lifecycle !== "retired").map((model) => ({
-    id: compatibleModelId("anthropic", model.id), rawId: model.id, name: model.display_name || model.id,
-    connectionId: "anthropic", connectionName: "Anthropic", provider: "anthropic", suggested: { text: true, tts: false },
-    effortLevels: ["low", "medium", "high", "xhigh", "max"].filter((level) => model.capabilities?.effort?.supported && model.capabilities.effort[level]?.supported),
-    maxTokens: Number.isSafeInteger(model.max_tokens) && model.max_tokens > 0 ? model.max_tokens : null,
-  }));
-  provider.textModels = provider.discoveredModels.filter((model) => context.config.providers.anthropic.activeModels[model.rawId]?.text);
-  provider.status = "ready";
-  provider.error = null;
-}
-
 async function loadCompatibleModels(context, connection, provider) {
   const apiKey = context.credentials[connection.apiKeyEnv];
-  if (connection.requiresApiKey && !apiKey) throw new Error(missingKeyMessage(connection.name, apiKeyName(connection)));
+  if (connection.requiresApiKey && !apiKey) throw new Error(missingKeyMessage(connection.name, connection.apiKeyEnv));
   const label = `${connection.name} models`;
   const client = openAiClient({ baseURL: connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) });
   const requests = await Promise.allSettled(modelDiscoveryUrls(connection).map((url) => sdkJson(client.get(url, callOptions(MODEL_TIMEOUT_MS)), label)
-    .catch((error) => { throw providerError(error, label, apiKeyName(connection), MODEL_TIMEOUT_MS, apiKey); })));
+    .catch((error) => { throw providerError(error, label, connection.apiKeyEnv, MODEL_TIMEOUT_MS, apiKey); })));
   const successful = requests.filter((result) => result.status === "fulfilled");
   if (successful.length === 0) throw new Error([...new Set(requests.map((result) => result.reason?.message || String(result.reason)))].join(" ") || `${connection.name} models request failed.`);
   const models = [...new Map(successful.flatMap((result) => Array.isArray(result.value?.data) ? result.value.data : [])
@@ -392,22 +255,17 @@ async function loadCompatibleModels(context, connection, provider) {
   for (const model of models) {
     const rawId = typeof model?.id === "string" ? model.id : "";
     if (!rawId) continue;
-    const protocol = connection.kind === "opencodeGo" ? openCodeGoProtocol(rawId) : null;
-    const capability = connection.kind === "opencodeGo" ? { text: Boolean(protocol), tts: false } : compatibleCapability(model);
-    const shared = {
+    discoveredModels.push({
       id: compatibleModelId(connection.id, rawId),
       rawId,
       name: model?.name || rawId,
-      provider: ["openai", "opencodeGo", "chatterbox"].includes(connection.kind) ? connection.kind : "compatible",
+      provider: ["openai", "chatterbox"].includes(connection.kind) ? connection.kind : "compatible",
       connectionId: connection.id,
       connectionName: connection.name,
-      suggested: capability,
-      ...(connection.kind === "opencodeGo" ? { protocol, supported: Boolean(protocol) } : {}),
-    };
-    discoveredModels.push(shared);
+      suggested: { tts: suggestsTts(model) },
+    });
   }
   provider.discoveredModels = discoveredModels;
-  provider.textModels = discoveredModels.filter((model) => model.supported !== false && connection.activeModels?.[model.rawId]?.text);
   provider.ttsModels = discoveredModels.filter((model) => connection.activeModels?.[model.rawId]?.tts);
   provider.status = "ready";
   provider.error = null;
@@ -443,31 +301,10 @@ export function builtInConnectionId(config, connectionId) {
   return config.compatibleConnections.some((connection) => connection.id === connectionId) ? "" : connectionId;
 }
 
-const EFFORT_LEVELS = new Set(["none", "low", "medium", "high", "xhigh", "max"]);
-
-export function normalizeEffort(value) {
-  const effort = String(value || "").trim();
-  return EFFORT_LEVELS.has(effort) ? effort : "";
-}
-
-// ponytail: hardcoded from OpenAI docs — the models endpoint does not enumerate supported efforts
-export function effortLevelsForModel(rawModelId) {
-  const id = String(rawModelId || "");
-  if (/^gpt-5\.6/.test(id)) return ["none", "low", "medium", "high", "xhigh", "max"];
-  if (/^gpt-5\.5-pro(?:-|$)/.test(id)) return ["medium", "high", "xhigh"];
-  if (/^gpt-5\.5/.test(id)) return ["none", "low", "medium", "high", "xhigh"];
-  return [];
-}
-
-export function usesResponsesApi(rawModelId) {
-  return /^gpt-5\.(5|6)/.test(String(rawModelId || ""));
-}
-
 export function compatibleConnection(context, connectionId) {
   const custom = context.config.compatibleConnections.find((item) => item.id === connectionId);
   if (custom) return custom;
   if (connectionId === "openai") return builtInOpenAiConnection(context.config);
-  if (connectionId === "opencode-go") return builtInOpenCodeGoConnection(context.config);
   if (connectionId === "chatterbox") return builtInChatterboxConnection(context.config);
   return null;
 }
@@ -476,19 +313,13 @@ function builtInOpenAiConnection(config) {
   return { id: "openai", name: "OpenAI", apiKeyEnv: "OPENAI_API_KEY", kind: "openai", requiresApiKey: true, ...config.providers.openai };
 }
 
-function builtInOpenCodeGoConnection(config) {
-  return { id: "opencode-go", name: "OpenCode Go", apiKeyEnv: "OPENCODE_GO_API_KEY", kind: "opencodeGo", requiresApiKey: true, baseUrl: OPENCODE_GO_BASE_URL, modelsUrl: `${OPENCODE_GO_BASE_URL}/models`, llmBaseUrl: "", ttsBaseUrl: "", ...config.providers.opencodeGo };
-}
-
 export function builtInChatterboxConnection(config) {
-  return { id: "chatterbox", name: "Chatterbox", apiKeyEnv: "CHATTERBOX_API_KEY", kind: "chatterbox", ttsBaseUrl: "", llmBaseUrl: "", ...config.providers.chatterbox };
+  return { id: "chatterbox", name: "Chatterbox", apiKeyEnv: "CHATTERBOX_API_KEY", kind: "chatterbox", ttsBaseUrl: "", ...config.providers.chatterbox };
 }
-
-export const apiKeyName = (connection) => connection.kind === "opencodeGo" ? "OPENCODE_GO_API_KEY (or the OpenCode login)" : connection.apiKeyEnv;
 
 function modelDiscoveryUrls(connection) {
   if (connection.modelsUrl) return [modelsEndpoint(connection.modelsUrl)];
-  return [...new Set([connection.llmBaseUrl || connection.baseUrl, connection.ttsBaseUrl || connection.baseUrl].map(modelsEndpoint))];
+  return [...new Set([connection.baseUrl, connection.ttsBaseUrl || connection.baseUrl].map(modelsEndpoint))];
 }
 
 function modelsEndpoint(value) {
@@ -496,28 +327,18 @@ function modelsEndpoint(value) {
   return url.endsWith(OPENAI_COMPATIBLE_MODELS_URL) ? url : `${url}${OPENAI_COMPATIBLE_MODELS_URL}`;
 }
 
-function compatibleCapability(model) {
-  const capabilities = model?.capabilities;
-  if (typeof capabilities?.text === "boolean" || typeof capabilities?.tts === "boolean") {
-    return { text: capabilities.text === true, tts: capabilities.tts === true };
-  }
+function suggestsTts(model) {
+  if (typeof model?.capabilities?.tts === "boolean") return model.capabilities.tts;
   const id = String(model?.id).toLowerCase();
-  if (/(whisper|transcribe|transcription|asr|scribe)/.test(id)) return { text: false, tts: false };
-  if (/(^tts-|tts$|text-to-speech|speech)/.test(id)) return { text: false, tts: true };
-  return { text: true, tts: false };
+  return !/(whisper|transcribe|transcription|asr|scribe)/.test(id) && /(^tts-|tts$|text-to-speech|speech)/.test(id);
 }
 
 export function availableModelIds(context) {
   const providers = context.modelCatalog.providers;
-  const openaiText = providers.openai.textModels.map((model) => model.id);
-  const openCodeGoText = providers.opencodeGo.textModels.map((model) => model.id);
   const openaiTts = providers.openai.ttsModels.map((model) => model.id);
-  const chatterboxText = providers.chatterbox.textModels.map((model) => model.id);
   const chatterboxTts = providers.chatterbox.ttsModels.map((model) => model.id);
-  const compatibleText = (providers.compatible || []).flatMap((provider) => provider.textModels.map((model) => model.id));
   const compatibleTts = (providers.compatible || []).flatMap((provider) => provider.ttsModels.map((model) => model.id));
   return {
-    textModels: new Set([...providers.mimo.textModels.map((model) => model.id), ...openaiText, ...(providers.chatgpt?.textModels || []).map((model) => model.id), ...(providers.anthropic?.textModels || []).map((model) => model.id), ...openCodeGoText, ...chatterboxText, ...compatibleText]),
     ttsModels: new Set([...providers.mimo.ttsModels, ...providers.elevenlabs.ttsModels, ...openaiTts, ...chatterboxTts, ...compatibleTts].map((model) => typeof model === "string" ? model : model.id)),
     languages: new Set(context.modelCatalog.languages.map((language) => language.id)),
   };

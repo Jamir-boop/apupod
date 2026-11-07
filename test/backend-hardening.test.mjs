@@ -6,38 +6,38 @@ import test, { after } from "node:test";
 import { runInNewContext } from "node:vm";
 import { writeAudioAsWav } from "../src/app.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
-import { createModelCatalog, openCodeGoProtocol } from "../src/providers/catalog.mjs";
-import { callTextModel, synthesizeTurn } from "../src/providers/generate.mjs";
+import { createModelCatalog } from "../src/providers/catalog.mjs";
+import { synthesizeTurn } from "../src/providers/generate.mjs";
 import { fetchBytes, fetchJsonWithBody } from "../src/providers/transport.mjs";
-import { chatgptStub, script, setEnv, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
+import { script, setEnv, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 // Keys in the developer's shell would start discovery against the stubs.
-const CLEARED_ENV = ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENCODE_GO_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY"];
+const CLEARED_ENV = ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY"];
 const savedEnv = Object.fromEntries(CLEARED_ENV.map((name) => [name, process.env[name]]));
 for (const name of CLEARED_ENV) delete process.env[name];
 after(() => setEnv(savedEnv));
 
 const LANGUAGE = { id: "en-US", apiCode: "en", name: "English (United States)" };
-const chat = (content = "{\"ok\":true}") => Response.json({ choices: [{ message: { content } }] });
 
-const start = (t, options = {}, prepare) => startTestServer(t, { chatgptClient: chatgptStub(), fetchImpl: async () => Response.json({ data: [] }), ...options }, prepare);
+const start = (t, options = {}, prepare) => startTestServer(t, { fetchImpl: async () => Response.json({ data: [] }), ...options }, prepare);
 
 function unitContext(fetchImpl, { apiKey = "sk-custom-secret" } = {}) {
   const modelCatalog = createModelCatalog({});
-  modelCatalog.providers.compatible = [{ id: "custom", name: "Custom", status: "ready", textModels: [], ttsModels: [{ id: "compat:custom:tts-1" }], discoveredModels: [] }];
+  modelCatalog.providers.compatible = [{ id: "custom", name: "Custom", status: "ready", ttsModels: [{ id: "compat:custom:tts-1" }], discoveredModels: [] }];
+  modelCatalog.providers.mimo.ttsModels = [{ id: "mimo-v2.5-tts" }];
   return {
     fetchImpl,
     modelCatalog,
-    credentials: { CUSTOM_API_KEY: apiKey, MIMO_API_KEY: "mimo-key-secret", OPENCODE_GO_API_KEY: "go-key-secret" },
+    credentials: { CUSTOM_API_KEY: apiKey, MIMO_API_KEY: "mimo-key-secret" },
     config: {
-      providers: { mimo: { baseUrl: "https://mimo.test/v1" }, opencodeGo: {} },
-      compatibleConnections: [{ id: "custom", name: "Custom", baseUrl: "https://custom.test/v1", llmBaseUrl: "", ttsBaseUrl: "", apiKeyEnv: "CUSTOM_API_KEY", enabled: true, activeModels: {} }],
+      providers: { mimo: { baseUrl: "https://mimo.test/v1" } },
+      compatibleConnections: [{ id: "custom", name: "Custom", baseUrl: "https://custom.test/v1", ttsBaseUrl: "", apiKeyEnv: "CUSTOM_API_KEY", enabled: true, activeModels: {} }],
     },
   };
 }
 
-const text = (ctx, model = "compat:custom:chat-model") => callTextModel({ context: ctx, model, system: "s", prompt: "p", maxTokens: 100, temperature: 0.5, topP: 1 });
 const speak = (ctx) => synthesizeTurn(ctx, { voiceModel: "compat:custom:tts-1" }, { voiceId: "alloy" }, "Hello", "", LANGUAGE);
+const speakMimo = (ctx) => synthesizeTurn(ctx, { voiceModel: "mimo-v2.5-tts" }, { voiceId: "default" }, "Hello", "", LANGUAGE);
 const hostCopy = (profiles, id) => {
   const host = { ...structuredClone(profiles.speakerProfiles[0]), id, name: `Host ${id}` };
   delete host.revision;
@@ -45,7 +45,7 @@ const hostCopy = (profiles, id) => {
 };
 
 test("B1: /api/jobs reads only the episodes its jobs name, shows renames, and drops deleted episodes", async (t) => {
-  const job = { id: "job-1", episodeId: "ep-1", type: "transcript", status: "failed", queuedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+  const job = { id: "job-1", episodeId: "ep-1", type: "tts", status: "failed", queuedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
   const { rootDir, api } = await start(t, {}, async (root) => {
     await mkdir(join(root, "data", "episodes", "ep-1"), { recursive: true });
     await writeFile(join(root, "data", "episodes", "ep-1", "episode.json"), JSON.stringify({ id: "ep-1", name: "Old name", status: "draft", updatedAt: job.updatedAt, job }));
@@ -137,19 +137,8 @@ test("B4: a stale tab cannot silently delete a host that another tab added; requ
   assert.equal(response.status, 200, response.value.error);
 });
 
-test("B4: every profiles.json writer advances updatedAt, so single-tab save, add, delete, plan, and apply flows never conflict", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "single-tab-mimo-key" });
-  const generatedPlan = { episodeFormat: { name: "Generated format", description: "Created by plan generation" }, episodes: [{ number: 1, title: "Only" }] };
-  const proposal = { message: "Add Charlie.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Charlie", voiceModel: "mimo-v2.5-tts", speakers: [{ name: "Charlie", voiceId: "Mia" }] } } } };
-  const fetchImpl = async (url, init = {}) => {
-    if (String(url).endsWith("/chat/completions")) {
-      const request = JSON.parse(init.body);
-      return chat(JSON.stringify(request.messages[0].content.includes("podcast content planner") ? generatedPlan : proposal));
-    }
-    return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-  };
-  const { api } = await start(t, { fetchImpl });
-  await waitFor(async () => (await api("/api/models")).value.providers.mimo.status === "ready");
+test("B4: every profiles.json writer advances updatedAt, so single-tab save, add, and delete flows never conflict", async (t) => {
+  const { api } = await start(t);
   let profiles = (await api("/api/state")).value.profiles;
   const seen = [profiles.updatedAt];
   const adopt = (next) => {
@@ -165,20 +154,7 @@ test("B4: every profiles.json writer advances updatedAt, so single-tab save, add
   assert.equal(typeof profiles.updatedAt, "string");
   await save(profiles);
   await save({ ...profiles, speakerProfiles: [...profiles.speakerProfiles, hostCopy(profiles, "added-host")] });
-  let response = await api("/api/speaker-profiles/added-host", undefined, "DELETE");
-  assert.equal(response.status, 200, response.value.error);
-  assert.equal(response.value.previousProfilesUpdatedAt, profiles.updatedAt);
-  adopt(response.value.profiles);
-  response = await api("/api/plans", { name: "Plan", speakerProfileId: profiles.speakerProfiles[0].id, planningModel: "mimo-v2.5-pro", theme: "Theme", audience: "Everyone", goal: "Learn", episodeCount: 1 });
-  assert.equal(response.status, 201, response.value.error);
-  const plan = response.value.plan;
-  response = await api(`/api/plans/${plan.id}/generate`, {});
-  assert.equal(response.status, 200, response.value.error);
-  adopt(response.value.profiles);
-  response = await api("/api/plans/chat", { planId: plan.id, text: "Add Charlie", model: "mimo-v2.5-pro" });
-  assert.equal(response.status, 200, response.value.error);
-  const thread = (await api(`/api/chat?threadId=${response.value.threadId}`)).value;
-  response = await api("/api/plans/chat/apply", { threadId: response.value.threadId, messageIndex: thread.messages.findLastIndex((message) => message.role === "assistant") });
+  const response = await api("/api/speaker-profiles/added-host", undefined, "DELETE");
   assert.equal(response.status, 200, response.value.error);
   assert.equal(response.value.previousProfilesUpdatedAt, profiles.updatedAt);
   adopt(response.value.profiles);
@@ -210,7 +186,7 @@ test("B4: the page sends the loaded updatedAt and adopts the saved one, so a sec
   assert.equal(context.profilesDirty, false);
 });
 
-test("B4: the page adopts updatedAt after host delete and Apply only when it held the replaced one", async () => {
+test("B4: the page adopts updatedAt after host delete only when it held the replaced one", async () => {
   const deleteListener = script.match(/\$\("deleteSpeakerProfile"\)\.addEventListener\("click", (guard\([^]*?\}\))\);\n    \$\("saveProfiles"\)/)[1];
   const noop = () => {};
   const hosts = () => [{ id: "s", name: "Hosts" }, { id: "x", name: "Host X" }];
@@ -223,7 +199,6 @@ test("B4: the page adopts updatedAt after host delete and Apply only when it hel
   };
   const context = {
     structuredClone, uiRequests: { state: 0 }, profilesDirty: false, activeSpeakerProfileId: "x", activePlan: { id: "p" }, activePlanId: "p", currentEpisode: null,
-    plannerChatThreadId: "t", plannerChatThread: { threadId: "t", messages: [{ role: "assistant", content: JSON.stringify({ proposal: { speakerProfile: {} } }) }] },
     state: { plans: [], episodes: [], profiles: { speakerProfiles: hosts(), episodeProfiles: [{ id: "f", name: "Format", speakerProfileId: "s" }], updatedAt: "v1" } },
     guard: (action) => action, confirm: () => true, notify: noop, activeViewName: () => "transcript", validateControls: () => true,
     $: () => ({}), document: { querySelectorAll: () => [] },
@@ -231,35 +206,28 @@ test("B4: the page adopts updatedAt after host delete and Apply only when it hel
     refreshState: noop, refreshPlanIndex: noop, refreshPlanVersionAfterRepoint: noop, loadPlannerChatThread: noop, loadSpeakerForm: noop, loadPlanForm: noop,
     api: async (path, options) => {
       if (options.method === "DELETE") return { ...write([{ id: "s", name: "Hosts" }]), fallbackId: "s" };
-      if (path === "/api/plans/chat/apply") return { ...write(hosts()), appliedType: "speakerProfile", appliedId: "s", plan: null, warnings: [] };
       const { expectedUpdatedAt, ...profiles } = JSON.parse(options.body);
       sent.push(expectedUpdatedAt);
       if (expectedUpdatedAt !== server) throw new Error("Profiles changed somewhere else after this page loaded.");
       return write(profiles.speakerProfiles);
     },
   };
-  runInNewContext(`${["saveEditor", "saveProfiles", "mergeAppliedHostsDraft", "applyAssistantProposal"].map(source).join("\n")}\ndeleteHost = ${deleteListener};`, context);
+  runInNewContext(`${["saveEditor", "saveProfiles"].map(source).join("\n")}\ndeleteHost = ${deleteListener};`, context);
   await context.deleteHost();
   await context.saveProfiles();
-  await context.applyAssistantProposal(0, false);
-  await context.saveProfiles();
-  assert.deepEqual(sent, ["v1+", "v1+++"]);
-  // Another tab wrote in between: neither response may launder this tab's stale list.
+  assert.deepEqual(sent, ["v1+"]);
+  // Another tab wrote in between: the delete response may not launder this tab's stale list.
   context.state.profiles.speakerProfiles = hosts();
   context.activeSpeakerProfileId = "x";
   server = "other-tab";
   await context.deleteHost();
   await assert.rejects(context.saveProfiles(), /changed somewhere else/);
-  context.profilesDirty = false;
-  await context.applyAssistantProposal(0, false);
-  await assert.rejects(context.saveProfiles(), /changed somewhere else/);
-  assert.deepEqual(sent.slice(2), ["v1++++", "v1++++"]);
+  assert.deepEqual(sent.slice(1), ["v1++"]);
 });
 
-test("B7: a 2xx body with an object error fails with the provider message on SDK JSON paths", async () => {
+test("B7: a 2xx body with an object error fails with the provider message on the SDK JSON path", async () => {
   const fetchImpl = async () => Response.json({ error: { message: "invalid api key" } });
-  await assert.rejects(text(unitContext(fetchImpl)), /^Error: Custom chat request failed: invalid api key$/);
-  await assert.rejects(text(unitContext(fetchImpl), "mimo-v2.5"), /^Error: MiMo request failed: invalid api key$/);
+  await assert.rejects(speakMimo(unitContext(fetchImpl)), /^Error: MiMo request failed: invalid api key$/);
 });
 
 test("B8: a 2xx JSON or text body is not accepted as audio on the SDK and raw paths", async () => {
@@ -273,7 +241,7 @@ test("B8: a 2xx JSON or text body is not accepted as audio on the SDK and raw pa
 
 test("B9: a WAV that is not RIFF names the provider that returned it", async (t) => {
   const audio = await speak(unitContext(async () => new Response(Buffer.from("not a wav file"), { headers: { "content-type": "audio/wav" } })));
-  const directory = await mkdtemp(join(tmpdir(), "podcast-hardening-wav-"));
+  const directory = await mkdtemp(join(tmpdir(), "apupod-hardening-wav-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await assert.rejects(writeAudioAsWav(audio, join(directory, "clip.wav")), /^Error: Custom TTS returned audio data, but it is not a WAV RIFF file\.$/);
 });
@@ -284,7 +252,7 @@ test("B10: model and voice parsing skips null entries and a non-array voices fie
   const fetchImpl = async (url) => {
     if (String(url).startsWith("https://api.elevenlabs.io/v2/voices")) return Response.json({ voices });
     if (String(url).startsWith("https://api.elevenlabs.io/")) return Response.json([]);
-    return Response.json({ data: [null, { id: "mimo-v2.5" }] });
+    return Response.json({ data: [null, { id: "mimo-v2.5-tts" }] });
   };
   const { api } = await start(t, { fetchImpl });
   const mimo = await waitFor(async () => {
@@ -292,7 +260,7 @@ test("B10: model and voice parsing skips null entries and a non-array voices fie
     return provider.status === "loading" ? null : provider;
   });
   assert.equal(mimo.status, "ready", mimo.error);
-  assert.deepEqual(mimo.discoveredModels.map((model) => model.id), ["mimo-v2.5"]);
+  assert.deepEqual(mimo.discoveredModels.map((model) => model.id), ["mimo-v2.5-tts"]);
   let response = await api("/api/tts/elevenlabs/voices");
   assert.equal(response.status, 200, response.value.error);
   assert.deepEqual(response.value.voices, []);
@@ -302,33 +270,13 @@ test("B10: model and voice parsing skips null entries and a non-array voices fie
   assert.deepEqual(response.value.voices.map((voice) => voice.id), ["v1"]);
 });
 
-test("B10: the ChatGPT model catalog skips a null model entry", async (t) => {
-  const chatgptClient = {
-    status: () => ({ activeAccountId: "account-a", accounts: [{ id: "account-a", label: "a", active: true, grant: true, status: "connected" }] }),
-    models: async () => [null, { slug: "model-a", display_name: "Model A", visibility: "list" }], close: async () => {},
-  };
-  // PUT /api/config writes MIMO_BASE_URL into process.env.
-  withEnv(t, { MIMO_BASE_URL: process.env.MIMO_BASE_URL });
-  const { api } = await start(t, { chatgptClient });
-  const { config } = (await api("/api/state")).value;
-  config.providers.chatgpt.enabled = true;
-  assert.equal((await api("/api/config", config, "PUT")).status, 200);
-  const chatgpt = await waitFor(async () => {
-    const provider = (await api("/api/models")).value.providers.chatgpt;
-    return ["loading", "unconfigured"].includes(provider.status) ? null : provider;
-  });
-  assert.equal(chatgpt.status, "ready", chatgpt.error);
-  assert.deepEqual(chatgpt.discoveredModels.map((model) => model.rawId), ["model-a"]);
-});
-
 test("B11: discovery reports every failed /models URL, and an unconfigured provider names its key", async (t) => {
   withEnv(t, { OPENAI_API_KEY: "two-url-openai-key" });
   const fetchImpl = async (url) => String(url).startsWith("http://llm.test/") ? new Response("gateway down", { status: 502 })
     : String(url).startsWith("http://tts.test/") ? new Response(JSON.stringify({ error: { message: "bad key" } }), { status: 401, headers: { "content-type": "application/json" } })
       : Response.json({ data: [] });
   const { api } = await start(t, { fetchImpl }, async (root) => {
-    await mkdir(join(root, "data"), { recursive: true });
-    await writeFile(join(root, "data", "config.json"), JSON.stringify({ providers: { openai: { llmBaseUrl: "http://llm.test/v1", ttsBaseUrl: "http://tts.test/v1" } } }));
+    await writeFile(join(root, "config.json"), JSON.stringify({ providers: { openai: { baseUrl: "http://llm.test/v1", ttsBaseUrl: "http://tts.test/v1" } } }));
   });
   const catalog = await waitFor(async () => {
     const value = (await api("/api/models")).value;
@@ -339,26 +287,12 @@ test("B11: discovery reports every failed /models URL, and an unconfigured provi
   assert.equal(catalog.providers.mimo.error, "MiMo API key is not configured. Set MIMO_API_KEY in .env.");
 });
 
-test("B12: OpenCode Go keeps every listed id on its protocol and routes new ids by family", () => {
-  const chatModels = ["grok-4.5", "glm-5.2", "glm-5.1", "glm-5", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni", "hy3", "hy3-preview"];
-  const messagesModels = ["minimax-m3", "minimax-m2.7", "minimax-m2.5", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus"];
-  for (const id of chatModels) assert.equal(openCodeGoProtocol(id), "chat", id);
-  for (const id of messagesModels) assert.equal(openCodeGoProtocol(id), "messages", id);
-  assert.equal(openCodeGoProtocol("kimi-k4"), "chat");
-  assert.equal(openCodeGoProtocol("minimax-m4"), "messages");
-  assert.equal(openCodeGoProtocol("qwen4-max"), "messages");
-  assert.equal(openCodeGoProtocol("future-unknown"), null);
-  assert.equal(openCodeGoProtocol(""), null);
-});
-
 test("S1: an error body that echoes the key never puts the key into the error message", async () => {
   const echo = (status, body) => async () => new Response(body, { status, headers: { "content-type": "application/json", "x-should-retry": "false" } });
-  const chatError = await text(unitContext(echo(400, JSON.stringify({ error: { message: "Incorrect API key provided: sk-custom-secret" } })))).then(() => null, (error) => error);
-  assert.match(chatError.message, /Incorrect API key provided: \[redacted\]/);
-  const mimoError = await text(unitContext(echo(400, "rejected header api-key: mimo-key-secret")), "mimo-v2.5").then(() => null, (error) => error);
+  const customError = await speak(unitContext(echo(400, JSON.stringify({ error: { message: "Incorrect API key provided: sk-custom-secret" } })))).then(() => null, (error) => error);
+  assert.match(customError.message, /Incorrect API key provided: \[redacted\]/);
+  const mimoError = await speakMimo(unitContext(echo(400, "rejected header api-key: mimo-key-secret"))).then(() => null, (error) => error);
   assert.doesNotMatch(mimoError.message, /mimo-key-secret/);
-  const goError = await text(unitContext(echo(401, JSON.stringify({ error: { message: "x-api-key go-key-secret is not valid" } }))), "compat:opencode-go:minimax-m3").then(() => null, (error) => error);
-  assert.doesNotMatch(goError.message, /go-key-secret/);
   await assert.rejects(fetchJsonWithBody(echo(401, "Authorization: Bearer leaked-token-value"), "https://voices.test", { headers: { "xi-api-key": "eleven-secret-key" } }, "ElevenLabs voices", 1_000),
     (error) => /Bearer \[redacted\]/.test(error.message) && !/leaked-token-value/.test(error.message));
   await assert.rejects(fetchBytes(echo(401, "Missing bearer token; api-key: missing"), "https://tts.test", {}, "ElevenLabs TTS", 1_000),
@@ -366,10 +300,8 @@ test("S1: an error body that echoes the key never puts the key into the error me
   await assert.rejects(fetchBytes(echo(401, "bad key eleven-secret-key"), "https://tts.test", { headers: { "xi-api-key": "eleven-secret-key" } }, "ElevenLabs TTS", 1_000),
     (error) => /bad key \[redacted\]/.test(error.message));
   // A 2xx body can carry an error object or a JSON error page in place of audio.
-  for (const [model, key] of [["compat:custom:chat-model", "sk-custom-secret"], ["mimo-v2.5", "mimo-key-secret"], ["compat:opencode-go:kimi-k3", "go-key-secret"], ["compat:opencode-go:minimax-m3", "go-key-secret"]]) {
-    const error = await text(unitContext(echo(200, JSON.stringify({ error: { message: `key ${key} has no quota` } }))), model).then(() => null, (failure) => failure);
-    assert.match(error.message, /key \[redacted\] has no quota/, model);
-  }
+  const mimoQuota = await speakMimo(unitContext(echo(200, JSON.stringify({ error: { message: "key mimo-key-secret has no quota" } })))).then(() => null, (failure) => failure);
+  assert.match(mimoQuota.message, /key \[redacted\] has no quota/);
   const ttsError = await speak(unitContext(echo(200, JSON.stringify({ error: "invalid key sk-custom-secret" })))).then(() => null, (error) => error);
   assert.match(ttsError.message, /instead of audio: .*invalid key \[redacted\]/);
   await assert.rejects(fetchBytes(echo(200, "{\"detail\":\"bad key eleven-secret-key\"}"), "https://tts.test", { headers: { "xi-api-key": "eleven-secret-key" } }, "ElevenLabs TTS", 1_000),
@@ -378,17 +310,17 @@ test("S1: an error body that echoes the key never puts the key into the error me
 
 test("S2: clients that send the key in a non-Authorization header do not follow redirects", async () => {
   const inits = [];
+  const wav = Buffer.alloc(12); wav.write("RIFF", 0); wav.write("WAVE", 8);
   const fetchImpl = async (url, init) => {
     inits.push([String(url), init.redirect]);
-    return String(url).endsWith("/messages") ? Response.json({ content: [{ type: "text", text: "{}" }] }) : chat();
+    return String(url).endsWith("/audio/speech") ? new Response(Buffer.from("audio"), { headers: { "content-type": "audio/mpeg" } })
+      : Response.json({ choices: [{ message: { audio: { data: wav.toString("base64") } } }] });
   };
-  await text(unitContext(fetchImpl), "mimo-v2.5");
-  await text(unitContext(fetchImpl), "compat:opencode-go:minimax-m3");
-  await text(unitContext(fetchImpl));
+  await speakMimo(unitContext(fetchImpl));
+  await speak(unitContext(fetchImpl));
   assert.deepEqual(inits, [
     ["https://mimo.test/v1/chat/completions", "error"],
-    ["https://opencode.ai/zen/go/v1/messages", "error"],
-    ["https://custom.test/v1/chat/completions", undefined],
+    ["https://custom.test/v1/audio/speech", undefined],
   ]);
   const raw = [];
   const rawFetch = async (url, init) => { raw.push(init.redirect); return Response.json({}); };
@@ -397,16 +329,16 @@ test("S2: clients that send the key in a non-Authorization header do not follow 
   assert.deepEqual(raw, ["error", undefined]);
   // Undici's shape for a refused redirect: the reason sits on the cause of "fetch failed".
   const refuse = async () => { throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") }); };
-  await assert.rejects(text(unitContext(refuse), "mimo-v2.5"), /^Error: MiMo request failed: fetch failed \(unexpected redirect\)$/);
+  await assert.rejects(speakMimo(unitContext(refuse)), /^Error: MiMo request failed: fetch failed \(unexpected redirect\)$/);
   await assert.rejects(fetchJsonWithBody(refuse, "https://api.elevenlabs.test/v1/models", { headers: { "xi-api-key": "eleven-secret-key" } }, "ElevenLabs models", 1_000), /^Error: ElevenLabs models request failed: fetch failed \(unexpected redirect\)$/);
 });
 
 test("S3: a 401 on a connection that sent no key says the provider needs a key", async () => {
   const unauthorized = async () => new Response(JSON.stringify({ error: { message: "missing credentials" } }), { status: 401, headers: { "content-type": "application/json", "x-should-retry": "false" } });
-  const keyless = await text(unitContext(unauthorized, { apiKey: "" })).then(() => null, (error) => error);
+  const keyless = await speak(unitContext(unauthorized, { apiKey: "" })).then(() => null, (error) => error);
   assert.match(keyless.message, /requires an API key and none is configured\. Set CUSTOM_API_KEY in \.env/);
   assert.doesNotMatch(keyless.message, /rejected/);
-  const keyed = await text(unitContext(unauthorized)).then(() => null, (error) => error);
+  const keyed = await speak(unitContext(unauthorized)).then(() => null, (error) => error);
   assert.match(keyed.message, /The provider rejected CUSTOM_API_KEY/);
 });
 

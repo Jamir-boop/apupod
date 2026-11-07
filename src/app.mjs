@@ -1,32 +1,53 @@
 import {
   mkdir,
+  readFile,
   rename,
 } from "node:fs/promises";
 import { createServer } from "node:http";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEnv } from "node:util";
 import { DEFAULT_DATA } from "./defaults.mjs";
-import { createChatGptClient, ChatGptError } from "./chatgpt.mjs";
 import { badRequest, conflict, assertSafeId, readJsonBody, assertLocalRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
-import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog, chatGptRecovery, chatGptStatus, chatGptCatalogAccount, refreshChatGptAccount, availableModelIds } from "./providers/catalog.mjs";
+import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog, availableModelIds } from "./providers/catalog.mjs";
 import { fetchElevenLabsVoices, fetchChatterboxVoices } from "./providers/generate.mjs";
 import { serializeMutation, listPlans, listEpisodes, readJson, writeJsonAtomic, exists, nextUpdatedAt } from "./store.mjs";
 import { defaultConfig, readConfig, activateReferencedModels, redactConfig, saveConfigRequest } from "./config.mjs";
 import { deleteEpisodeRequest, deleteSpeakerProfileRequest, saveEpisodeRequest, getEpisodeResponse, renameEpisodeRequest, applyLatestProfilesRequest, resolveTranscriptPromptRequest, saveTranscriptRequest, validateProfileData, assertProfileRevisionsCurrent, applyProfileRevisions, mergeSavedProfileSelections, modelReferenceWarnings, assertProfilesCompatibleWithEpisodes } from "./episodes.mjs";
-import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanResponse, updatePlanRequest, deletePlannedEpisodeRequest, deletePlanRequest, generatePlanRequest, createPlanEpisodesRequest } from "./plans.mjs";
-import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTranscriptJob, enqueueTtsJob, ensureFfmpeg, previewVoice } from "./jobs.mjs";
-import { cleanupLegacyAssistantChats, listChatThreadsResponse, getChatThread, sendPlannerChatMessage, applyPlannerChatProposal, deleteChatThread } from "./chat.mjs";
-export { validateProfileData, transcriptSpeakerRule, validateOutline, validateTranscriptJson, transcriptToMarkdown, parseTranscript } from "./episodes.mjs";
+import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanResponse, updatePlanRequest, deletePlannedEpisodeRequest, deletePlanRequest, createPlanEpisodesRequest } from "./plans.mjs";
+import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTtsJob, ensureFfmpeg, previewVoice } from "./jobs.mjs";
+export { validateProfileData, transcriptSpeakerRule, parseTranscript } from "./episodes.mjs";
 export { clipCacheKey, writeAudioAsWav, runProcess } from "./jobs.mjs";
-export { sanitizeProposalEpisode } from "./chat.mjs";
 
 const HERE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+// Data and config never depend on cwd: harness plugins start apupod from any folder.
+export function resolveDirs(env = process.env) {
+  const home = homedir();
+  return {
+    dataDir: env.APUPOD_DATA_DIR || join(env.XDG_DATA_HOME || join(home, ".local", "share"), "apupod"),
+    configDir: env.APUPOD_CONFIG_DIR || join(env.XDG_CONFIG_HOME || join(home, ".config"), "apupod"),
+  };
+}
+
+// Keys saved in the config-dir .env; a variable already in the process environment wins.
+export async function loadEnvFile(path) {
+  let text;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  for (const [name, value] of Object.entries(parseEnv(text))) if (!Object.hasOwn(process.env, name)) process.env[name] = value;
+}
+
 async function createAppContext(options = {}) {
-  const rootDir = options.rootDir || HERE;
   const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const paths = makePaths(rootDir);
+  const paths = makePaths(options);
   await ensureData(paths);
+  await loadEnvFile(paths.env);
   const config = await readConfig(paths);
   if (activateReferencedModels(config, await readJson(paths.profiles))) await writeJsonAtomic(paths.config, config);
   const context = {
@@ -43,17 +64,11 @@ async function createAppContext(options = {}) {
     recentJobs: new Map(),
     mutationTail: Promise.resolve(),
     ffmpegCheck: null,
-    chatBusy: new Map(),
   };
   await cleanupInterruptedEpisodeDeletes(paths);
   await interruptStaleJobs(paths);
   for (const episode of (await listEpisodes(paths)).toReversed()) if (episode.job) rememberJob(context, episode.job);
   await cleanupStoredArtifacts(context);
-  await cleanupLegacyAssistantChats(paths);
-  context.chatgptClient = options.chatgptClient || await createChatGptClient({ fetchImpl,
-    ...(options.chatgptStorageDir || resolve(rootDir) !== HERE ? { storageDir: options.chatgptStorageDir || join(rootDir, ".chatgpt-auth") } : {}),
-  });
-  context.chatgptCatalogAccount = chatGptCatalogAccount(context);
   void queueModelCatalogRefresh(context).promise;
 
   return context;
@@ -67,20 +82,9 @@ export async function createPodcastServer(options = {}) {
         res.end();
         return;
       }
-      if (error instanceof ChatGptError) {
-        const diagnostics = Object.fromEntries(["requestId", "param", "bodyShape"].filter((key) => typeof error[key] === "string" && error[key].length <= 160 && /^[A-Za-z0-9_.:/\[\]-]+$/.test(error[key])).map((key) => [key, error[key]]));
-        return sendJson(res, error.status || 502, { error: chatGptRecovery(error.code, diagnostics.param), code: error.code, ...diagnostics });
-      }
       sendJson(res, error.statusCode || 500, { error: error.message || String(error) });
     });
   });
-  const close = server.close.bind(server);
-  let closing;
-  server.close = (callback) => {
-    closing ||= Promise.resolve(context.chatgptClient.close());
-    void closing.then(() => close(callback), () => close(callback));
-    return server;
-  };
   return server;
 }
 
@@ -98,22 +102,24 @@ async function serializeWithLatestModelCatalog(context, action) {
   }
 }
 
-function makePaths(rootDir) {
-  const data = join(rootDir, "data");
+// Tests pass dataDir and configDir, or a rootDir that holds data/, config.json, .env and public/.
+function makePaths({ rootDir, dataDir, configDir }) {
+  const defaults = rootDir ? { dataDir: join(rootDir, "data"), configDir: rootDir } : resolveDirs();
+  const data = dataDir || defaults.dataDir;
+  const config = configDir || defaults.configDir;
+  const app = rootDir || HERE;
   return {
-    root: rootDir,
     data,
     profiles: join(data, "profiles.json"),
-    config: join(data, "config.json"),
+    config: join(config, "config.json"),
     knowledge: join(data, "knowledge"),
     knowledgeIndex: join(data, "knowledge", "index.json"),
     plans: join(data, "plans"),
     plansIndex: join(data, "plans", "index.json"),
     episodes: join(data, "episodes"),
-    chat: join(data, "chat"),
-    publicIndex: join(rootDir, "public", "index.html"),
-    publicIcon: join(rootDir, "public", "icon.png"),
-    env: join(rootDir, ".env"),
+    publicIndex: join(app, "public", "index.html"),
+    publicIcon: join(app, "public", "icon.png"),
+    env: join(config, ".env"),
   };
 }
 
@@ -131,7 +137,7 @@ async function quarantineCorruptJson(path, isUsable = () => true) {
 }
 
 async function ensureData(paths) {
-  await Promise.all([mkdir(paths.knowledge, { recursive: true }), mkdir(paths.plans, { recursive: true }), mkdir(paths.episodes, { recursive: true }), mkdir(paths.chat, { recursive: true })]);
+  await Promise.all([mkdir(paths.knowledge, { recursive: true }), mkdir(paths.plans, { recursive: true }), mkdir(paths.episodes, { recursive: true }), mkdir(dirname(paths.config), { recursive: true, mode: 0o700 })]);
   await Promise.all([
     quarantineCorruptJson(paths.profiles, (value) => Array.isArray(value?.speakerProfiles) && Array.isArray(value?.episodeProfiles)),
     quarantineCorruptJson(paths.config),
@@ -179,11 +185,11 @@ async function routeRequest(req, res, context) {
       listPlans(context.paths),
       listEpisodes(context.paths),
     ]);
-    return sendJson(res, 200, { profiles, knowledgeBases, plans, episodes, config: await redactConfig(context.config) });
+    return sendJson(res, 200, { profiles, knowledgeBases, plans, episodes, config: redactConfig(context.config) });
   }
 
   if (method === "GET" && path === "/api/config") {
-    return sendJson(res, 200, await redactConfig(context.config));
+    return sendJson(res, 200, redactConfig(context.config));
   }
 
   if (method === "PUT" && path === "/api/config") {
@@ -197,27 +203,6 @@ async function routeRequest(req, res, context) {
 
   if (method === "GET" && path === "/api/models") {
     return sendJson(res, 200, context.modelCatalog);
-  }
-
-  if (path === "/api/chatgpt/status" && method === "GET") {
-    const refresh = refreshChatGptAccount(context);
-    return sendJson(res, 200, { ...chatGptStatus(context), ...(refresh ? { modelCatalog: await refresh.promise } : {}) });
-  }
-  const chatGptAction = path.match(/^\/api\/chatgpt\/(signin|select|signout|cancel)$/);
-  if (chatGptAction && method === "POST") {
-    const body = await readJsonBody(req);
-    const action = chatGptAction[1];
-    const accountId = String(body.accountId || "").trim();
-    let result;
-    if (action === "signin") {
-      result = await context.chatgptClient.signIn(accountId || undefined);
-      const url = new URL(result.authorizeUrl);
-      if (url.origin !== "https://auth.openai.com" || url.pathname !== "/api/accounts/authorize" || url.username || url.password || url.hash) throw badRequest("ChatGPT returned an invalid sign-in URL.");
-    } else if (action === "select") await context.chatgptClient.select(accountId);
-    else if (action === "signout") result = await context.chatgptClient.signOut(accountId || undefined);
-    else context.chatgptClient.cancel();
-    const refresh = refreshChatGptAccount(context, action === "select" || action === "signout");
-    return sendJson(res, 200, { ...chatGptStatus(context), ...(action === "signin" ? { authorizeUrl: result.authorizeUrl } : {}), ...(result?.warning ? { warning: result.warning } : {}), ...(refresh ? { modelCatalog: await refresh.promise } : {}) });
   }
 
   if (method === "POST" && path === "/api/models/refresh") {
@@ -269,15 +254,7 @@ async function routeRequest(req, res, context) {
   }
 
   if (method === "POST" && path === "/api/plans") {
-    return serializeWithLatestModelCatalog(context, () => createPlanRequest(req, res, context));
-  }
-
-  if (method === "POST" && path === "/api/plans/chat") {
-    return sendPlannerChatMessage(req, res, context);
-  }
-
-  if (method === "POST" && path === "/api/plans/chat/apply") {
-    return serializeMutation(context, () => applyPlannerChatProposal(req, res, context));
+    return serializeMutation(context, () => createPlanRequest(req, res, context));
   }
 
   if (method === "POST" && path === "/api/preview") {
@@ -291,18 +268,6 @@ async function routeRequest(req, res, context) {
 
   if (method === "GET" && path === "/api/tts/chatterbox/voices") {
     return listChatterboxVoices(res, context);
-  }
-
-  if (method === "GET" && path === "/api/chats") {
-    return listChatThreadsResponse(req, res, context);
-  }
-
-  if (method === "GET" && path === "/api/chat") {
-    return getChatThread(req, res, context);
-  }
-
-  if (method === "DELETE" && path === "/api/chat") {
-    return serializeMutation(context, () => deleteChatThread(req, res, context));
   }
 
   if (method === "POST" && path === "/api/transcript-prompt/resolve") {
@@ -324,18 +289,17 @@ async function routeRequest(req, res, context) {
     return serializeMutation(context, () => deletePlannedEpisodeRequest(res, context.paths, planId, plannedEpisodeId));
   }
 
-  const planMatch = path.match(/^\/api\/plans\/([a-zA-Z0-9_-]+)(?:\/(generate|create-episodes))?$/);
+  const planMatch = path.match(/^\/api\/plans\/([a-zA-Z0-9_-]+)(?:\/(create-episodes))?$/);
   if (planMatch) {
     const [, id, action] = planMatch;
     assertSafeId(id);
     if (method === "GET" && !action) return getPlanResponse(res, context.paths, id);
     if (method === "PUT" && !action) return serializeMutation(context, () => updatePlanRequest(req, res, context, id));
     if (method === "DELETE" && !action) return serializeMutation(context, () => deletePlanRequest(res, context, id));
-    if (method === "POST" && action === "generate") return generatePlanRequest(req, res, context, id);
     if (method === "POST" && action === "create-episodes") return serializeMutation(context, () => createPlanEpisodesRequest(req, res, context, id));
   }
 
-  const episodeMatch = path.match(/^\/api\/episodes\/([a-zA-Z0-9_-]+)(?:\/(generate|transcript|render|profiles))?$/);
+  const episodeMatch = path.match(/^\/api\/episodes\/([a-zA-Z0-9_-]+)(?:\/(transcript|render|profiles))?$/);
   if (episodeMatch) {
     const [, id, action] = episodeMatch;
     assertSafeId(id);
@@ -344,7 +308,6 @@ async function routeRequest(req, res, context) {
     if (method === "PATCH" && !action) return serializeMutation(context, () => renameEpisodeRequest(req, res, context.paths, id));
     if (method === "PUT" && action === "transcript") return serializeWithLatestModelCatalog(context, () => saveTranscriptRequest(req, res, context, id));
     if (method === "PUT" && action === "profiles") return serializeMutation(context, () => applyLatestProfilesRequest(res, context.paths, id));
-    if (method === "POST" && action === "generate") return serializeWithLatestModelCatalog(context, () => enqueueTranscriptJob(req, res, context, id));
     if (method === "POST" && action === "render") {
       await ensureFfmpeg(context);
       return serializeWithLatestModelCatalog(context, () => enqueueTtsJob(req, res, context, id));

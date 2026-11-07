@@ -7,12 +7,12 @@ import {
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { badRequest, conflict, notFound, oneLine, normalizeDelivery, validateId, requireText, validateNumber, validateOptionalNumber, validateOptionalInteger, assertSafeId, readJsonBody, sendJson } from "./util.mjs";
-import { TTS_MODELS, TEXT_MODELS, LANGUAGE_OPTIONS, normalizeEffort, resolveLanguage } from "./providers/catalog.mjs";
-import { CHATTERBOX_DEFAULTS, ELEVENLABS_DEFAULTS, MIMO_INSTRUCTION_PRESETS, CHATTERBOX_TAGS, TTS_CUE_RE, ELEVEN_BREAK_RE, ELEVEN_BREAK_ANY_RE, TTS_DOCS, speakerAccent, ttsCueCapability, callTextModel, chatterboxSettings, mimoTtsSettings, assertElevenLabsMarkup, elevenLabsSettings, parseChatJson } from "./providers/generate.mjs";
+import { TTS_MODELS, LANGUAGE_OPTIONS, resolveLanguage } from "./providers/catalog.mjs";
+import { CHATTERBOX_DEFAULTS, ELEVENLABS_DEFAULTS, MIMO_INSTRUCTION_PRESETS, CHATTERBOX_TAGS, TTS_CUE_RE, ELEVEN_BREAK_RE, ELEVEN_BREAK_ANY_RE, TTS_DOCS, ttsCueCapability, chatterboxSettings, mimoTtsSettings, assertElevenLabsMarkup, elevenLabsSettings } from "./providers/generate.mjs";
 import { isActiveJob, planPath, planIndexItem, listPlans, loadPlan, savePlan, nextUpdatedAt, profileRevision, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, writeTextAtomic, exists } from "./store.mjs";
 import { collectModelReferences } from "./config.mjs";
 
-const TRANSCRIPT_TARGET_WORDS_PER_MINUTE = 140;
+export const TRANSCRIPT_TARGET_WORDS_PER_MINUTE = 140;
 export const TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE = 125;
 
 export async function deleteEpisodeRequest(res, context, id) {
@@ -377,92 +377,8 @@ export async function saveTranscriptRequest(req, res, context, id) {
   sendJson(res, 200, { ...updated, transcript: transcript.trim() + "\n", warning: parsed.warning });
 }
 
-export async function generateOutline(context, knowledge, episode, profile, speakers, language) {
-  const schema = `{"segments":[{"number":1,"title":"string","purpose":"string","points":["string"],"closingBeat":"string"}]}`;
-  const source = knowledge
-    ? `KNOWLEDGE BASE START\n${knowledge}\nKNOWLEDGE BASE END`
-    : "No knowledge base was supplied. Use broadly established model knowledge, avoid unsupported precision, and never invent quotations.";
-  const prompt = `${generationContext(episode, profile, speakers, language)}
-
-Create exactly ${profile.numSegments} segments for a ${profile.targetMinutes}-minute podcast in ${language.name}. Return JSON only using this shape: ${schema}
-
-${source}`;
-  const data = await callTextModel({
-    context,
-    model: profile.outlineModel,
-    effort: profile.outlineEffort,
-    system: `You create grounded podcast outlines in ${language.name}. Return JSON only. Never invent quotations. ${knowledge ? "Use only the supplied knowledge base for factual claims." : "Use reliable general knowledge and avoid unsupported precision."}`,
-    prompt,
-    maxTokens: 4_000,
-    temperature: 0.8,
-    topP: 0.95,
-  });
-  const value = parseChatJson(data, "outline");
-  validateOutline(value, profile.numSegments);
-  return value;
-}
-
-export async function generateTranscript(context, knowledge, outline, episode, profile, speakerProfile, language) {
-  const speakerNames = speakerProfile.speakers.map((speaker) => speaker.name);
-  const formatRule = transcriptSpeakerRule(speakerNames);
-  const schema = `{"title":"string","segments":[{"number":1,"title":"string","turns":[{"speaker":"${speakerNames.join("|")}","delivery":"short acting direction","text":"spoken ${language.name} text"}]}]}`;
-  const targetWords = Math.round(profile.targetMinutes * TRANSCRIPT_TARGET_WORDS_PER_MINUTE);
-  const minimumWords = Math.round(profile.targetMinutes * TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE);
-  const promptState = transcriptPromptState(context, speakerProfile, profile, language, episode.transcriptPromptGuidance);
-  const source = knowledge
-    ? `KNOWLEDGE BASE START\n${knowledge}\nKNOWLEDGE BASE END`
-    : "No knowledge base was supplied. Use broadly established model knowledge, avoid unsupported precision, and never invent quotations.";
-  const prompt = `${generationContext(episode, profile, speakerProfile, language)}
-
-Approved outline:
-${JSON.stringify(outline)}
-
-Write a natural transcript in ${language.name} of about ${targetWords} words and never fewer than ${minimumWords} spoken words. Return JSON only using this shape: ${schema}
-Use exactly ${profile.numSegments} segments. Every turn must use one configured speaker name. ${formatRule} Keep each turn concise enough for spoken dialogue. End with exactly three practical lessons. Paraphrase source. Never invent or reproduce long quotations.
-
-${promptState.effectivePrompt}
-
-${source}`;
-  const data = await callTextModel({
-    context,
-    model: profile.transcriptModel,
-    effort: profile.transcriptEffort,
-    system: `You write grounded, emotionally intelligent podcast dialogue in natural ${language.name}. Return JSON only.`,
-    prompt,
-    maxTokens: 16_000,
-    temperature: 0.9,
-    topP: 0.95,
-  });
-  const value = parseChatJson(data, "transcript");
-  validateTranscriptJson(value, profile.numSegments, speakerNames);
-  return value;
-}
-
-function generationContext(episode, episodeProfile, speakerProfile, language) {
-  const speakerText = speakerProfile.speakers.map((speaker) =>
-    `${speaker.name}\nBackstory: ${speaker.backstory}\nPersonality: ${speaker.personality}\nAccent: ${speakerAccent(speaker, language) || "language default"}`
-  ).join("\n\n");
-  return `Language: ${language.name} (${language.id}). Episode: ${episode.name}
-Target duration: ${episodeProfile.targetMinutes} minutes.
-
-Episode Format:
-${episodeProfile.description}
-
-Additional episode instructions:
-${episode.additionalInstructions || "None."}
-
-Speaker profile rules:
-${speakerProfile.instructions}
-
-Speakers:
-${speakerText}
-
-NON-NEGOTIABLE LANGUAGE OVERRIDE:
-Write every title, heading, narration, and spoken turn in ${language.name}. Ignore any conflicting language instruction in the knowledge base, briefing, speaker profile, or additional instructions. Keep each speaker's vocabulary and register natural for the requested accent without caricature.`;
-}
-
 export function validateProfileData(value, models = {
-  ttsModels: new Set(TTS_MODELS), textModels: new Set(TEXT_MODELS), languages: new Set(LANGUAGE_OPTIONS.map((language) => language.id)),
+  ttsModels: new Set(TTS_MODELS), languages: new Set(LANGUAGE_OPTIONS.map((language) => language.id)),
 }, { allowIncomplete = false } = {}) {
   if (!value || !Array.isArray(value.speakerProfiles) || !Array.isArray(value.episodeProfiles)) {
     throw badRequest("Profile data is invalid.");
@@ -520,12 +436,8 @@ export function validateProfileData(value, models = {
     if ((!allowIncomplete || profile.speakerProfileId) && !ids.has(profile.speakerProfileId)) throw badRequest(`Speaker profile "${profile.speakerProfileId}" does not exist.`);
     if ((!allowIncomplete || profile.targetMinutes != null && profile.targetMinutes !== "") && (!Number.isInteger(profile.targetMinutes) || profile.targetMinutes < 5 || profile.targetMinutes > 60)) throw badRequest("Target duration must be an integer from 5 to 60 minutes.");
     if (profile.targetMinutes != null && profile.targetMinutes !== "") profile.numSegments = derivedNumSegments(profile.targetMinutes);
-    delete profile.defaultBriefing;
-    if ((!allowIncomplete || profile.outlineModel) && !models.textModels.has(profile.outlineModel)) throw badRequest(`Unsupported outline model "${profile.outlineModel}".`);
-    if ((!allowIncomplete || profile.transcriptModel) && !models.textModels.has(profile.transcriptModel)) throw badRequest(`Unsupported transcript model "${profile.transcriptModel}".`);
-    // ponytail: lenient — model-specific validity enforced at call time by effortLevelsForModel
-    profile.outlineEffort = normalizeEffort(profile.outlineEffort);
-    profile.transcriptEffort = normalizeEffort(profile.transcriptEffort);
+    // apupod makes no text-model calls, so a format has no model or effort fields.
+    for (const key of ["defaultBriefing", "outlineModel", "transcriptModel", "outlineEffort", "transcriptEffort"]) delete profile[key];
     if ((!allowIncomplete || profile.language) && !models.languages.has(profile.language)) throw badRequest(`Unsupported language "${profile.language}".`);
   }
   return true;
@@ -568,8 +480,6 @@ export function mergeSavedProfileSelections(models, profiles) {
     }
   }
   for (const profile of profiles.episodeProfiles || []) {
-    if (profile.outlineModel) models.textModels.add(profile.outlineModel);
-    if (profile.transcriptModel) models.textModels.add(profile.transcriptModel);
     if (profile.language) models.languages.add(profile.language);
   }
 }
@@ -580,12 +490,11 @@ export function modelReferenceWarnings(profiles, strictModels) {
   const seen = new Set();
   const warnings = [];
   for (const reference of references) {
-    const available = reference.type === "text" ? strictModels.textModels : strictModels.ttsModels;
-    if (available.has(reference.modelId)) continue;
-    const key = `${reference.owner}:${reference.type}:${reference.modelId}`;
+    if (strictModels.ttsModels.has(reference.modelId)) continue;
+    const key = `${reference.owner}:${reference.modelId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    warnings.push(`${reference.owner} uses unavailable saved ${reference.type === "text" ? "text" : "TTS"} model "${reference.modelId}". Restore or refresh the provider before generation, preview, or rendering.`);
+    warnings.push(`${reference.owner} uses unavailable saved TTS model "${reference.modelId}". Restore or refresh the provider before preview or rendering.`);
   }
   return warnings;
 }
@@ -617,45 +526,6 @@ export function transcriptSpeakerRule(speakerNames) {
   return speakerNames.length === 1
     ? `This is a solo podcast. Use only ${speakerNames[0]} and never invent a cohost.`
     : `${speakerNames[0]} is the lead host and handles transitions. Use every configured speaker naturally without forcing equal turn counts.`;
-}
-
-export function validateOutline(value, numSegments) {
-  if (!value || !Array.isArray(value.segments) || value.segments.length !== numSegments) throw new Error(`Outline must contain exactly ${numSegments} segments.`);
-  value.segments.forEach((segment, index) => {
-    if (segment.number !== index + 1 || typeof segment.title !== "string" || !segment.title.trim()) throw new Error(`Outline segment ${index + 1} is invalid.`);
-    if (!Array.isArray(segment.points) || segment.points.length === 0) throw new Error(`Outline segment ${index + 1} needs points.`);
-  });
-  return true;
-}
-
-export function validateTranscriptJson(value, numSegments, speakerNames) {
-  if (!value || typeof value.title !== "string" || !value.title.trim()) throw new Error("Transcript title is required.");
-  if (!Array.isArray(value.segments) || value.segments.length === 0) throw new Error("Transcript must contain at least 1 segment.");
-  if (value.segments.length > numSegments) throw new Error(`Transcript may contain at most ${numSegments} segments.`);
-  const allowed = new Set(speakerNames);
-  value.segments.forEach((segment, index) => {
-    if (segment.number !== index + 1 || typeof segment.title !== "string" || !segment.title.trim()) throw new Error(`Transcript segment ${index + 1} is invalid.`);
-    if (!Array.isArray(segment.turns) || segment.turns.length === 0) throw new Error(`Transcript segment ${index + 1} needs turns.`);
-    segment.turns.forEach((turn) => {
-      if (!allowed.has(turn.speaker)) throw new Error(`Unknown transcript speaker "${turn.speaker}".`);
-      if (typeof turn.text !== "string" || !turn.text.trim()) throw new Error(`Transcript turn for ${turn.speaker} is empty.`);
-      if (turn.delivery != null && typeof turn.delivery !== "string") throw new Error(`Transcript delivery for ${turn.speaker} must be text.`);
-    });
-  });
-  return true;
-}
-
-export function transcriptToMarkdown(value) {
-  const lines = [`# ${oneLine(value.title)}`, ""];
-  for (const segment of value.segments) {
-    lines.push(`## Segmento ${segment.number} — ${oneLine(segment.title)}`, "");
-    for (const turn of segment.turns) {
-      const delivery = normalizeDelivery(turn.delivery || "");
-      lines.push(`${turn.speaker}${delivery ? ` [${delivery}]` : ""}: ${oneLine(turn.text)}`);
-    }
-    lines.push("");
-  }
-  return lines.join("\n").trim() + "\n";
 }
 
 export function parseTranscript(markdown, speakers, expectedSegments) {

@@ -122,18 +122,18 @@ test("four speakers get independent models, provider-filtered voices, and named 
 });
 
 test("language decisions are visible before model candidate filtering", async () => {
-  const mock = mockFetch({ language: "es-419", outlineModel: "spanish-model", transcriptModel: "spanish-model" });
+  const mock = mockFetch({ language: "es-419", hostModel: "spanish-model", guestModel: "spanish-model" });
   const result = await decideAssistantConfiguration({ ...defaults, ...mock, candidates: ({ phase, questionId, decisions }) => {
-    if (phase === "fields") return [{ id: "transcriptModel" }, { id: "outlineModel" }, { id: "language" }];
+    if (phase === "fields") return [{ id: "guestModel" }, { id: "hostModel" }, { id: "language" }];
     if (questionId === "language") return ["es-419"];
-    if (["outlineModel", "transcriptModel"].includes(questionId)) {
+    if (["hostModel", "guestModel"].includes(questionId)) {
       assert.equal(decisions.language, "es-419");
       return ["spanish-model"];
     }
   } });
   assert.equal(result.status, "ready");
   assert.equal(mock.requests.length, 5);
-  assert.deepEqual(Object.keys(mock.requests[4].request.questions), ["transcriptModel", "outlineModel"]);
+  assert.deepEqual(Object.keys(mock.requests[4].request.questions), ["guestModel", "hostModel"]);
 });
 
 test("keep_current preserves unavailable IDs without offering them as new options", async () => {

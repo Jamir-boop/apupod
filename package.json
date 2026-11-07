@@ -1,18 +1,17 @@
 {
-  "name": "pod-god",
-  "version": "0.28.0",
+  "name": "apupod",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "dev": "node --env-file-if-exists=.env server.mjs",
-    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
     "test": "node --test --test-force-exit test/*.test.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.135.0",
     "openai": "7.34.0"
   }
 }

@@ -1741,9 +1741,8 @@
       const request = ++uiRequests.state;
       const episodeRequest = uiRequests.episode;
       let nextState;
-      let connection;
       try {
-        [nextState, connection] = await Promise.all([api("/api/state"), api("/api/chatgpt/status")]);
+        nextState = await api("/api/state");
         if (request !== uiRequests.state) return;
         $("retryState").hidden = true;
       } catch (error) {
@@ -1759,8 +1758,6 @@
       state = nextState;
       if (pendingProfiles) state.profiles = pendingProfiles;
       configState = configDirty ? pendingConfig : structuredClone(state.config || { providers: { mimo: {}, elevenlabs: {}, openai: {}, chatterbox: {} }, compatibleConnections: [] });
-      chatGptConnection = connection;
-      if (chatGptConnection.modelCatalog) modelCatalog = chatGptConnection.modelCatalog;
       renderProfileOptions();
       renderBuildOptions();
       renderFormatView();
@@ -1780,10 +1777,6 @@
       }
       if (request !== uiRequests.state) return;
       renderJobIndicators();
-      if (chatGptConnection.pending && !chatGptPollTimer) {
-        chatGptPollCount = 0;
-        chatGptPollTimer = setTimeout(() => refreshChatGptStatus().catch((error) => notify(error.message, "error")), 2_000);
-      }
     }
 
     function renderProfileOptions() {
@@ -1976,10 +1969,7 @@
       const openConnections = new Set([...document.querySelectorAll("#configProviders .connection-row[open]")].map((row) => row.dataset.providerId ? `provider:${row.dataset.providerId}` : `compatible:${row.dataset.compatibleId}`));
       const p = configState.providers;
       $("configProviders").innerHTML = [
-        providerCard("chatgpt", "ChatGPT plan", ["text"], chatGptFields(), openConnections),
         providerCard("openai", "OpenAI", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.openai.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.openai.apiKey || "")}" placeholder="${p.openai.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.openai.baseUrl || "https://api.openai.com/v1")}"></label><label>Text generation URL override<input data-field="llmBaseUrl" value="${escapeHtml(p.openai.llmBaseUrl || "")}" placeholder="Optional"></label><label>Speech URL override<input data-field="ttsBaseUrl" value="${escapeHtml(p.openai.ttsBaseUrl || "")}" placeholder="Optional"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.openai.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
-        providerCard("anthropic", "Anthropic", ["text"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.anthropic.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.anthropic.apiKey || "")}" placeholder="${p.anthropic.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input readonly value="https://api.anthropic.com"></label><label>Documentation<a href="https://platform.claude.com/docs/en/api/messages" target="_blank" rel="noopener noreferrer">Anthropic Messages API</a></label><p class="muted full">Claude models for text only. If a model declines, the server can continue on another Claude model (fallback), billed at that model's rate. A mid-stream refusal, or a refusal in a billed category, is billed too. If no model answers, the request stops with a clear error.</p>`, openConnections),
-        providerCard("opencodeGo", "OpenCode Go", ["text"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.opencodeGo.enabled !== false ? " checked" : ""}></label><label>Credential source<input readonly value="${escapeHtml(p.opencodeGo.credentialSource === "environment" ? "OPENCODE_GO_API_KEY" : p.opencodeGo.credentialSource === "opencode-login" ? "OpenCode login" : "Not found")}"></label><label>Base URL<input readonly value="https://opencode.ai/zen/go/v1"></label><label>Documentation<a href="https://opencode.ai/docs/go/" target="_blank" rel="noreferrer">OpenCode Go API</a></label>`, openConnections),
         providerCard("elevenlabs", "ElevenLabs", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.elevenlabs.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.elevenlabs.apiKey || "")}" placeholder="${p.elevenlabs.hasApiKey ? "Key saved on server" : "Paste key"}"></label>`, openConnections),
         providerCard("chatterbox", "Chatterbox", ["tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.chatterbox.enabled === true ? " checked" : ""}></label><label>API key, optional<input data-field="apiKey" type="password" value="${escapeHtml(p.chatterbox.apiKey || "")}" placeholder="${p.chatterbox.hasApiKey ? "Key saved on server" : "Optional"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.chatterbox.baseUrl || "")}" placeholder="http://127.0.0.1:8000/v1"></label><label>Models URL override<input data-field="modelsUrl" value="${escapeHtml(p.chatterbox.modelsUrl || "")}" placeholder="Optional"></label>`, openConnections),
         providerCard("mimo", "MiMo", ["text", "tts"], `<label>Enabled<input data-field="enabled" type="checkbox"${p.mimo.enabled !== false ? " checked" : ""}></label><label>API key<input data-field="apiKey" type="password" value="${escapeHtml(p.mimo.apiKey || "")}" placeholder="${p.mimo.hasApiKey ? "Key saved on server" : "Paste key"}"></label><label>Base URL<input data-field="baseUrl" value="${escapeHtml(p.mimo.baseUrl || "")}"></label>`, openConnections),
@@ -4077,29 +4067,12 @@
       $("plannerChatMessages").scrollTop = $("plannerChatMessages").scrollHeight;
     }
 
-    async function loadPlannerChatThread(keepControls = false) {
-      const request = ++uiRequests.chat;
-      const planId = activePlanId;
-      const threadId = plannerChatThreadId;
-      const displayedThreadId = plannerChatThread?.threadId || "";
-      const currentRequest = () => request === uiRequests.chat && planId === activePlanId && threadId === plannerChatThreadId;
+    // The server no longer stores chats (apupod makes no LLM calls); the UI rework removes the chat pane.
+    async function loadPlannerChatThread() {
+      ++uiRequests.chat;
       setChatHistoryOpen(false);
-      if (!planId) { plannerChatThreads = []; plannerChatThreadId = ""; plannerChatThread = null; renderPlannerChatHistory(); renderPlannerChatMessages(); return; }
-      if (plannerChatThread?.threadId !== threadId) { plannerChatThread = null; renderPlannerChatMessages(); }
-      let listed, thread;
-      let selectedId;
-      try {
-        listed = await api(`/api/chats?kind=planner&planId=${encodeURIComponent(planId)}`);
-        if (!currentRequest()) return;
-        selectedId = (listed.chats || []).some((item) => item.threadId === threadId) ? threadId : "";
-        thread = selectedId ? await api(`/api/chat?threadId=${encodeURIComponent(selectedId)}`) : null;
-      } catch (error) { if (!currentRequest()) return; throw error; }
-      if (!currentRequest()) return;
-      plannerChatThreads = listed.chats || [];
-      plannerChatThreadId = selectedId;
-      plannerChatThread = thread;
-      renderChatControls(thread && selectedId !== displayedThreadId && !keepControls ? { model: thread.lastModel || activePlan?.planningModel || "", effort: activePlan?.planningEffort || "" } : null);
-      renderPlannerChatMessages();
+      plannerChatThreads = []; plannerChatThreadId = ""; plannerChatThread = null;
+      renderPlannerChatHistory(); renderPlannerChatMessages();
     }
 
     async function sendPlannerChat(request = {}) {

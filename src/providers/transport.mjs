@@ -1,15 +1,11 @@
 import OpenAI from "openai";
-import Anthropic from "@anthropic-ai/sdk";
 
 export const MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024;
 export const MAX_AUDIO_RESPONSE_BYTES = 128 * 1024 * 1024;
 export const MAX_TTS_JSON_RESPONSE_BYTES = Math.ceil(MAX_AUDIO_RESPONSE_BYTES * 4 / 3) + 1024 * 1024;
 const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 export const MODEL_TIMEOUT_MS = 15_000;
-export const LLM_TIMEOUT_MS = 240_000;
 export const TTS_TIMEOUT_MS = 120_000;
-export const MAX_STREAM_RESPONSE_BYTES = 32 * 1024 * 1024;
-export const LLM_RETRIES = 2;
 
 export async function fetchJson(fetchImpl, url, headers, label) {
   return fetchJsonWithBody(fetchImpl, url, { headers }, label, MODEL_TIMEOUT_MS);
@@ -47,7 +43,7 @@ export function redactSecrets(text, keys = []) {
   return result.replace(/(Bearer\s+|(?i:(?:x-|xi-)?api-key)["']?\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{12,}/g, "$1[redacted]");
 }
 
-// The SDKs keep only body.error of an error body. This keeps the old detail rule: error.message, then detail.message, then raw text.
+// The SDK keeps only body.error of an error body. This keeps the old detail rule: error.message, then detail.message, then raw text.
 async function errorResponse(response, label, keys) {
   let text;
   try { text = (await readResponseBuffer(response, MAX_ERROR_RESPONSE_BYTES, label)).toString("utf8"); }
@@ -58,7 +54,7 @@ async function errorResponse(response, label, keys) {
   const error = data?.error && typeof data.error === "object" ? data.error : {};
   const headers = new Headers(response.headers);
   headers.delete("content-length");
-  // The Anthropic SDK honors any retry-after, which could outlast the call deadline; keep the OpenAI SDK rule (over 60 s means default backoff).
+  // A retry-after over 60 s means default backoff, as in the OpenAI SDK.
   let waitMs = parseFloat(headers.get("retry-after-ms"));
   const retryAfter = headers.get("retry-after");
   if (Number.isNaN(waitMs) && retryAfter) waitMs = Number.isNaN(parseFloat(retryAfter)) ? Date.parse(retryAfter) - Date.now() : parseFloat(retryAfter) * 1000;
@@ -73,21 +69,16 @@ export function cappedFetch(fetchImpl, maximum, label) {
   };
 }
 
-// The SDKs read OPENAI_CUSTOM_HEADERS and ANTHROPIC_CUSTOM_HEADERS in the constructor and send them to every host, including an Authorization line.
+// The SDK reads OPENAI_CUSTOM_HEADERS in the constructor and sends it to every host, including an Authorization line.
 function withoutEnv(name, create) {
   const saved = process.env[name];
   delete process.env[name];
   try { return create(); } finally { if (saved !== undefined) process.env[name] = saved; }
 }
 
-// An empty baseURL makes the SDKs fall back to api.openai.com or api.anthropic.com, which would send the key to the wrong host.
+// An empty baseURL makes the SDK fall back to api.openai.com, which would send the key to the wrong host.
 function requireBaseURL(baseURL) {
   if (!baseURL) throw new Error("Provider base URL is not configured.");
-}
-
-// An empty apiKey makes the Anthropic SDK fall back to ANTHROPIC_API_KEY or its credential chain and send that to the configured host.
-function requireApiKey(apiKey) {
-  if (!apiKey) throw new Error("Provider API key is not configured.");
 }
 
 // fetch drops only Authorization on a cross-origin redirect, so a client that sends the key in another header must not follow one.
@@ -107,17 +98,10 @@ export function openAiClient({ baseURL, apiKey, headers, fetch, fetchOptions }) 
   }));
 }
 
-export function anthropicClient({ baseURL, apiKey, fetch }) {
-  // Explicit baseURL, apiKey and authToken stop the SDK reading ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and profiles.
-  requireBaseURL(baseURL);
-  requireApiKey(apiKey);
-  return withoutEnv("ANTHROPIC_CUSTOM_HEADERS", () => new Anthropic({ baseURL, apiKey, authToken: null, fetch, fetchOptions: NO_REDIRECT, maxRetries: 0, logLevel: "off" }));
-}
-
 // The SDK timeout covers one attempt (for a stream, only until headers). The signal is the app's total deadline across retries and the body.
 export const callOptions = (timeoutMs, maxRetries = 0) => ({ timeout: timeoutMs, maxRetries, signal: AbortSignal.timeout(timeoutMs) });
 
-// The SDKs parse only application/json. The app has always parsed any 2xx body as JSON.
+// The SDK parses only application/json. The app has always parsed any 2xx body as JSON.
 export async function sdkJson(request, label) {
   const text = await (await request.asResponse()).text();
   let data;
@@ -135,7 +119,7 @@ function causeMessage(error) {
   return deepest !== error && deepest.message !== message ? `${message} (${deepest.message})` : message;
 }
 
-const sdkError = (error, name) => error instanceof OpenAI[name] || error instanceof Anthropic[name];
+const sdkError = (error, name) => error instanceof OpenAI[name];
 
 // apiKey is the key this call sent: it is redacted from every message, and no key means a 401 or 403 asks for one.
 export function providerError(error, label, keyName, timeoutMs, apiKey) {

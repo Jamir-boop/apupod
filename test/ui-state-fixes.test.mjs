@@ -143,7 +143,7 @@ test("refresh captures the live draft after fetch and does not replace newer epi
   const saved = structuredClone(context.currentEpisode);
   context.episodeDraftDirty = true;
   context.$("episodeName").value = "Before refresh";
-  context.api = async (path) => path === "/api/state" ? request.promise : path === "/api/chatgpt/status" ? { accounts: [], pending: null } : saved;
+  context.api = async (path) => path === "/api/state" ? request.promise : saved;
   const refreshing = context.refreshState("a");
   context.$("episodeName").value = "During refresh";
   request.resolve({ ...context.state, config: {} });
@@ -151,7 +151,7 @@ test("refresh captures the live draft after fetch and does not replace newer epi
   assert.equal(context.$("episodeName").value, "During refresh");
   assert.equal(context.episodeDraftDirty, true);
   const later = Promise.withResolvers();
-  context.api = async (path) => path === "/api/state" ? later.promise : { accounts: [], pending: null };
+  context.api = async () => later.promise;
   const nextRefresh = context.refreshState("a");
   context.currentEpisode = { id: "b", name: "B" };
   ++context.uiRequests.episode;
@@ -227,41 +227,6 @@ test("queued episode saves keep their original target and payload after navigati
   assert.equal(context.$("episodeName").value, "B draft");
 });
 
-test("Generate pins the saved episode and auto-TTS choice before waiting", async () => {
-  const context = episodeContext();
-  const request = Promise.withResolvers();
-  context.$("autoGenerateTts").checked = true;
-  context.saveEpisode = () => request.promise;
-  context.trackJob = noop;
-  let submitted;
-  context.api = async (path, options) => { submitted = [path, JSON.parse(options.body)]; return { job: {} }; };
-  install(["generateTranscript"], context);
-  const generating = context.generateTranscript();
-  context.currentEpisode = { id: "b" };
-  context.$("autoGenerateTts").checked = false;
-  request.resolve({ id: "a" });
-  await generating;
-  assert.equal(submitted[0], "/api/episodes/a/generate");
-  assert.equal(submitted[1].autoTts, true);
-});
-
-test("Script effort survives hidden Format sync, including a different active Format", async () => {
-  for (const sameFormat of [true, false]) {
-    const context = episodeContext();
-    context.formatFormId = sameFormat ? "f" : "other";
-    context.state.profiles.episodeProfiles.push({ id: "other", name: "Other" });
-    context.$("fmtTranscriptEffort").value = "medium";
-    context.$("transcriptEffort").value = "high";
-    context.syncFormatForm = () => { context.state.profiles.episodeProfiles.find((item) => item.id === context.formatFormId).transcriptEffort = context.$("fmtTranscriptEffort").value; };
-    let submitted;
-    context.api = async (_, options) => { submitted = JSON.parse(options.body); return { profiles: submitted }; };
-    install(["saveProfiles"], context);
-    await runInNewContext(`(${handler("transcriptEffort", "change")})()`, context);
-    assert.equal(submitted.episodeProfiles.find((item) => item.id === "f").transcriptEffort, "high");
-    if (!sameFormat) assert.equal(submitted.episodeProfiles.find((item) => item.id === "other").transcriptEffort, "medium");
-  }
-});
-
 test("Hosts navigation synchronizes the current profile before loading podcast Hosts", () => {
   const context = episodeContext();
   context.activePlan = { speakerProfileId: "s" };
@@ -326,9 +291,7 @@ test("old voice success and error do not alter new provider requests or catalogs
 
 test("plan save sends the loaded version, retains later edits, and preserves a conflict draft", async () => {
   const context = episodeContext();
-  context.activePlan = { id: "p", name: "Plan", updatedAt: "v1", planningModel: "model", planningEffort: "medium" };
-  context.$("plannerChatModel").value = "model";
-  context.$("plannerChatEffort").value = "medium";
+  context.activePlan = { id: "p", name: "Plan", updatedAt: "v1" };
   context.refreshPlanIndex = async () => {};
   context.loadPlanForm = (plan) => { context.activePlan = plan; };
   const request = Promise.withResolvers();
@@ -338,14 +301,14 @@ test("plan save sends the loaded version, retains later edits, and preserves a c
   const saving = context.saveActivePlan();
   await tick();
   assert.equal(submitted.expectedUpdatedAt, "v1");
-  context.$("plannerChatEffort").value = "high";
-  request.resolve({ plan: { ...context.activePlan, updatedAt: "v2" } });
+  context.activePlan.name = "Later name";
+  request.resolve({ plan: { ...submitted, updatedAt: "v2" } });
   await saving;
-  assert.equal(context.activePlan.planningEffort, "high");
+  assert.equal(context.activePlan.name, "Later name");
   assert.equal(context.activePlan.updatedAt, "v2");
   context.api = async (_, options) => { assert.equal(JSON.parse(options.body).expectedUpdatedAt, "v2"); throw new Error("Content plan changed in another tab. Reload the plan before saving your changes."); };
   await assert.rejects(context.saveActivePlan(), /changed in another tab/);
-  assert.equal(context.activePlan.planningEffort, "high");
+  assert.equal(context.activePlan.name, "Later name");
   assert.equal(context.activePlan.updatedAt, "v2");
 });
 
@@ -379,9 +342,9 @@ test("playlist mutations from two stale tabs preserve additions and do not resto
 });
 
 test("API errors retain the backend recovery message and safe parameter name", async () => {
-  const context = { fetch: async () => ({ ok: false, headers: { get: () => "application/json" }, json: async () => ({ error: "ChatGPT plan rejected parameter reasoning.effort. Select a supported effort before trying again.", param: "reasoning.effort", bodyShape: { reasoning: { effort: "string" } } }) }) };
+  const context = { fetch: async () => ({ ok: false, headers: { get: () => "application/json" }, json: async () => ({ error: "Provider rejected parameter voice_settings.speed. Select a supported speed before trying again.", param: "voice_settings.speed", bodyShape: { voice_settings: { speed: "number" } } }) }) };
   install(["api"], context);
-  await assert.rejects(context.api("/api/plans/chat"), /reasoning\.effort.*Select a supported effort/);
+  await assert.rejects(context.api("/api/preview"), /voice_settings\.speed.*Select a supported speed/);
 });
 
 test("deleting another Hosts profile cannot give a stale profile the server's newer revision", async () => {
@@ -439,13 +402,12 @@ test("a state snapshot from before a successful Hosts save cannot restore the ol
   context.currentEpisode = null;
   context.state.profiles.speakerProfiles[0] = { id: "s", name: "Old name", revision: 1 };
   const oldState = structuredClone({ ...context.state, config: {} });
-  const status = Promise.withResolvers();
+  const snapshot = Promise.withResolvers();
   const input = { value: "Old name" };
   context.syncSpeakerForm = () => { context.state.profiles.speakerProfiles[0].name = input.value; };
   context.renderProfileOptions = () => { input.value = context.state.profiles.speakerProfiles[0].name; };
   context.api = async (path, options) => {
-    if (path === "/api/state") return oldState;
-    if (path === "/api/chatgpt/status") return status.promise;
+    if (path === "/api/state") return snapshot.promise;
     const { expectedUpdatedAt, ...profiles } = JSON.parse(options.body);
     profiles.speakerProfiles[0].revision = 2;
     return { profiles };
@@ -455,157 +417,23 @@ test("a state snapshot from before a successful Hosts save cannot restore the ol
   input.value = "New saved name";
   context.profilesDirty = true;
   await context.saveProfiles();
-  status.resolve({ accounts: [], pending: null });
+  snapshot.resolve(oldState);
   await refreshing;
   assert.equal(input.value, "New saved name");
   assert.equal(context.state.profiles.speakerProfiles[0].revision, 2);
   assert.equal(context.profilesDirty, false);
 });
 
-function chatContext() {
-  const context = episodeContext();
-  Object.assign(context, {
-    activePlanId: "p", activePlan: { id: "p" }, plannerChatThreadId: "a", plannerChatThread: null, plannerChatThreads: [],
-    setChatHistoryOpen: noop, renderPlannerChatHistory: noop, renderPlannerChatMessages: noop,
-    document: { querySelectorAll: () => [] }, refreshPlanIndex: async () => {}, refreshState: async () => {},
-  });
-  install(["loadPlannerChatThread", "applyAssistantProposal"], context);
-  return context;
-}
-
-const proposalThread = (id, name = id) => ({ threadId: id, messages: [{ role: "assistant", content: JSON.stringify({ proposal: { planPatch: { name } } }) }] });
-
-test("chat loads guard the selected thread at both history and message response boundaries", async () => {
-  const context = chatContext();
-  const a = Promise.withResolvers(), b = Promise.withResolvers();
-  context.api = async (path) => path.startsWith("/api/chats?") ? { chats: [{ threadId: "a" }, { threadId: "b" }] } : path.endsWith("=a") ? a.promise : b.promise;
-  const loadingA = context.loadPlannerChatThread();
-  await tick();
-  context.plannerChatThreadId = "b";
-  const loadingB = context.loadPlannerChatThread();
-  await tick();
-  b.resolve(proposalThread("b"));
-  await loadingB;
-  a.resolve(proposalThread("a"));
-  await loadingA;
-  assert.equal(context.plannerChatThreadId, "b");
-  assert.equal(context.plannerChatThread.threadId, "b");
-  const history = Promise.withResolvers();
-  context.api = () => history.promise;
-  const oldPlanLoad = context.loadPlannerChatThread();
-  context.activePlanId = "q";
-  context.activePlan = { id: "q" };
-  history.resolve({ chats: [{ threadId: "old-plan-thread" }] });
-  await oldPlanLoad;
-  assert.equal(context.plannerChatThreadId, "b");
-  assert.equal(context.plannerChatThreads.some((item) => item.threadId === "old-plan-thread"), false);
-});
-
-test("Apply rejects a mismatched rendered thread, changed message, or navigation during pre-save", async () => {
-  const context = chatContext();
-  context.plannerChatThread = proposalThread("a");
-  context.plannerChatThreadId = "b";
-  let calls = 0;
-  context.api = async () => { calls++; };
-  await assert.rejects(context.applyAssistantProposal(0, false), /proposal changed/);
-  context.plannerChatThreadId = "a";
-  const oldContent = context.plannerChatThread.messages[0].content;
-  context.plannerChatThread = proposalThread("a", "New proposal");
-  await assert.rejects(context.applyAssistantProposal(0, false, "a", oldContent), /proposal changed/);
-  const preSave = Promise.withResolvers();
-  context.profilesDirty = true;
-  context.plannerChatThread.messages[0].content = JSON.stringify({ proposal: { speakerProfile: { value: { name: "Hosts" } } } });
-  context.saveProfiles = () => preSave.promise;
-  const applying = context.applyAssistantProposal(0, false);
-  context.plannerChatThreadId = "b";
-  context.plannerChatThread = proposalThread("b");
-  preSave.resolve({});
-  await assert.rejects(applying, /proposal changed/);
-  assert.equal(calls, 0);
-  assert.match(source("renderPlannerChatMessages"), /data-chat-thread=/);
-  assert.match(source("renderPlannerChatMessages"), /data-message-content=/);
-});
-
-test("a reply to an old chat cannot change the current selected thread", async () => {
-  const context = chatContext();
-  const reply = Promise.withResolvers();
-  context.plannerChatBusy = false;
-  context.$("plannerChatInput").value = "Composed request";
-  context.$("plannerChatModel").value = "model";
-  context.capturePlanDraft = () => ({});
-  context.assistantContext = () => ({});
-  context.assistantWorkspaceDraft = () => null;
-  let loads = 0;
-  context.loadPlannerChatThread = async () => { loads++; };
-  context.api = () => reply.promise;
-  install(["sendPlannerChat"], context);
-  const sending = context.sendPlannerChat();
-  context.plannerChatThreadId = "b";
-  context.plannerChatThread = proposalThread("b");
-  reply.resolve({ threadId: "a" });
-  await sending;
-  assert.equal(context.plannerChatThreadId, "b");
-  assert.equal(context.plannerChatThread.threadId, "b");
-  assert.equal(context.$("plannerChatInput").value, "Composed request");
-  assert.equal(loads, 0);
-});
-
-test("new-chat replies survive a history refresh but not explicit chat or plan selection", async () => {
-  for (const change of ["refresh", "new", "thread", "plan"]) {
-    const context = chatContext();
-    const reply = Promise.withResolvers();
-    context.plannerChatThreadId = "";
-    context.plannerChatBusy = false;
-    context.$("plannerChatInput").value = "New chat request";
-    context.$("plannerChatModel").value = "model";
-    context.capturePlanDraft = () => ({});
-    context.assistantContext = () => ({});
-    context.assistantWorkspaceDraft = () => null;
-    let replied = false;
-    context.api = async (path) => {
-      if (path === "/api/plans/chat") return reply.promise;
-      if (path === "/api/plans/q") return { plan: { id: "q" } };
-      if (path.startsWith("/api/chats?")) return { chats: replied ? [{ threadId: "new-thread" }, { threadId: "b" }] : change === "thread" ? [{ threadId: "b" }] : [] };
-      return proposalThread(path.endsWith("=b") ? "b" : "new-thread");
-    };
-    install(["sendPlannerChat", "loadPlan", "loadPlanForm"], context);
-    const sending = context.sendPlannerChat();
-    if (change === "refresh") await context.loadPlannerChatThread();
-    if (change === "new") {
-      const reset = script.match(/\$\("chatHistoryNew"\)\.addEventListener\("click", (\(\) => \{[^]*?\n    })\);/)[1];
-      runInNewContext(`(${reset})()`, context);
-    }
-    if (change === "thread") {
-      context.event = { target: { closest: (selector) => selector === "[data-chat-open]" ? { dataset: { chatOpen: "b" } } : null } };
-      await runInNewContext(`(${handler("chatHistoryList", "click")})(event)`, context);
-    }
-    if (change === "plan") await context.loadPlan("q");
-    replied = true;
-    reply.resolve({ threadId: "new-thread" });
-    await sending;
-    if (change === "refresh") {
-      assert.equal(context.plannerChatThreadId, "new-thread");
-      assert.equal(context.plannerChatThread.threadId, "new-thread");
-      assert.equal(context.$("plannerChatInput").value, "");
-    } else {
-      assert.notEqual(context.plannerChatThreadId, "new-thread");
-      assert.equal(context.$("plannerChatInput").value, "New chat request");
-    }
-  }
-});
-
 test("KB deletion refreshes only its plan version and retains later local plan edits", async () => {
   const context = episodeContext();
   context.activePlanId = "p";
-  context.activePlan = { id: "p", name: "Plan", knowledgeBaseId: "kb", planningModel: "model", planningEffort: "medium", updatedAt: "v1" };
+  context.activePlan = { id: "p", name: "Plan", knowledgeBaseId: "kb", updatedAt: "v1" };
   context.plannerChatThread = null;
-  context.$("plannerChatModel").value = "model";
-  context.$("plannerChatEffort").value = "medium";
   const savedPlan = { ...context.activePlan, knowledgeBaseId: "", updatedAt: "v2" };
   const getPlan = Promise.withResolvers();
   let submitted;
   context.api = async (path, options) => {
-    if (path === "/api/knowledge/kb") return { cleared: { plans: 1, episodes: 0, chats: 0 } };
+    if (path === "/api/knowledge/kb") return { cleared: { plans: 1, episodes: 0 } };
     if (!options) return getPlan.promise;
     submitted = JSON.parse(options.body);
     if (submitted.expectedUpdatedAt !== "v2") throw new Error("Content plan changed");
@@ -618,16 +446,13 @@ test("KB deletion refreshes only its plan version and retains later local plan e
   const deleting = context.deleteKnowledgeBase("kb");
   await tick();
   context.activePlan.name = "Later local name";
-  context.$("plannerChatEffort").value = "high";
   getPlan.resolve({ plan: savedPlan });
   await deleting;
   assert.equal(context.activePlan.updatedAt, "v2");
   assert.equal(context.activePlan.name, "Later local name");
-  assert.equal(context.$("plannerChatEffort").value, "high");
   await context.saveActivePlan();
   assert.equal(submitted.expectedUpdatedAt, "v2");
   assert.equal(submitted.name, "Later local name");
-  assert.equal(submitted.planningEffort, "high");
   context.activePlan = { ...savedPlan, updatedAt: "v1" };
   context.api = async () => ({ plan: { ...savedPlan, name: "Other-tab change" } });
   await context.refreshPlanVersionAfterRepoint({ ...savedPlan, updatedAt: "v1" }, { knowledgeBaseId: "" });
@@ -664,65 +489,6 @@ test("Undo key clear synchronizes Config edits before its rerender", () => {
   assert.equal(input.value, "Later endpoint edit");
   assert.equal(context.configState.providers.openai.clearApiKey, false);
   assert.equal(context.configDirty, true);
-});
-
-test("chat refresh keeps unsent effort, including default, and an explicit plan load resets it", () => {
-  const context = episodeContext();
-  context.activePlanId = "p";
-  context.activePlan = { id: "p", planningModel: "model", planningEffort: "medium" };
-  context.state.plans = [{ id: "p" }];
-  context.plannerChatThread = { lastModel: "older-model" };
-  context.renderPlannerChatHistory = noop;
-  context.updateChatPills = noop;
-  context.textModelOptions = (value) => `<option value="${value}" selected>${value}</option>`;
-  context.effortLevelsForModel = () => ["medium", "high"];
-  install(["effortOptions", "renderChatControls", "loadPlanForm"], context);
-  context.$("plannerChatModel").value = "model";
-  context.$("plannerChatEffort").value = "high";
-  context.renderChatControls();
-  assert.equal(context.$("plannerChatModel").value, "model");
-  assert.equal(context.$("plannerChatEffort").value, "high");
-  context.$("plannerChatEffort").value = "";
-  context.renderChatControls();
-  assert.equal(context.$("plannerChatEffort").value, "");
-  context.loadPlanForm({ id: "p", planningModel: "model", planningEffort: "medium" });
-  assert.equal(context.$("plannerChatEffort").value, "medium");
-});
-
-test("Apply keeps an updatedAt that a same-tab save adopted during the request, and a plan-only Apply leaves it alone", async () => {
-  const context = chatContext();
-  install(["saveProfiles"], context);
-  context.plannerChatThread = proposalThread("a");
-  context.state.profiles.updatedAt = "v1";
-  let server = "v1";
-  let apply;
-  context.api = async (path, options) => {
-    if (path === "/api/plans/chat/apply") return (apply = Promise.withResolvers()).promise;
-    if (path === "/api/profiles") {
-      const { expectedUpdatedAt, ...profiles } = JSON.parse(options.body);
-      assert.equal(expectedUpdatedAt, server);
-      server = `${server}+`;
-      return { previousProfilesUpdatedAt: expectedUpdatedAt, profiles: { ...profiles, updatedAt: server } };
-    }
-    return path.startsWith("/api/chats?") ? { chats: [{ threadId: "a" }] } : proposalThread("a");
-  };
-  const applyWith = async (profiles) => {
-    const applying = context.applyAssistantProposal(0, false);
-    await tick();
-    context.profilesDirty = true;
-    await context.saveProfiles();
-    const previousProfilesUpdatedAt = server;
-    if (profiles) server = `${server}+`;
-    apply.resolve({ previousProfilesUpdatedAt, profiles: profiles && { ...structuredClone(context.state.profiles), updatedAt: server }, appliedType: "planPatch", plan: null, warnings: [] });
-    await applying;
-  };
-  await applyWith(true);
-  assert.equal(context.state.profiles.updatedAt, "v1++");
-  await applyWith(false);
-  assert.equal(context.state.profiles.updatedAt, "v1+++");
-  context.profilesDirty = true;
-  await context.saveProfiles();
-  assert.equal(context.state.profiles.updatedAt, "v1++++");
 });
 
 const statusHelper = script.match(/    const statusHtml = [^]*?\n    };/)[0];
@@ -849,45 +615,6 @@ test("setStatus compares markup with the last string written, not the browser's 
   runInNewContext(statusHelper, context);
   runInNewContext('setStatus("modelStatus", "Can&#39;t load models", "innerHTML"); setStatus("modelStatus", "Can&#39;t load models", "innerHTML");', context);
   assert.equal(writes, 1, "an unchanged status must not be rewritten and announced again");
-});
-
-test("a saved Claude effort survives Format and plan saves while the Anthropic catalog is empty", () => {
-  const model = "compat:anthropic:claude-test";
-  const context = episodeContext();
-  context.modelCatalog = { providers: { anthropic: { discoveredModels: [] } } };
-  install(["effortLevelsForModel", "effortOptions", "renderFormatEffortFields", "syncFormatForm", "renderChatControls", "capturePlanDraft"], context);
-  const format = Object.assign(context.state.profiles.episodeProfiles[0], { outlineModel: model, transcriptModel: model, outlineEffort: "high", transcriptEffort: "max" });
-  context.formatFormId = "f";
-  for (const id of ["fmtOutlineModel", "fmtTranscriptModel"]) context.$(id).value = model;
-  for (const id of ["fmtOutlineEffort", "fmtTranscriptEffort"]) context.$(id).closest = () => ({});
-  context.renderFormatEffortFields(format);
-  assert.match(context.$("fmtOutlineEffort").innerHTML, /selected disabled>high · saved — currently unavailable/);
-  context.syncFormatForm();
-  assert.equal(format.outlineEffort, "high");
-  assert.equal(format.transcriptEffort, "max");
-  Object.assign(context, { activePlanId: "p", activePlan: { id: "p", planningModel: model, planningEffort: "high" }, plannerChatThread: null, renderPlannerChatHistory: noop, updateChatPills: noop,
-    textModelOptions: (value) => `<option value="${value}" selected>${value}</option>` });
-  context.state.plans = [{ id: "p" }];
-  context.renderChatControls({ model, effort: "high" });
-  context.renderChatControls();
-  assert.equal(context.capturePlanDraft().planningEffort, "high");
-});
-
-test("a saved effort that a known model does not support falls back to the default on a Format save", () => {
-  const claude = "compat:anthropic:claude-test";
-  for (const model of [claude, "compat:openai:gpt-5.5-pro"]) {
-    const context = episodeContext();
-    context.modelCatalog = { providers: { anthropic: { discoveredModels: [{ id: claude, effortLevels: ["low", "medium", "high"] }] } } };
-    install(["effortLevelsForModel", "effortOptions", "renderFormatEffortFields", "syncFormatForm"], context);
-    const format = Object.assign(context.state.profiles.episodeProfiles[0], { outlineModel: model, transcriptModel: model, transcriptEffort: "max" });
-    context.formatFormId = "f";
-    for (const id of ["fmtOutlineModel", "fmtTranscriptModel"]) context.$(id).value = model;
-    for (const id of ["fmtOutlineEffort", "fmtTranscriptEffort"]) context.$(id).closest = () => ({});
-    context.renderFormatEffortFields(format);
-    assert.doesNotMatch(context.$("fmtTranscriptEffort").innerHTML, /currently unavailable/, model);
-    context.syncFormatForm();
-    assert.equal(format.transcriptEffort, "", model);
-  }
 });
 
 test("a transcript edit keeps its draft base, so a restore after a regeneration still asks", async () => {
@@ -1040,70 +767,6 @@ test("selecting an episode restores its draft, and a confirmed discard removes i
   assert.equal(context.$("transcriptText").value, "Host: saved");
   assert.equal(context.transcriptDirty, false);
   assert.deepEqual(notices, ["warning"]);
-});
-
-test("a new chat keeps the model and effort selected for its first message", async () => {
-  const context = episodeContext();
-  let created;
-  context.state.plans = [];
-  context.state.knowledgeBases = [];
-  Object.assign(context, { activePlanId: "", activePlan: null, plannerChatThread: null, renderPlannerChatHistory: noop, updateChatPills: noop, loadPlan: async () => {}, queueMicrotask,
-    textModelOptions: (value) => `<option value="${value}" selected>${value}</option>`, effortLevelsForModel: () => ["medium", "high"],
-    api: async (path, options) => {
-      if (options?.method === "POST") { created = JSON.parse(options.body); return { plan: { id: "p", episodes: [], planningModel: created.planningModel || "default-model", planningEffort: created.planningEffort || "" } }; }
-      return { plans: [{ id: "p" }] };
-    } });
-  install(["effortOptions", "renderChatControls", "loadPlanForm", "capturePlanDraft", "refreshPlanIndex", "createNewPlan"], context);
-  context.$("plannerChatModel").value = "chosen-model";
-  context.$("plannerChatEffort").value = "high";
-  await context.createNewPlan();
-  assert.deepEqual(created, { planningModel: "chosen-model", planningEffort: "high" });
-  assert.equal(context.$("plannerChatEffort").value, "high");
-  assert.equal(context.capturePlanDraft().planningEffort, "high");
-  assert.equal(context.capturePlanDraft().planningModel, "chosen-model");
-
-  // The reply gives the new chat its first thread id; the controls must keep the chosen effort, not the plan's saved one.
-  for (const effort of ["high", "medium"]) {
-    Object.assign(context, { activePlan: { id: "p", episodes: [], planningModel: "chosen-model", planningEffort: "" }, plannerChatThread: null, plannerChatThreadId: "", plannerChatBusy: false, plannerChatThreads: [], setChatHistoryOpen: noop, renderPlannerChatMessages: noop,
-      assistantContext: () => ({}), assistantWorkspaceDraft: () => ({}) });
-    context.$("plannerChatEffort").value = effort;
-    context.$("plannerChatInput").value = "Make a show";
-    let sent;
-    context.api = async (path, options) => {
-      if (path === "/api/plans/chat") { sent = JSON.parse(options.body); return { threadId: "t" }; }
-      if (path.startsWith("/api/chats")) return { chats: [{ threadId: "t" }] };
-      return { threadId: "t", lastModel: "chosen-model", messages: [{ role: "user", content: "Make a show" }] };
-    };
-    install(["loadPlannerChatThread", "sendPlannerChat"], context);
-    await context.sendPlannerChat();
-    assert.equal(sent.planDraft.planningEffort, effort);
-    assert.equal(context.plannerChatThread.threadId, "t");
-    assert.equal(context.$("plannerChatEffort").value, effort);
-  }
-});
-
-test("the chat log appends new messages with author labels instead of rebuilding the thread", () => {
-  const log = listStub();
-  const thread = { threadId: "t", messages: [{ role: "user", content: "Hello" }, { role: "assistant", content: "not json" }] };
-  const context = { plannerChatThread: thread, renderedChat: { threadId: "", items: [] }, $: () => log };
-  install(["escapeHtml", "icon", "renderPlannerChatMessages"], context);
-  context.renderPlannerChatMessages();
-  thread.messages.push({ role: "user", content: "More" });
-  context.renderPlannerChatMessages();
-  context.renderPlannerChatMessages();
-  assert.equal(log.writes, 1);
-  assert.deepEqual(log.inserted.map(([position]) => position), ["beforeend", "beforeend"]);
-  assert.match(log.inserted[0][1], /sr-only">You: <\/span>More/);
-  assert.match(log.innerHTML, /sr-only">You: <\/span>Hello/);
-  assert.match(log.innerHTML, /sr-only">Assistant: <\/span>not json/);
-  context.plannerChatThread = { threadId: "other", messages: [{ role: "user", content: "Other" }] };
-  context.renderPlannerChatMessages();
-  assert.equal(log.writes, 2);
-  Object.assign(context, { plannerChatThread: null, activePlan: null, planEpisodeRows: () => [] });
-  context.renderPlannerChatMessages();
-  context.renderPlannerChatMessages();
-  assert.equal(log.writes, 3, "the same empty-chat prompt must not be written again");
-  assert.match(log.innerHTML, /Describe the podcast you want/);
 });
 
 test("notifications and toasts add and remove single nodes in their live regions", () => {

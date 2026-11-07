@@ -36,12 +36,10 @@ export function createApi(baseUrl) {
   };
 }
 
-export const chatgptStub = () => ({ status: () => ({ accounts: [] }), close: async () => {} });
-
 // Pass `rootDir` to restart on the directory of an earlier server; only a directory this call creates is removed.
 export async function startTestServer(t, { rootDir, ...options } = {}, prepare) {
   if (!rootDir) {
-    rootDir = await mkdtemp(join(tmpdir(), "podcast-test-"));
+    rootDir = await mkdtemp(join(tmpdir(), "apupod-test-"));
     t.after(() => rm(rootDir, { recursive: true, force: true }));
   }
   await prepare?.(rootDir);

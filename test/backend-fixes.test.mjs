@@ -6,26 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { writeAudioAsWav } from "../src/app.mjs";
-import { ChatGptError } from "../src/chatgpt.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
-import { chatgptStub, silentWav, startTestServer, waitFor } from "./helpers.mjs";
+import { silentWav, startTestServer, waitFor } from "./helpers.mjs";
 
-// A key in the developer's shell would start Anthropic discovery against the stubs.
-delete process.env.ANTHROPIC_API_KEY;
+for (const name of ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY"]) process.env[name] = `backend-test-${name}`;
 
-for (const name of ["MIMO_API_KEY", "ELEVENLABS_API_KEY", "OPENAI_API_KEY", "OPENCODE_GO_API_KEY", "CHATTERBOX_API_KEY", "TYPESAFE_API_KEY"]) process.env[name] = `backend-test-${name}`;
-
-const start = (t, options = {}, prepare) => startTestServer(t, { chatgptClient: chatgptStub(), fetchImpl: async () => Response.json({ data: [] }), ...options }, prepare);
-
-function accountClient(respond) {
-  let active = "account-a";
-  return {
-    status: () => ({ activeAccountId: active, accounts: ["account-a", "account-b"].map((id) => ({ id, label: id, active: id === active, grant: true, status: "connected" })) }),
-    models: async () => [{ slug: "shared-model", display_name: "Shared model", visibility: "list" }],
-    select: async (id) => { active = id; }, close: async () => {},
-    respond: (request) => respond(request, () => active),
-  };
-}
+const start = (t, options = {}, prepare) => startTestServer(t, { fetchImpl: async () => Response.json({ data: [] }), ...options }, prepare);
 
 test("plan write preconditions reject an old tab and all successful writes advance the stamp", async (t) => {
   const { api } = await start(t);
@@ -64,179 +50,22 @@ test("Hosts deletion returns pre-delete revision evidence for a safe own-tab For
   assert.equal(result.value.profiles.speakerProfiles[0].revision, before.speakerProfiles[1].revision ?? 0);
 });
 
-test("queued ChatGPT jobs stay pinned to the enqueue account even with identical model catalogs", async (t) => {
-  const entered = Promise.withResolvers();
-  const gate = Promise.withResolvers();
-  t.after(() => gate.resolve());
-  const calls = [];
-  const client = accountClient(async (request, active) => {
-    calls.push(request);
-    entered.resolve();
-    await gate.promise;
-    if (request.accountId !== active()) throw new ChatGptError("chatgpt_account_changed", { status: 409 });
-    throw new Error("The account change must prevent generation.");
-  });
-  const { api } = await start(t, { chatgptClient: client });
-  const state = (await api("/api/state")).value;
-  for (const [name, provider] of Object.entries(state.config.providers)) provider.enabled = name === "chatgpt";
-  state.config.providers.chatgpt.activeModels = { "shared-model": { text: true } };
-  assert.equal((await api("/api/config", state.config, "PUT")).status, 200);
-  Object.assign(state.profiles.episodeProfiles[0], { outlineModel: "compat:chatgpt:shared-model", transcriptModel: "compat:chatgpt:shared-model" });
-  assert.equal((await api("/api/profiles", state.profiles, "PUT")).status, 200);
-  const episodes = [];
-  for (const name of ["First under A", "Queued under A"]) episodes.push((await api("/api/episodes", { name, episodeProfileId: state.profiles.episodeProfiles[0].id })).value);
-  const first = await api(`/api/episodes/${episodes[0].id}/generate`, {});
-  assert.equal(first.status, 202);
-  await entered.promise;
-  const second = await api(`/api/episodes/${episodes[1].id}/generate`, {});
-  assert.equal(second.status, 202);
-  assert.equal((await api("/api/jobs")).value.jobs.find((job) => job.id === second.value.job.id).status, "queued");
-  await api("/api/chatgpt/select", { accountId: "account-b" });
-  gate.resolve();
-  const jobs = await waitFor(async () => { const result = (await api("/api/jobs")).value; return !result.activeJobId && result.jobs.every((job) => job.status === "failed") && result.jobs; });
-  assert.equal(jobs.length, 2);
-  assert.match(jobs.find((job) => job.id === second.value.job.id).error, /chatgpt_account_changed/);
-  assert.equal(calls.length, 1, "the queued request must not use account B");
-  assert.equal(calls[0].accountId, "account-a");
-});
-
-test("plan and Knowledge Base deletion cannot race a new unsaved assistant thread", async (t) => {
-  const entered = Promise.withResolvers();
-  const gate = Promise.withResolvers();
-  t.after(() => gate.resolve());
-  const { api } = await start(t, { fetchImpl: async (url) => {
-    if (String(url).endsWith("/chat/completions")) { entered.resolve(); await gate.promise; return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Saved answer", proposal: null }) } }] }); }
-    return Response.json({ data: [{ id: "mimo-v2.5-pro" }] });
-  } });
-  const state = (await api("/api/state")).value;
-  const kb = (await api("/api/knowledge", { name: "Source.md", content: "Safe test source" })).value;
-  const plan = (await api("/api/plans", { name: "Busy plan", knowledgeBaseId: kb.id, planningModel: "mimo-v2.5-pro", speakerProfileId: state.profiles.speakerProfiles[0].id })).value.plan;
-  const pending = api("/api/plans/chat", { planId: plan.id, model: "mimo-v2.5-pro", kbId: kb.id, text: "Explain this source." });
-  await entered.promise;
-  assert.equal((await api(`/api/plans/${plan.id}`, undefined, "DELETE")).status, 409);
-  assert.equal((await api(`/api/knowledge/${kb.id}`, undefined, "DELETE")).status, 409);
-  gate.resolve();
-  const reply = await pending;
-  assert.equal(reply.status, 200, JSON.stringify(reply.value));
-  assert.equal((await api(`/api/knowledge/${kb.id}`, undefined, "DELETE")).status, 200);
-  assert.equal((await api(`/api/chat?threadId=${reply.value.threadId}`)).value.kbId, "");
-  assert.equal((await api(`/api/plans/${plan.id}`, undefined, "DELETE")).status, 200);
-  assert.equal((await api(`/api/chat?threadId=${reply.value.threadId}`)).status, 404);
-});
-
-test("deletion commits before a later chat registers, without a provider call or restored references", async (t) => {
-  for (const kind of ["plan", "knowledge", "chat"]) {
-    const entered = Promise.withResolvers();
-    const gate = Promise.withResolvers();
-    t.after(() => gate.resolve());
-    let providerCalls = 0;
-    const { api, rootDir } = await start(t, { fetchImpl: async (url) => {
-      if (String(url).endsWith("/chat/completions")) { providerCalls += 1; return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Saved response", proposal: null }) } }] }); }
-      return Response.json({ data: [{ id: "mimo-v2.5-pro" }] });
-    } });
-    const kb = (await api("/api/knowledge", { name: "Source.md", content: "Test source" })).value;
-    const plan = (await api("/api/plans", { name: "Deletion race", planningModel: "mimo-v2.5-pro", knowledgeBaseId: kb.id })).value.plan;
-    const body = { planId: plan.id, model: plan.planningModel, kbId: kb.id, text: "Explain the source." };
-    const existing = kind === "chat" ? await api("/api/plans/chat", body) : null;
-    if (existing) { assert.equal(existing.status, 200); body.threadId = existing.value.threadId; }
-    const before = providerCalls;
-    const target = kind === "chat" ? join(rootDir, "data", "chat", `${body.threadId}.json`) : join(rootDir, "data", kind === "plan" ? "plans" : "knowledge", "index.json");
-    const method = kind === "chat" ? "rm" : "rename";
-    const original = fs[method];
-    t.mock.method(fs, method, async (...args) => {
-      if (String(args[kind === "chat" ? 0 : 1]) === target) { entered.resolve(); await gate.promise; }
-      return original(...args);
-    });
-    syncBuiltinESMExports();
-    try {
-      const path = kind === "plan" ? `/api/plans/${plan.id}` : kind === "knowledge" ? `/api/knowledge/${kb.id}` : `/api/chat?threadId=${body.threadId}`;
-      const deleting = api(path, undefined, "DELETE");
-      await entered.promise;
-      const sending = api("/api/plans/chat", body);
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      assert.equal(providerCalls, before, `${kind}: no provider request while deletion commits`);
-      gate.resolve();
-      assert.equal((await deleting).status, 200);
-      const rejected = await sending;
-      assert.equal(rejected.status, kind === "knowledge" ? 400 : 404, JSON.stringify(rejected.value));
-      assert.equal(providerCalls, before);
-      assert.deepEqual((await api(`/api/chats?planId=${plan.id}`)).value.chats, []);
-    } finally {
-      gate.resolve();
-      t.mock.restoreAll();
-      syncBuiltinESMExports();
-    }
-  }
-});
-
-test("new reserved connection IDs are rejected and a saved custom ChatGPT connection keeps its routing and references", async (t) => {
-  const first = await start(t);
-  const config = (await first.api("/api/config")).value;
-  for (const id of ["chatgpt", "anthropic", "openai", "opencode-go", "chatterbox"]) {
-    const result = await first.api("/api/config", { ...config, compatibleConnections: [{ id, name: "Custom", baseUrl: "https://custom.invalid/v1", activeModels: {} }] }, "PUT");
+test("new reserved connection IDs are rejected", async (t) => {
+  const { api } = await start(t);
+  const config = (await api("/api/config")).value;
+  for (const id of ["openai", "chatterbox"]) {
+    const result = await api("/api/config", { ...config, compatibleConnections: [{ id, name: "Custom", baseUrl: "https://custom.invalid/v1", activeModels: {} }] }, "PUT");
     assert.equal(result.status, 400);
     assert.match(result.value.error, /reserved/);
   }
-  const calls = [];
-  let nativeCalls = 0;
-  const entered = Promise.withResolvers();
-  const gate = Promise.withResolvers();
-  let pause = false;
-  t.after(() => gate.resolve());
-  const client = accountClient(async () => { nativeCalls += 1; throw new Error("Custom IDs cannot call ChatGPT plan usage."); });
-  const { api, rootDir } = await start(t, { chatgptClient: client, fetchImpl: async (url, options = {}) => {
-    const target = String(url);
-    calls.push(target);
-    if (target === "https://custom.invalid/v1/models") return Response.json({ data: [{ id: "shared-model" }, { id: "custom-tts", capabilities: { tts: true } }] });
-    if (target === "https://custom.invalid/v1/chat/completions") { if (pause) { entered.resolve(); await gate.promise; } return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Custom response", proposal: null }) } }] }); }
-    if (target === "https://custom.invalid/v1/audio/speech") { assert.equal(JSON.parse(options.body).model, "custom-tts"); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
-    if (target === "https://api.xiaomimimo.com/v1/models") return Response.json({ data: [{ id: "mimo-v2.5-tts" }] });
-    return Response.json({ data: [] });
-  } }, async (root) => {
-    await mkdir(join(root, "data"), { recursive: true });
-    await writeFile(join(root, "data", "config.json"), JSON.stringify({ providers: { chatgpt: { enabled: true, activeModels: { "shared-model": { text: true } } } }, compatibleConnections: [{ id: "chatgpt", name: "Legacy Custom", baseUrl: "https://custom.invalid/v1", activeModels: { "shared-model": { text: true }, "custom-tts": { tts: true } } }] }));
-  });
-  const stateResult = await api("/api/state");
-  assert.equal(stateResult.status, 200, JSON.stringify(stateResult.value));
-  const state = stateResult.value;
-  const savedConfig = await api("/api/config", state.config, "PUT");
-  assert.equal(savedConfig.status, 200, JSON.stringify(savedConfig.value));
-  assert.equal(savedConfig.value.modelCatalog.providers.chatgpt.status, "error");
-  assert.match(savedConfig.value.modelCatalog.providers.chatgpt.error, /reserved ID "chatgpt".*references are preserved/);
-  assert.deepEqual(savedConfig.value.modelCatalog.providers.chatgpt.textModels, []);
-  assert.doesNotMatch(savedConfig.value.warnings.join(" "), /compat:chatgpt/);
-  const plan = (await api("/api/plans", { name: "Legacy plan", planningModel: "compat:chatgpt:shared-model", speakerProfileId: state.profiles.speakerProfiles[0].id })).value.plan;
-  pause = true;
-  const pending = api("/api/plans/chat", { planId: plan.id, model: plan.planningModel, text: "Use the custom provider." });
-  await entered.promise;
-  assert.equal((await api("/api/chatgpt/select", { accountId: "account-b" })).status, 200);
-  gate.resolve();
-  assert.equal((await pending).status, 200);
-  state.profiles.speakerProfiles[0].voiceModel = "compat:chatgpt:custom-tts";
-  state.profiles.speakerProfiles[0].speakers[0].voiceId = "custom-voice";
-  assert.equal((await api("/api/profiles", state.profiles, "PUT")).status, 200);
-  const preview = await api("/api/preview", { episodeProfileId: state.profiles.episodeProfiles[0].id, speakerProfileId: state.profiles.speakerProfiles[0].id, speakerIndex: 0, text: "Custom speech." });
-  assert.equal(preview.status, 200, JSON.stringify(preview.value));
-  assert.equal(nativeCalls, 0);
-  assert.ok(calls.includes("https://custom.invalid/v1/chat/completions"));
-  assert.ok(calls.includes("https://custom.invalid/v1/audio/speech"));
-  const restored = (await api("/api/state")).value.profiles;
-  restored.speakerProfiles[0].voiceModel = "mimo-v2.5-tts";
-  assert.equal((await api("/api/profiles", restored, "PUT")).status, 200);
-  const current = (await api("/api/config")).value;
-  const blocked = await api("/api/config", { ...current, compatibleConnections: [] }, "PUT");
-  assert.equal(blocked.status, 409);
-  assert.match(blocked.value.error, /content plan "Legacy plan"/);
-  assert.equal(JSON.parse(await readFile(join(rootDir, "data", "config.json"), "utf8")).compatibleConnections[0].id, "chatgpt");
 });
 
-test("other saved reserved connection IDs use their custom endpoints and activation maps", async (t) => {
-  for (const [id, textModel, ttsModel] of [["openai", "gpt-5.6", "tts-1"], ["opencode-go", "minimax-m2.7", "custom-tts"], ["chatterbox", "gpt-5.6", "chatterbox-turbo"], ["anthropic", "claude-custom", "custom-tts"]]) {
+test("saved reserved connection IDs use their custom endpoints and activation maps", async (t) => {
+  for (const [id, ttsModel] of [["openai", "tts-1"], ["chatterbox", "chatterbox-turbo"]]) {
     const calls = [];
     const { api } = await start(t, { fetchImpl: async (url, options = {}) => {
       const target = String(url);
-      if (target === "https://custom.invalid/v1/models") return Response.json({ data: [{ id: textModel }, { id: ttsModel, capabilities: { tts: true } }] });
-      if (target === "https://custom.invalid/v1/chat/completions") { calls.push(target); const body = JSON.parse(options.body); assert.equal(body.max_tokens, 8_000); assert.equal(body.max_completion_tokens, undefined); return Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Custom response", proposal: null }) } }] }); }
+      if (target === "https://custom.invalid/v1/models") return Response.json({ data: [{ id: ttsModel, capabilities: { tts: true } }] });
       if (target === "https://custom.invalid/v1/audio/speech") { calls.push(target); const body = JSON.parse(options.body); assert.equal(body.response_format, "mp3"); assert.equal(body.exaggeration, undefined); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
       return Response.json({ data: [] });
     } }, async (root) => {
@@ -244,48 +73,18 @@ test("other saved reserved connection IDs use their custom endpoints and activat
       const profiles = structuredClone(DEFAULT_DATA);
       profiles.speakerProfiles[0].voiceModel = `compat:${id}:${ttsModel}`;
       for (const speaker of profiles.speakerProfiles[0].speakers) speaker.voiceId = "custom-voice";
-      Object.assign(profiles.episodeProfiles[0], { outlineModel: `compat:${id}:${textModel}`, transcriptModel: `compat:${id}:${textModel}` });
       await writeFile(join(root, "data", "profiles.json"), JSON.stringify(profiles));
-      await writeFile(join(root, "data", "config.json"), JSON.stringify({ compatibleConnections: [{ id, name: "Legacy", baseUrl: "https://custom.invalid/v1", activeModels: {} }] }));
+      await writeFile(join(root, "config.json"), JSON.stringify({ compatibleConnections: [{ id, name: "Legacy", baseUrl: "https://custom.invalid/v1", activeModels: {} }] }));
     });
     const state = (await api("/api/state")).value;
-    const custom = state.config.compatibleConnections[0];
-    assert.equal(custom.activeModels[textModel].text, true);
-    assert.equal(custom.activeModels[ttsModel].tts, true);
-    const plan = (await api("/api/plans", { name: id, planningModel: `compat:${id}:${textModel}` })).value.plan;
-    const chat = await api("/api/plans/chat", { planId: plan.id, model: plan.planningModel, text: "Explain." });
-    assert.equal(chat.status, 200, JSON.stringify(chat.value));
-    const provider = (await api("/api/models")).value.providers[id === "opencode-go" ? "opencodeGo" : id];
+    assert.equal(state.config.compatibleConnections[0].activeModels[ttsModel].tts, true);
+    const provider = (await api("/api/models")).value.providers[id];
     assert.equal(provider.status, "error");
     assert.match(provider.error, /reserved ID/);
     const preview = await api("/api/preview", { episodeProfileId: state.profiles.episodeProfiles[0].id, speakerProfileId: state.profiles.speakerProfiles[0].id, speakerIndex: 0, text: "Custom speech." });
     assert.equal(preview.status, 200, JSON.stringify(preview.value));
-    assert.deepEqual(calls, ["https://custom.invalid/v1/chat/completions", "https://custom.invalid/v1/audio/speech"]);
+    assert.deepEqual(calls, ["https://custom.invalid/v1/audio/speech"]);
   }
-});
-
-test("ChatGPT capability errors expose only safe diagnostics and name the unsupported setting", async (t) => {
-  let diagnostic = { param: "reasoning.effort", bodyShape: "error" };
-  const client = accountClient(async () => { throw new ChatGptError("subscription_sharing_unsupported_capability", { status: 400, requestId: "req-test", ...diagnostic }); });
-  const { api } = await start(t, { chatgptClient: client });
-  const config = (await api("/api/config")).value;
-  config.providers.chatgpt = { enabled: true, activeModels: { "shared-model": { text: true } } };
-  assert.equal((await api("/api/config", config, "PUT")).status, 200);
-  const plan = (await api("/api/plans", { name: "Errors", planningModel: "compat:chatgpt:shared-model" })).value.plan;
-  const request = { planId: plan.id, model: plan.planningModel, text: "Test capability error." };
-  const result = await api("/api/plans/chat", request);
-  assert.equal(result.status, 400);
-  assert.equal(result.value.code, "subscription_sharing_unsupported_capability");
-  assert.equal(result.value.requestId, "req-test");
-  assert.equal(result.value.param, "reasoning.effort");
-  assert.equal(result.value.bodyShape, "error");
-  assert.match(result.value.error, /does not support parameter "reasoning.effort".*Remove this setting/);
-  assert.doesNotMatch(result.value.error, /try again|retry/);
-  diagnostic = { param: "secret credential value", bodyShape: '{"access_token":"hidden"}' };
-  const unsafe = await api("/api/plans/chat", request);
-  assert.equal(unsafe.value.param, undefined);
-  assert.equal(unsafe.value.bodyShape, undefined);
-  assert.doesNotMatch(JSON.stringify(unsafe.value), /credential|access_token|hidden/);
 });
 
 test("ElevenLabs honors discovered legacy limits without cutting tags or SSML breaks", async (t) => {

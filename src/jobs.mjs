@@ -12,21 +12,20 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { ChatGptError } from "./chatgpt.mjs";
 import { httpError, badRequest, conflict, serviceUnavailable, ID_RE, readJsonBody, readOptionalJsonBody, sendJson } from "./util.mjs";
 import { MAX_AUDIO_RESPONSE_BYTES } from "./providers/transport.mjs";
-import { LANGUAGE_OPTIONS, modelRuntimeSnapshot, chatGptCatalogAccount, parseCompatibleModelId, builtInConnectionId, resolveLanguage, modelLanguageError, assertTtsLanguageCompatibility } from "./providers/catalog.mjs";
+import { LANGUAGE_OPTIONS, modelRuntimeSnapshot, resolveLanguage, modelLanguageError, assertTtsLanguageCompatibility } from "./providers/catalog.mjs";
 import { turnClipDescriptor, spokenTextForModel, synthesizeTurn, assertWav } from "./providers/generate.mjs";
-import { serializeMutation, isActiveJob, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, replaceTextThenCommit, exists } from "./store.mjs";
-import { TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE, validateTranscriptCues, generateOutline, generateTranscript, transcriptToMarkdown, parseTranscript, transcriptWordCount } from "./episodes.mjs";
+import { serializeMutation, isActiveJob, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, exists } from "./store.mjs";
+import { parseTranscript } from "./episodes.mjs";
 
 const FFMPEG_TIMEOUT_MS = 900_000;
 const PROCESS_KILL_SIGNAL = "SIGKILL";
 
 export async function interruptStaleJobs(paths) {
   for (const episode of await listEpisodes(paths)) {
-    if (!isActiveJob(episode.job) && !["queued", "generating", "rendering"].includes(episode.status)) continue;
-    const message = "Generation was interrupted by a server restart.";
+    if (!isActiveJob(episode.job) && !["queued", "rendering"].includes(episode.status)) continue;
+    const message = "Rendering was interrupted by a server restart.";
     await updateEpisode(paths, episode, {
       status: "failed",
       lastError: message,
@@ -108,16 +107,6 @@ export async function cleanupStoredArtifacts(context) {
       console.warn(`[episode:${entry.name}] cleanup skipped: ${error.message || error}`);
     }
   }
-  for (const entry of await readdir(paths.chat, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    const path = join(paths.chat, entry.name);
-    try {
-      if ((await readJson(path)).kind === "tts") {
-        await rm(path, { force: true });
-        removed += 1;
-      }
-    } catch {}
-  }
   if (removed) console.log(`[cleanup] removed ${removed} obsolete episode artifacts.`);
 }
 
@@ -189,28 +178,24 @@ export function rememberJob(context, job) {
   while (context.recentJobs.size > 30) context.recentJobs.delete(context.recentJobs.keys().next().value);
 }
 
-async function enqueueJob(res, context, id, type, options = {}) {
-  const chatgptAccountId = chatGptCatalogAccount(context);
+export async function enqueueTtsJob(req, res, context, id) {
+  const body = await readOptionalJsonBody(req);
+  if (String(body.languageOverride || "").trim()) throw badRequest("TTS language is defined by the Episode Format.");
   const episode = await loadEpisode(context.paths, id, true);
   if (isActiveJob(episode.job)) throw conflict("Episode already has an active job.");
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
   const language = resolveLanguage(context, episodeProfile.language);
-  let total = 3;
-  if (type === "transcript") {
-    if (episode.knowledgeBaseId && !(await exists(join(context.paths.knowledge, `${episode.knowledgeBaseId}.md`)))) throw badRequest("Knowledge base does not exist.");
-  } else {
-    if (!episode.transcript) throw badRequest("Save or generate transcript before rendering.");
-    assertTtsLanguageCompatibility(context, speakerProfile, language);
-    total = parseTranscript(episode.transcript, speakerProfile.speakers, episodeProfile.numSegments)
-      .segments.flatMap((segment) => segment.turns).length;
-  }
+  if (!episode.transcript) throw badRequest("Save a transcript before rendering.");
+  assertTtsLanguageCompatibility(context, speakerProfile, language);
+  const total = parseTranscript(episode.transcript, speakerProfile.speakers, episodeProfile.numSegments)
+    .segments.flatMap((segment) => segment.turns).length;
 
   const now = new Date().toISOString();
   const job = {
-    id: randomUUID(), episodeId: id, type, status: "queued", phase: "queued", completed: 0, total,
-    message: `${type === "transcript" ? "Transcript" : "TTS"} job queued.`, error: null,
+    id: randomUUID(), episodeId: id, type: "tts", status: "queued", phase: "queued", completed: 0, total,
+    message: "TTS job queued.", error: null,
     queuedAt: now, startedAt: null, finishedAt: null, updatedAt: now,
-    options: type === "transcript" && options.autoTts ? { autoTts: true } : {},
+    options: {},
   };
   await updateEpisode(context.paths, episode, {
     status: "queued",
@@ -221,25 +206,12 @@ async function enqueueJob(res, context, id, type, options = {}) {
   context.queue.push({
     id: job.id,
     episodeId: id,
-    type,
-    ...(type === "transcript" && [episodeProfile.outlineModel, episodeProfile.transcriptModel].some((model) => builtInConnectionId(context.config, parseCompatibleModelId(model)?.connectionId) === "chatgpt") ? { chatgptAccountId } : {}),
-    previousAudioReady: type === "tts" && episode.audioReady === true && await exists(join(episodeDir(context.paths, id), "episode.mp3")),
-    autoTts: type === "transcript" && options.autoTts === true,
+    type: "tts",
+    previousAudioReady: episode.audioReady === true && await exists(join(episodeDir(context.paths, id), "episode.mp3")),
   });
-  if (res) sendJson(res, 202, { job });
-  console.log(`[job:${job.id}] queued ${type} for ${id}`);
+  sendJson(res, 202, { job });
+  console.log(`[job:${job.id}] queued tts for ${id}`);
   queueMicrotask(() => void drainQueue(context));
-}
-
-export async function enqueueTranscriptJob(req, res, context, id) {
-  const body = await readOptionalJsonBody(req);
-  return enqueueJob(res, context, id, "transcript", { autoTts: body.autoTts === true });
-}
-
-export async function enqueueTtsJob(req, res, context, id) {
-  const body = await readOptionalJsonBody(req);
-  if (String(body.languageOverride || "").trim()) throw badRequest("TTS language is defined by the Episode Format.");
-  return enqueueJob(res, context, id, "tts");
 }
 
 export async function ensureFfmpeg(context) {
@@ -260,41 +232,22 @@ async function drainQueue(context) {
   const queued = context.queue.shift();
   context.activeJobId = queued.id;
   try {
-    const startMessage = queued.type === "transcript" ? "Starting transcript generation." : "Starting TTS generation.";
     await updateJob(context, queued, {
-      status: "running", phase: "starting", message: startMessage,
+      status: "running", phase: "starting", message: "Starting TTS generation.",
       startedAt: new Date().toISOString(),
-    }, { status: queued.type === "transcript" ? "generating" : "rendering", lastError: null });
+    }, { status: "rendering", lastError: null });
     console.log(`[job:${queued.id}] started ${queued.type}`);
-    const runtime = await modelRuntimeSnapshot(context);
-    if (Object.hasOwn(queued, "chatgptAccountId") && queued.chatgptAccountId !== runtime.chatgptAccountId) throw new ChatGptError("chatgpt_account_changed", { status: 409 });
-    const result = queued.type === "transcript" ? await runTranscriptJob(context, queued, runtime) : await runTtsJob(context, queued, runtime);
+    const result = await runTtsJob(context, queued, await modelRuntimeSnapshot(context));
     const episode = await updateJob(context, queued, {
       status: "completed", phase: "complete",
-      message: result?.warning || (queued.type === "transcript" ? "Transcript ready." : "MP3 ready."), error: null,
+      message: result?.warning || "MP3 ready.", error: null,
       finishedAt: new Date().toISOString(),
     });
     console.log(`[job:${queued.id}] completed ${queued.type} for ${episode.id}`);
-    if (queued.type === "transcript" && queued.autoTts) {
-      try {
-        await ensureFfmpeg(context);
-        await serializeMutation(context, () => enqueueJob(null, context, queued.episodeId, "tts"));
-      } catch (error) {
-        try {
-          await updateJob(context, queued, {
-            message: `Transcript ready, but automatic TTS could not start: ${error.message || String(error)}`,
-            error: error.message || String(error),
-          });
-        } catch (saveError) {
-          console.error(`[job:${queued.id}] failed to persist automatic TTS warning: ${saveError.message || saveError}`);
-        }
-      }
-    }
   } catch (error) {
     const message = error.message || String(error);
     try {
-      const episodeChanges = { status: "failed", lastError: message };
-      if (queued.type === "tts") episodeChanges.audioReady = queued.previousAudioReady === true;
+      const episodeChanges = { status: "failed", lastError: message, audioReady: queued.previousAudioReady === true };
       await updateJob(context, queued, {
         status: "failed", phase: "failed", message, error: message, finishedAt: new Date().toISOString(),
       }, episodeChanges);
@@ -319,37 +272,6 @@ async function updateJob(context, queued, jobChanges, episodeChanges = {}) {
     rememberJob(context, updated.job);
     return updated;
   });
-}
-
-async function runTranscriptJob(context, queued, runtime) {
-  const episode = await loadEpisode(context.paths, queued.episodeId, false);
-  const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
-  const language = resolveLanguage(runtime, episodeProfile.language);
-  const knowledge = episode.knowledgeBaseId ? await readFile(join(context.paths.knowledge, `${episode.knowledgeBaseId}.md`), "utf8") : "";
-
-  await updateJob(context, queued, { phase: "outline", completed: 0, message: "Generating outline…" });
-  const outline = await generateOutline(runtime, knowledge, episode, episodeProfile, speakerProfile, language);
-  await updateJob(context, queued, { phase: "transcript", completed: 1, message: "Writing transcript…" });
-  const transcriptJson = await generateTranscript(runtime, knowledge, outline, episode, episodeProfile, speakerProfile, language);
-  const transcript = transcriptToMarkdown(transcriptJson);
-  const parsed = parseTranscript(transcript, speakerProfile.speakers, episodeProfile.numSegments);
-  validateTranscriptCues(runtime, parsed.segments, speakerProfile, language);
-  const transcriptWords = transcriptWordCount(parsed.segments, language.id);
-  const minimumWords = Math.round(episodeProfile.targetMinutes * TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE);
-  const lengthWarning = transcriptWords < minimumWords
-    ? `Transcript is too short: ${transcriptWords} words. Recommended minimum is ${minimumWords} words for ${episodeProfile.targetMinutes} minutes. Rendering may fail duration validation.`
-    : "";
-  const warning = [parsed.warning, lengthWarning].filter(Boolean).join(" ");
-
-  await updateJob(context, queued, { phase: "saving", completed: 2, message: "Saving transcript…" });
-  await replaceTextThenCommit(join(episodeDir(context.paths, episode.id), "transcript.md"), transcript, () =>
-    updateJob(context, queued, { completed: 3 }, (current) => ({
-      ...(current.name.trim() === "New episode" ? { name: transcriptJson.title.trim() } : {}),
-      status: "transcript_ready", audioReady: false,
-      transcriptWords,
-      lastError: null,
-    })));
-  return { warning };
 }
 
 export async function previewVoice(req, res, context) {
@@ -386,7 +308,7 @@ async function runTtsJob(context, queued, runtime) {
   const episode = await loadEpisode(context.paths, queued.episodeId, true);
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
   const language = resolveLanguage(runtime, episodeProfile.language);
-  if (!episode.transcript) throw badRequest("Save or generate transcript before rendering.");
+  if (!episode.transcript) throw badRequest("Save a transcript before rendering.");
   const parsed = parseTranscript(episode.transcript, speakerProfile.speakers, episodeProfile.numSegments);
   const turns = parsed.segments.flatMap((segment, segmentIndex) => segment.turns.map((turn, turnIndex) => ({
     turn,
@@ -494,7 +416,7 @@ export async function writeAudioAsWav(audio, outputPath) {
 }
 
 async function normalizePreviewAudio(audio, speakerName, model) {
-  const outputPath = join(tmpdir(), `.pod-god-preview-${randomUUID()}.wav`);
+  const outputPath = join(tmpdir(), `.apupod-preview-${randomUUID()}.wav`);
   try {
     await writeAudioAsWav(audio, outputPath);
     const { size } = await stat(outputPath);
@@ -542,7 +464,7 @@ async function assembleMp3(clipPaths, directory, minimumSeconds, targetMinutes) 
     const actualSeconds = await mediaDurationSeconds(temporary);
     await rename(temporary, output);
     if (actualSeconds < minimumSeconds) {
-      return { warning: `Rendered audio too short: ${(actualSeconds / 60).toFixed(1)} min. Target: ${targetMinutes} min. Regenerate a longer transcript.` };
+      return { warning: `Rendered audio too short: ${(actualSeconds / 60).toFixed(1)} min. Target: ${targetMinutes} min. Write a longer transcript.` };
     }
     return {};
   } finally {

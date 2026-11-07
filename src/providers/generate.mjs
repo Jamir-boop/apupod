@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { ChatGptError } from "../chatgpt.mjs";
 import { badRequest, oneLine, normalizeDelivery } from "../util.mjs";
-import { MAX_JSON_RESPONSE_BYTES, MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, LLM_TIMEOUT_MS, TTS_TIMEOUT_MS, LLM_RETRIES, MAX_STREAM_RESPONSE_BYTES, fetchJsonWithBody, fetchBytes, audioResult, cappedFetch, openAiClient, anthropicClient, callOptions, sdkJson, providerError } from "./transport.mjs";
-import { ANTHROPIC_BASE_URL, openCodeGoProtocol, resolveOpenCodeGoCredential, awaitLatestModelCatalog, parseCompatibleModelId, builtInConnectionId, effortLevelsForModel, usesResponsesApi, compatibleConnection, builtInChatterboxConnection, availableModelIds, isElevenLabsModel, modelLanguageError, elevenLabsCapabilities, apiKeyName } from "./catalog.mjs";
+import { MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, TTS_TIMEOUT_MS, fetchJsonWithBody, fetchBytes, audioResult, cappedFetch, openAiClient, callOptions, sdkJson, providerError } from "./transport.mjs";
+import { awaitLatestModelCatalog, parseCompatibleModelId, compatibleConnection, builtInChatterboxConnection, availableModelIds, isElevenLabsModel, modelLanguageError, elevenLabsCapabilities } from "./catalog.mjs";
 
 const ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
@@ -92,53 +91,6 @@ function ttsProviderFingerprint(context, model) {
     : model === "mimo-v2.5-tts" ? runtimeCredential(context, "MIMO_API_KEY") : runtimeCredential(context, "ELEVENLABS_API_KEY");
   const account = apiKey ? createHash("sha256").update(apiKey).digest("hex").slice(0, 16) : "";
   return { endpoint, account };
-}
-
-export async function callTextModel({ context, model, system, prompt, maxTokens, temperature, topP, effort }) {
-  await awaitLatestModelCatalog(context);
-  const compatible = parseCompatibleModelId(model);
-  if (compatible) {
-    const builtInId = builtInConnectionId(context.config, compatible.connectionId);
-    if (builtInId === "chatgpt") {
-      if (!availableModelIds(context).textModels.has(model)) throw badRequest(`Unsupported or inactive ChatGPT model "${model}".`);
-      if (!context.chatgptAccountId) throw new ChatGptError("chatgpt_sign_in_required", { status: 401 });
-      return context.chatgptClient.respond({ accountId: context.chatgptAccountId, model: compatible.modelId, system, prompt, ...(effort ? { effort } : {}) });
-    }
-    if (builtInId === "anthropic") return callAnthropicMessages(context, model, { system, prompt, effort });
-    // ponytail: Responses API only for the built-in openai connection; compatible connections stay on chat/completions
-    if (builtInId === "openai" && usesResponsesApi(compatible.modelId)) {
-      return callOpenAiResponses(context, model, { system, prompt, maxTokens, effort }, LLM_TIMEOUT_MS);
-    }
-    if (builtInId === "opencode-go") {
-      const protocol = openCodeGoProtocol(compatible.modelId);
-      if (protocol === "messages") return callOpenCodeGoMessages(context, model, { system, prompt, maxTokens, temperature, topP }, LLM_TIMEOUT_MS);
-      if (protocol !== "chat") throw badRequest(`Unsupported OpenCode Go model "${compatible.modelId}". Refresh models or update its protocol mapping.`);
-    }
-    const tokenLimit = builtInId === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens };
-    return callCompatibleChat(context, model, {
-      model: compatible.modelId,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt },
-      ],
-      response_format: { type: "json_object" },
-      ...tokenLimit,
-      temperature,
-      top_p: topP,
-    }, LLM_TIMEOUT_MS);
-  }
-  return callMimo(context, {
-    model,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: prompt },
-    ],
-    response_format: { type: "json_object" },
-    max_completion_tokens: maxTokens,
-    temperature,
-    top_p: topP,
-    thinking: { type: "disabled" },
-  }, LLM_TIMEOUT_MS);
 }
 
 export function spokenTextForModel(context, modelId, text, language) {
@@ -266,7 +218,7 @@ async function synthesizeCompatible(context, compositeModelId, voiceId, text, de
     response = await openAiClient({ baseURL: connection.ttsBaseUrl || connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_AUDIO_RESPONSE_BYTES, label) }).audio.speech.create(body, callOptions(TTS_TIMEOUT_MS));
     bytes = Buffer.from(await response.arrayBuffer());
   } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), TTS_TIMEOUT_MS, apiKey);
+    throw providerError(error, label, connection.apiKeyEnv, TTS_TIMEOUT_MS, apiKey);
   }
   return audioResult(bytes, response.headers.get("content-type"), label, [apiKey]);
 }
@@ -399,147 +351,12 @@ async function callMimo(context, payload, timeoutMs) {
       baseURL: context.config.providers.mimo.baseUrl,
       apiKey,
       headers: { Authorization: null, "api-key": apiKey },
-      fetch: cappedFetch(context.fetchImpl, payload.audio ? MAX_TTS_JSON_RESPONSE_BYTES : MAX_JSON_RESPONSE_BYTES, "MiMo"),
-    }).chat.completions.create(payload, callOptions(timeoutMs, payload.audio ? 0 : LLM_RETRIES)), "MiMo");
+      fetch: cappedFetch(context.fetchImpl, MAX_TTS_JSON_RESPONSE_BYTES, "MiMo"),
+    }).chat.completions.create(payload, callOptions(timeoutMs)), "MiMo");
   } catch (error) {
     throw providerError(error, "MiMo", "MIMO_API_KEY", timeoutMs, apiKey);
   }
   return data;
-}
-
-async function callCompatibleChat(context, compositeModelId, payload, timeoutMs) {
-  const parsed = parseCompatibleModelId(compositeModelId);
-  const connection = parsed && compatibleConnection(context, parsed.connectionId);
-  if (!parsed || !connection) throw badRequest(`Unsupported compatible model "${compositeModelId}".`);
-  const apiKey = await connectionApiKey(context, connection);
-  if (connection.requiresApiKey && !apiKey) throw badRequest(connection.kind === "opencodeGo"
-    ? "OpenCode Go login is required. Run /connect in OpenCode or set OPENCODE_GO_API_KEY."
-    : `${connection.apiKeyEnv} is required in .env.`);
-  const label = `${connection.name} chat`;
-  try {
-    return await sdkJson(openAiClient({ baseURL: connection.llmBaseUrl || connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) })
-      .chat.completions.create(payload, callOptions(timeoutMs, LLM_RETRIES)), label);
-  } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), timeoutMs, apiKey);
-  }
-}
-
-async function connectionApiKey(context, connection) {
-  if (context.credentials) return runtimeCredential(context, connection.apiKeyEnv);
-  if (connection.kind === "opencodeGo") return (await resolveOpenCodeGoCredential()).key;
-  return runtimeCredential(context, connection.apiKeyEnv);
-}
-
-async function callOpenCodeGoMessages(context, compositeModelId, { system, prompt, maxTokens, temperature, topP }, timeoutMs) {
-  const parsed = parseCompatibleModelId(compositeModelId);
-  const connection = parsed && compatibleConnection(context, parsed.connectionId);
-  if (!parsed || connection?.kind !== "opencodeGo") throw badRequest(`Unsupported OpenCode Go model "${compositeModelId}".`);
-  const apiKey = await connectionApiKey(context, connection);
-  if (!apiKey) throw badRequest("OpenCode Go login is required. Run /connect in OpenCode or set OPENCODE_GO_API_KEY.");
-  const label = `${connection.name} messages`;
-  let data;
-  try {
-    // The SDK adds /v1/messages itself.
-    data = await sdkJson(anthropicClient({ baseURL: connection.baseUrl.replace(/\/v1$/, ""), apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) }).messages.create({
-      model: parsed.modelId,
-      system,
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: maxTokens,
-      temperature,
-      top_p: topP,
-    }, callOptions(timeoutMs, LLM_RETRIES)), label);
-  } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), timeoutMs, apiKey);
-  }
-  const text = Array.isArray(data?.content)
-    ? data.content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n")
-    : "";
-  if (!text) throw new Error(`${connection.name} messages did not include text content.`);
-  return { choices: [{ message: { content: text } }] };
-}
-
-async function callAnthropicMessages(context, compositeModelId, { system, prompt, effort }) {
-  const parsed = parseCompatibleModelId(compositeModelId);
-  const apiKey = runtimeCredential(context, "ANTHROPIC_API_KEY");
-  if (!apiKey) throw badRequest("ANTHROPIC_API_KEY is required in .env.");
-  const entry = context.modelCatalog.providers.anthropic?.textModels.find((model) => model.id === compositeModelId);
-  const label = "Anthropic messages";
-  // Adaptive thinking counts against max_tokens, so the callers' visible-output budgets would cut answers short. Billing counts only generated tokens.
-  const maxTokens = Math.min(entry?.maxTokens || 64_000, 64_000);
-  let message;
-  try {
-    // No thinking, temperature, top_p or top_k: current Claude models think adaptively and reject explicit settings.
-    message = await anthropicClient({ baseURL: ANTHROPIC_BASE_URL, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_STREAM_RESPONSE_BYTES, label) }).beta.messages.stream({
-      model: parsed.modelId,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: prompt }],
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      ...(effort && entry?.effortLevels?.includes(effort) ? { output_config: { effort } } : {}),
-    }, callOptions(LLM_TIMEOUT_MS, LLM_RETRIES)).finalMessage();
-  } catch (error) {
-    throw providerError(error, label, "ANTHROPIC_API_KEY", LLM_TIMEOUT_MS, apiKey);
-  }
-  if (message.stop_reason === "refusal") throw new Error(`Anthropic model ${parsed.modelId} declined this request (category: ${message.stop_details?.category ?? "none"}). Change the request or select another model.`);
-  if (message.stop_reason === "max_tokens") throw new Error(`Anthropic model ${parsed.modelId} stopped at its ${maxTokens}-token output limit before it finished. Lower the effort or shorten the request.`);
-  // A mid-stream fallback keeps the partial text and the fallback model continues it, so join every text block. Thinking and fallback blocks are not the answer.
-  const text = (message.content || []).filter((block) => block.type === "text").map((block) => block.text).join("");
-  if (!text) throw new Error("Anthropic messages did not include text content.");
-  return { choices: [{ message: { content: text } }] };
-}
-
-async function callOpenAiResponses(context, compositeModelId, { system, prompt, maxTokens, effort }, timeoutMs) {
-  const parsed = parseCompatibleModelId(compositeModelId);
-  const connection = parsed && compatibleConnection(context, parsed.connectionId);
-  if (!parsed || !connection) throw badRequest(`Unsupported compatible model "${compositeModelId}".`);
-  const apiKey = await connectionApiKey(context, connection);
-  if (connection.requiresApiKey && !apiKey) throw badRequest(`${connection.apiKeyEnv} is required in .env.`);
-  const body = {
-    model: parsed.modelId,
-    instructions: system,
-    input: prompt,
-    max_output_tokens: maxTokens,
-    text: { format: { type: "json_object" } },
-    // ponytail: no temperature/top_p — reasoning models reject them
-    ...(effort && effortLevelsForModel(parsed.modelId).includes(effort) ? { reasoning: { effort } } : {}),
-  };
-  const label = `${connection.name} responses`;
-  let data;
-  try {
-    data = await sdkJson(openAiClient({ baseURL: connection.llmBaseUrl || connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) })
-      .responses.create(body, callOptions(timeoutMs, LLM_RETRIES)), label);
-  } catch (error) {
-    throw providerError(error, label, apiKeyName(connection), timeoutMs, apiKey);
-  }
-  const text = data?.output_text
-    || (Array.isArray(data?.output) ? data.output.flatMap((item) => item?.content || []).find((part) => part?.type === "output_text")?.text : "");
-  if (!text) throw new Error(`${connection.name} responses did not include output text.`);
-  // ponytail: shim to chat/completions shape so every caller stays untouched
-  return { choices: [{ message: { content: text } }] };
-}
-
-export function parseChatJson(data, label) {
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error(`${label} response did not include choices[0].message.content.`);
-  try {
-    return parseJsonLoose(content);
-  } catch (error) {
-    throw new Error(`${label} response was not valid JSON: ${error.message}`);
-  }
-}
-
-export function parseJsonLoose(content) {
-  const text = String(content ?? "").trim();
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    // ponytail: models wrap JSON in ``` fences or prose; salvage the outermost object before giving up
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start < 0 || end <= start) throw error;
-    return JSON.parse(text.slice(start, end + 1));
-  }
 }
 
 export function assertWav(buffer, label = "TTS") {

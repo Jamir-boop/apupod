@@ -78,8 +78,6 @@ export const DEFAULT_DATA = {
       description: "Reusable profile for generating one episode per chapter. Valeria leads the reading and analysis; Diego comments with humor, emotion, and personal stories. The episode stays focused on the book and closes with a clear reflection.",
       speakerProfileId: "speaker-chisme-crianza",
       numSegments: 5,
-      outlineModel: "mimo-v2.5-pro",
-      transcriptModel: "mimo-v2.5-pro",
       language: "es-419",
       targetMinutes: 18
     }

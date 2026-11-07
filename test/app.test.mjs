@@ -13,19 +13,13 @@ import {
   createPodcastServer,
   parseTranscript,
   runProcess,
-  sanitizeProposalEpisode,
   transcriptSpeakerRule,
-  transcriptToMarkdown,
-  validateOutline,
   validateProfileData,
-  validateTranscriptJson,
   writeAudioAsWav,
 } from "../app.mjs";
 import { DEFAULT_DATA } from "../defaults.mjs";
+import { normalizeGeneratedPlan, normalizePlannedEpisode } from "../src/plans.mjs";
 import { html, script, seedEpisode, sendJson, silentWav, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
-
-// A key in the developer's shell would start Anthropic discovery against the stubs.
-delete process.env.ANTHROPIC_API_KEY;
 
 const speakers = DEFAULT_DATA.speakerProfiles[0].speakers;
 const execFileAsync = promisify(execFile);
@@ -107,16 +101,8 @@ test("speaker profiles accept 1 to 4 speakers", () => {
   assert.equal(spacedName.speakerProfiles[0].speakers[0].name, "Valeria");
 });
 
-test("assistant Episode Format proposal derives segments from target duration", () => {
-  const current = { numSegments: 20, targetMinutes: 18, defaultBriefing: "Legacy" };
-  assert.equal(sanitizeProposalEpisode({ numSegments: 99 }, current).numSegments, 5);
-  assert.equal(sanitizeProposalEpisode({ targetMinutes: 60 }, current).numSegments, 17);
-  assert.equal(sanitizeProposalEpisode({ targetMinutes: 5 }, current).numSegments, 3);
-  assert.equal(Object.hasOwn(sanitizeProposalEpisode({}, current), "defaultBriefing"), false);
-});
-
 test("saving Episode Formats derives segment count from target duration", async (t) => {
-  const { baseUrl } = await startTestServer(t);
+  const { baseUrl, rootDir } = await startTestServer(t);
   let profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   for (const [targetMinutes, numSegments] of [[18, 5], [60, 17], [5, 3]]) {
     profiles.episodeProfiles[0].targetMinutes = targetMinutes;
@@ -129,42 +115,20 @@ test("saving Episode Formats derives segment count from target duration", async 
     assert.equal(profiles.episodeProfiles[0].numSegments, numSegments);
     assert.equal(Object.hasOwn(profiles.episodeProfiles[0], "defaultBriefing"), false);
   }
-  profiles.episodeProfiles[0].outlineEffort = "max";
-  profiles.episodeProfiles[0].transcriptEffort = "nope";
+  // Formats and Hosts save without text-model fields, and stale ones are dropped.
+  Object.assign(profiles.episodeProfiles[0], { outlineModel: "mimo-v2.5-pro", transcriptModel: "mimo-v2.5-pro", outlineEffort: "max", transcriptEffort: "nope" });
   const response = await sendJson(`${baseUrl}/api/profiles`, profiles, "PUT");
   const saved = await response.json();
   assert.equal(response.status, 200, saved.error);
-  assert.equal(saved.profiles.episodeProfiles[0].outlineEffort, "max");
-  assert.equal(saved.profiles.episodeProfiles[0].transcriptEffort, "");
+  for (const key of ["outlineModel", "transcriptModel", "outlineEffort", "transcriptEffort"]) assert.equal(Object.hasOwn(saved.profiles.episodeProfiles[0], key), false, key);
+  const stored = JSON.parse(await readFile(join(rootDir, "data", "profiles.json"), "utf8"));
+  assert.equal(Object.hasOwn(stored.episodeProfiles[0], "outlineModel"), false);
 });
 
 test("transcript leadership follows configured speaker count", () => {
   assert.match(transcriptSpeakerRule(["Ana"]), /Use only Ana/);
   assert.match(transcriptSpeakerRule(["Ana", "Luis", "Sara"]), /^Ana is the lead host/);
   assert.doesNotMatch(transcriptSpeakerRule(["Ana", "Luis"]), /Valeria/);
-});
-
-test("structured transcript converts to validated Markdown", () => {
-  const value = {
-    title: "Episode",
-    segments: Array.from({ length: 5 }, (_, index) => ({
-      number: index + 1,
-      title: `Part ${index + 1}`,
-      turns: [
-        { speaker: "Valeria", delivery: "cálida ] [ natural", text: `Idea ${index + 1}` },
-        { speaker: "Diego", delivery: "humor seco", text: `Reaction ${index + 1}` },
-      ],
-    })),
-  };
-  assert.equal(validateTranscriptJson(value, 5, ["Valeria", "Diego"]), true);
-  assert.equal(validateTranscriptJson({ ...value, segments: value.segments.slice(0, 3) }, 5, ["Valeria", "Diego"]), true);
-  assert.throws(() => validateTranscriptJson({ ...value, segments: [] }, 5, ["Valeria", "Diego"]), /at least 1 segment/);
-  assert.throws(() => validateTranscriptJson({ ...value, segments: [...value.segments, { ...value.segments[0], number: 6 }] }, 5, ["Valeria", "Diego"]), /at most 5 segments/);
-  const markdown = transcriptToMarkdown(value);
-  const parsed = parseTranscript(markdown, speakers, 5);
-  assert.equal(parsed.segments.length, 5);
-  assert.equal(parsed.warning, "");
-  assert.deepEqual(parsed.segments[0].turns[0], { speaker: "Valeria", delivery: "cálida natural", text: "Idea 1" });
 });
 
 test("transcript warns for fewer segments and rejects invalid counts", () => {
@@ -174,13 +138,6 @@ test("transcript warns for fewer segments and rejects invalid counts", () => {
   assert.throws(() => parseTranscript("", speakers, 5), /at least 1 segment/);
   const excessive = Array.from({ length: 6 }, (_, index) => `## Segmento ${index + 1}\nValeria: hello`).join("\n");
   assert.throws(() => parseTranscript(excessive, speakers, 5), /at most 5 segments/);
-});
-
-test("outline validation enforces exact ordered segments", () => {
-  const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: "Title", points: ["Point"] })) };
-  assert.equal(validateOutline(outline, 5), true);
-  outline.segments[2].number = 9;
-  assert.throws(() => validateOutline(outline, 5), /segment 3 is invalid/);
 });
 
 test("clip cache changes when delivery changes", () => {
@@ -248,8 +205,8 @@ test("ElevenLabs voices and preview use server-side key", async (t) => {
 
   const initialState = await (await fetch(`${baseUrl}/api/state`)).json();
   initialState.config.providers.elevenlabs.activeModels = {
-    eleven_v3: { text: false, tts: true },
-    eleven_flash_v2_5: { text: false, tts: true },
+    eleven_v3: { tts: true },
+    eleven_flash_v2_5: { tts: true },
   };
   let response = await sendJson(`${baseUrl}/api/config`, initialState.config, "PUT");
   assert.equal(response.status, 200);
@@ -572,7 +529,7 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
   assert.equal(state.episodes.length, 1);
 });
 
-test("knowledge deletion clears plans, episodes, and chats", async (t) => {
+test("knowledge deletion clears plans and episodes", async (t) => {
   const { rootDir, baseUrl } = await startTestServer(t);
   let response = await sendJson(`${baseUrl}/api/knowledge`, { name: "delete.md", content: "# Delete me" });
   const knowledge = await response.json();
@@ -580,12 +537,10 @@ test("knowledge deletion clears plans, episodes, and chats", async (t) => {
   const plan = (await response.json()).plan;
   response = await sendJson(`${baseUrl}/api/episodes`, { name: "Episode", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id });
   const episode = await response.json();
-  const chatPath = join(rootDir, "data", "chat", "kb-delete-chat.json");
-  await writeFile(chatPath, JSON.stringify({ threadId: "kb-delete-chat", kind: "profile", title: "KB", kbId: knowledge.id, messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
 
   const episodePath = join(rootDir, "data", "episodes", episode.id, "episode.json");
   const activeEpisode = JSON.parse(await readFile(episodePath, "utf8"));
-  activeEpisode.job = { id: "active", type: "transcript", status: "running" };
+  activeEpisode.job = { id: "active", type: "tts", status: "running" };
   await writeFile(episodePath, JSON.stringify(activeEpisode, null, 2));
   response = await fetch(`${baseUrl}/api/knowledge/${knowledge.id}`, { method: "DELETE" });
   assert.equal(response.status, 409);
@@ -595,12 +550,11 @@ test("knowledge deletion clears plans, episodes, and chats", async (t) => {
   response = await fetch(`${baseUrl}/api/knowledge/${knowledge.id}`, { method: "DELETE" });
   const deleted = await response.json();
   assert.equal(response.status, 200);
-  assert.deepEqual(deleted.cleared, { plans: 1, episodes: 1, chats: 1 });
+  assert.deepEqual(deleted.cleared, { plans: 1, episodes: 1 });
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
   assert.equal(state.knowledgeBases.some((item) => item.id === knowledge.id), false);
   assert.equal(state.plans.find((item) => item.id === plan.id).knowledgeBaseId, "");
   assert.equal(state.episodes.find((item) => item.id === episode.id).knowledgeBaseId, "");
-  assert.equal(JSON.parse(await readFile(chatPath, "utf8")).kbId, "");
   await assert.rejects(readFile(join(rootDir, "data", "knowledge", `${knowledge.id}.md`)), { code: "ENOENT" });
 });
 
@@ -712,9 +666,9 @@ test("model catalog uses provider APIs without exposing keys", async (t) => {
     const value = await (await fetch(`${baseUrl}/api/models`)).json();
     return value.status === "ready" ? value : null;
   });
-  assert.deepEqual(catalog.providers.mimo.textModels.map((model) => model.id), ["mimo-v2.5-pro"]);
+  assert.equal(Object.hasOwn(catalog.providers.mimo, "textModels"), false);
   assert.deepEqual(catalog.providers.mimo.ttsModels.map((model) => model.id), ["mimo-v2.5-tts"]);
-  assert.ok(catalog.providers.mimo.discoveredModels.some((model) => model.id === "mimo-v2.5"));
+  assert.deepEqual(catalog.providers.mimo.discoveredModels.map((model) => model.id), ["mimo-v2.5-tts", "mimo-v2.5-tts-voiceclone"]);
   assert.deepEqual(catalog.providers.elevenlabs.ttsModels, []);
   assert.deepEqual(catalog.providers.elevenlabs.discoveredModels.map((model) => model.id), ["eleven_v3"]);
   assert.ok(catalog.languages.some((language) => language.id === "es-419" && language.apiCode === "es"));
@@ -871,128 +825,6 @@ test("failed transcript replacement restores episode metadata", async (t) => {
   assert.equal(await readFile(metadataPath, "utf8"), before);
 });
 
-test("transcript jobs return 202 and run through one FIFO queue", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "test-mimo-key", ELEVENLABS_API_KEY: null });
-
-  let releaseOutline;
-  const outlineGate = new Promise((resolve) => { releaseOutline = resolve; });
-  t.after(() => releaseOutline());
-  let chatCalls = 0;
-  const chatRequests = [];
-  const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Part ${index + 1}`, points: ["Point"] })) };
-  const transcript = {
-    title: "Episode",
-    segments: Array.from({ length: 5 }, (_, index) => ({
-      number: index + 1,
-      title: `Part ${index + 1}`,
-      turns: [
-        { speaker: "Valeria", delivery: "warm", text: longText(`Idea ${index + 1}`) },
-        { speaker: "Diego", delivery: "dry", text: longText(`Reaction ${index + 1}`) },
-      ],
-    })),
-  };
-  const fetchImpl = async (url, options = {}) => {
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-    if (String(url).endsWith("/chat/completions")) {
-      chatCalls += 1;
-      chatRequests.push(JSON.parse(options.body));
-      if (chatCalls === 1) await outlineGate;
-      const content = chatCalls % 2 === 1 ? outline : transcript;
-      return Response.json({ choices: [{ message: { content: JSON.stringify(content) } }] });
-    }
-    throw new Error(`Unexpected URL ${url}`);
-  };
-  const { baseUrl } = await startTestServer(t, { fetchImpl });
-
-  const profileData = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
-  profileData.episodeProfiles[0].language = "fr-FR";
-  profileData.speakerProfiles[0].speakers[0].accent = "Québécois";
-  let response = await sendJson(`${baseUrl}/api/profiles`, profileData, "PUT");
-  assert.equal(response.status, 200);
-
-  response = await sendJson(`${baseUrl}/api/knowledge`, { name: "book.md", content: "# Grounded" });
-  const knowledge = await response.json();
-  const createEpisode = async (name) => (await (await sendJson(`${baseUrl}/api/episodes`, { name, episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id })).json());
-  const first = await createEpisode("First");
-  const second = await createEpisode("Second");
-
-  const duplicateResponses = await Promise.all([
-    fetch(`${baseUrl}/api/episodes/${first.id}/generate`, { method: "POST" }),
-    fetch(`${baseUrl}/api/episodes/${first.id}/generate`, { method: "POST" }),
-  ]);
-  assert.deepEqual(duplicateResponses.map((item) => item.status).sort(), [202, 409]);
-  response = await fetch(`${baseUrl}/api/episodes/${second.id}/generate`, { method: "POST" });
-  assert.equal(response.status, 202);
-
-  const active = await (await fetch(`${baseUrl}/api/jobs`)).json();
-  assert.equal(active.jobs.find((job) => job.episodeId === first.id).status, "running");
-  assert.equal(active.jobs.find((job) => job.episodeId === second.id).status, "queued");
-  releaseOutline();
-
-  const finished = await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return value.jobs.filter((job) => [first.id, second.id].includes(job.episodeId)).every((job) => job.status === "completed") ? value : null;
-  });
-  assert.equal(finished.activeJobId, null);
-  assert.equal(chatCalls, 4);
-  assert.match(chatRequests[1].messages[1].content, /Write a natural transcript in French \(France\)/);
-  assert.match(chatRequests[1].messages[1].content, /Accent: Québécois/);
-  assert.match(chatRequests[1].messages[1].content, /NON-NEGOTIABLE LANGUAGE OVERRIDE/);
-  assert.doesNotMatch(chatRequests[1].messages[1].content, /Write a natural Spanish transcript/);
-  const saved = await (await fetch(`${baseUrl}/api/episodes/${second.id}`)).json();
-  assert.equal(saved.status, "transcript_ready");
-  assert.match(saved.transcript, /Valeria \[warm\]: Idea 1/);
-});
-
-test("short generated transcripts save with warning and can be retried", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "test-mimo-key" });
-
-  let chatCalls = 0;
-  const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Part ${index + 1}`, points: ["Point"] })) };
-  const transcript = (long, segments = 5) => ({
-    title: "Episode",
-    segments: Array.from({ length: segments }, (_, index) => ({
-      number: index + 1,
-      title: `Part ${index + 1}`,
-      turns: [
-        { speaker: "Valeria", delivery: "warm", text: long ? longText(`Idea ${index + 1}`) : "Short idea" },
-        { speaker: "Diego", delivery: "dry", text: long ? longText(`Reaction ${index + 1}`) : "Short reaction" },
-      ],
-    })),
-  });
-  const fetchImpl = async (url) => {
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-    if (String(url).endsWith("/chat/completions")) {
-      chatCalls += 1;
-      return Response.json({ choices: [{ message: { content: JSON.stringify(chatCalls % 2 ? outline : transcript(chatCalls >= 4, chatCalls >= 4 ? 5 : 3)) } }] });
-    }
-    throw new Error(`Unexpected URL ${url}`);
-  };
-  const { baseUrl } = await startTestServer(t, { fetchImpl });
-  const episode = await seedEpisode(baseUrl, "Retry");
-
-  await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
-  let result = await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
-  });
-  const shortJob = result.jobs.find((job) => job.episodeId === episode.id);
-  assert.equal(shortJob.status, "completed");
-  assert.match(shortJob.message, /3 of 5 configured segments/);
-  assert.match(shortJob.message, /Transcript is too short: 12 words/);
-  const savedShort = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
-  assert.equal(savedShort.status, "transcript_ready");
-  assert.ok(savedShort.transcriptWords > 0);
-
-  await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
-  result = await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
-  });
-  assert.equal(result.jobs.find((job) => job.episodeId === episode.id).status, "completed");
-  assert.ok((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).transcriptWords >= 2250);
-});
-
 test("TTS jobs report progress and publish MP3", async (t) => {
   withEnv(t, { MIMO_API_KEY: "test-mimo-key", ELEVENLABS_API_KEY: null, MIMO_BASE_URL: process.env.MIMO_BASE_URL });
   let ttsCalls = 0;
@@ -1110,29 +942,10 @@ test("TTS jobs report progress and publish MP3", async (t) => {
   assert.equal(response.status, 416);
 });
 
-test("transcript prompt adds cues, supports no KB, and renames placeholder", async (t) => {
+test("transcript prompt adds cues, supports no KB, and manual transcripts keep supported cues", async (t) => {
   withEnv(t, { MIMO_API_KEY: "test-mimo-key" });
-  const requests = [];
-  const fetchImpl = async (url, options = {}) => {
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-    if (String(url).endsWith("/chat/completions")) {
-      const request = JSON.parse(options.body);
-      requests.push(request);
-      if (request.audio) return Response.json({ choices: [{ message: { audio: { data: silentWav().toString("base64") } } }] });
-      const system = request.messages[0].content;
-      if (system.includes("create grounded podcast outlines")) {
-        return Response.json({ choices: [{ message: { content: JSON.stringify({ segments: Array.from({ length: 3 }, (_, index) => ({ number: index + 1, title: `Segment ${index + 1}`, purpose: "Discuss", points: ["Point"], closingBeat: "Close" })) }) } }] });
-      }
-      const words = Array.from({ length: 130 }, (_, index) => `word${index}`).join(" ");
-      return Response.json({ choices: [{ message: { content: JSON.stringify({
-        title: "Generated Title",
-        segments: Array.from({ length: 3 }, (_, index) => ({
-          number: index + 1,
-          title: `Segment ${index + 1}`,
-          turns: [{ speaker: "Valeria", delivery: "warm", text: `${words}${index === 0 ? " [pause]" : ""}` }],
-        })),
-      }) } }] });
-    }
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-tts" }] });
     throw new Error(`Unexpected URL ${url}`);
   };
   const { baseUrl } = await startTestServer(t, { fetchImpl });
@@ -1160,27 +973,15 @@ test("transcript prompt adds cues, supports no KB, and renames placeholder", asy
   assert.match(prompt.effectivePrompt, /Keep reactions restrained/);
   assert.equal(prompt.capabilities[0].cueMode, "tags");
 
-  response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/generate`, { autoTts: true });
-  assert.equal(response.status, 202);
-  const finishedJobs = await waitFor(async () => {
-    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    const job = jobs.jobs.find((item) => item.episodeId === episode.id);
-    return job?.type === "tts" && job.status === "completed" ? jobs : null;
-  }, 30_000);
-  assert.deepEqual(finishedJobs.jobs.filter((job) => job.episodeId === episode.id).map((job) => job.type).sort(), ["transcript", "tts"]);
-  const generated = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
-  assert.equal(generated.name, "Generated Title");
-  assert.match(generated.transcript, /\[pause\]/);
-  assert.equal(generated.audioReady, true);
-  const transcriptRequest = requests.find((request) => request.messages[0].content.includes("write grounded"));
-  assert.match(transcriptRequest.messages[1].content, /TTS-AWARE DIALOGUE RULES/);
-  assert.match(transcriptRequest.messages[1].content, /Keep reactions restrained/);
-  assert.match(transcriptRequest.messages[1].content, /No knowledge base was supplied/);
+  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nValeria: Idea ${index + 1}${index === 0 ? " [pause]" : ""}.`).join("\n\n");
+  response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
+  assert.equal(response.status, 200, (await response.clone().json()).error);
+  const saved = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.match(saved.transcript, /\[pause\]/);
 
-  response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript: generated.transcript.replace("[pause]", '<break time="1s" />') }, "PUT");
+  response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript: transcript.replace("[pause]", '<break time="1s" />') }, "PUT");
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /does not support SSML break tags/);
-
 });
 
 test("server restart marks active jobs interrupted", async (t) => {
@@ -1229,28 +1030,6 @@ test("job history keeps the newest 30 persisted jobs", async (t) => {
 });
 
 // B1/B5 share one stubbed transcript-generation harness.
-function transcriptJobFetch({ outlineContent, transcriptGate }) {
-  const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Part ${index + 1}`, points: ["Point"] })) };
-  const transcript = {
-    title: "Model chosen title",
-    segments: Array.from({ length: 5 }, (_, index) => ({
-      number: index + 1,
-      title: `Part ${index + 1}`,
-      turns: [
-        { speaker: "Valeria", delivery: "warm", text: longText(`Idea ${index + 1}`) },
-        { speaker: "Diego", delivery: "dry", text: longText(`Reaction ${index + 1}`) },
-      ],
-    })),
-  };
-  return async (url, init) => {
-    if (!String(url).endsWith("/chat/completions")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-    // Only the transcript prompt carries the approved outline, so a retry cannot desync the stub.
-    if (!String(init?.body).includes("Approved outline:")) return Response.json({ choices: [{ message: { content: outlineContent ?? JSON.stringify(outline) } }] });
-    if (transcriptGate) await transcriptGate();
-    return Response.json({ choices: [{ message: { content: JSON.stringify(transcript) } }] });
-  };
-}
-
 async function seedRenderedEpisode(baseUrl, rootDir, name) {
   const transcript = Array.from({ length: 5 }, (_, index) =>
     `## Segmento ${index + 1} — Test\nValeria: Idea ${index + 1}.\nDiego: Reaction ${index + 1}.`
@@ -1263,88 +1042,18 @@ async function seedRenderedEpisode(baseUrl, rootDir, name) {
   return episode;
 }
 
-test("a failed transcript job keeps the existing render playable", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "test-mimo-key" });
-  const fetchImpl = transcriptJobFetch({ outlineContent: "not json at all" });
-  const { rootDir, baseUrl } = await startTestServer(t, { fetchImpl });
-  const episode = await seedRenderedEpisode(baseUrl, rootDir, "Rendered episode");
-
-  assert.equal((await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" })).status, 202);
-  await waitFor(async () => {
-    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return jobs.jobs.find((job) => job.episodeId === episode.id)?.status === "failed";
-  });
-
-  const saved = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
-  assert.equal(saved.status, "failed");
-  assert.ok(saved.lastError);
-  assert.equal(saved.audioReady, true);
-  assert.match(saved.audioUrl, /episode\.mp3$/);
-  assert.equal(await readFile(join(rootDir, "data", "episodes", episode.id, "episode.mp3"), "utf8"), "existing-audio");
-});
-
 test("the existing render stays playable until a new transcript replaces it", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "test-mimo-key" });
-  let releaseTranscript;
-  let transcriptStarted = false;
-  const transcriptGate = new Promise((resolve) => { releaseTranscript = resolve; });
-  t.after(() => releaseTranscript());
-  const fetchImpl = transcriptJobFetch({ transcriptGate: async () => { transcriptStarted = true; await transcriptGate; } });
-  const { rootDir, baseUrl } = await startTestServer(t, { fetchImpl });
+  const { rootDir, baseUrl } = await startTestServer(t);
   const episode = await seedRenderedEpisode(baseUrl, rootDir, "Rendered episode");
+  const before = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
+  assert.equal(before.audioReady, true);
+  assert.match(before.audioUrl, /episode\.mp3$/);
 
-  assert.equal((await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" })).status, 202);
-  await waitFor(() => transcriptStarted);
-  const during = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
-  assert.equal(during.audioReady, true);
-  assert.match(during.audioUrl, /episode\.mp3$/);
-
-  releaseTranscript();
-  await waitFor(async () => {
-    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return jobs.jobs.find((job) => job.episodeId === episode.id)?.status === "completed";
-  });
+  const response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript: before.transcript.replace("Idea 1.", "New idea 1.") }, "PUT");
+  assert.equal(response.status, 200);
   const after = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
   assert.equal(after.audioReady, false);
   assert.equal(after.audioUrl, null);
-});
-
-test("a rename during transcript generation outranks the model title", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "test-mimo-key" });
-  let releaseTranscript;
-  let transcriptStarted = false;
-  const transcriptGate = new Promise((resolve) => { releaseTranscript = resolve; });
-  t.after(() => releaseTranscript());
-  let gateArmed = true;
-  const fetchImpl = transcriptJobFetch({
-    transcriptGate: async () => { if (!gateArmed) return; transcriptStarted = true; await transcriptGate; },
-  });
-  const { baseUrl } = await startTestServer(t, { fetchImpl });
-  let response = await sendJson(`${baseUrl}/api/knowledge`, { name: "book.md", content: "# Grounded" });
-  const knowledge = await response.json();
-  const createEpisode = async () => (await (await sendJson(`${baseUrl}/api/episodes`, { name: "New episode", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id })).json());
-
-  const renamed = await createEpisode();
-  assert.equal((await fetch(`${baseUrl}/api/episodes/${renamed.id}/generate`, { method: "POST" })).status, 202);
-  await waitFor(() => transcriptStarted);
-  response = await sendJson(`${baseUrl}/api/episodes/${renamed.id}`, { name: "User chosen name" }, "PATCH");
-  assert.equal(response.status, 200);
-  releaseTranscript();
-  await waitFor(async () => {
-    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return jobs.jobs.find((job) => job.episodeId === renamed.id)?.status === "completed";
-  });
-  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${renamed.id}`)).json()).name, "User chosen name");
-
-  // The placeholder name is still replaced by the model title when nobody renames the episode.
-  gateArmed = false;
-  const untouched = await createEpisode();
-  assert.equal((await fetch(`${baseUrl}/api/episodes/${untouched.id}/generate`, { method: "POST" })).status, 202);
-  await waitFor(async () => {
-    const jobs = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return jobs.jobs.find((job) => job.episodeId === untouched.id)?.status === "completed";
-  });
-  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${untouched.id}`)).json()).name, "Model chosen title");
 });
 
 test("runProcess stops and reports a command that outlives its timeout", async () => {
@@ -1408,8 +1117,8 @@ test("a failed config save restores the previous .env with owner-only permission
 
   assert.equal((await saveConfig("first-key")).status, 200);
   // A directory in place of config.json fails the write that follows the .env update.
-  await rm(join(rootDir, "data", "config.json"));
-  await mkdir(join(rootDir, "data", "config.json"));
+  await rm(join(rootDir, "config.json"));
+  await mkdir(join(rootDir, "config.json"));
   assert.equal((await saveConfig("second-key")).status, 500);
 
   const env = await readFile(join(rootDir, ".env"), "utf8");
@@ -1428,17 +1137,18 @@ test("an unreadable data file is reported instead of quarantined", async (t) => 
 });
 
 test("corrupt config and profiles are quarantined at boot and JSON errors name the file", async (t) => {
-  for (const file of ["config.json", "profiles.json"]) {
+  // config.json lives in the config dir (rootDir in tests); profiles.json lives in the data dir.
+  for (const [dir, file] of [[[], "config.json"], [["data"], "profiles.json"]]) {
     const { rootDir, baseUrl } = await startTestServer(t, {}, async (root) => {
-      await mkdir(join(root, "data"), { recursive: true });
-      await writeFile(join(root, "data", file), '{"truncated":');
+      await mkdir(join(root, ...dir), { recursive: true });
+      await writeFile(join(root, ...dir, file), '{"truncated":');
     });
     const state = await (await fetch(`${baseUrl}/api/state`)).json();
     assert.ok(state.profiles.speakerProfiles.length >= 1);
     assert.ok(state.config.providers.mimo);
-    const quarantined = (await readdir(join(rootDir, "data"))).filter((name) => name.startsWith(`${file}.corrupt-`));
+    const quarantined = (await readdir(join(rootDir, ...dir))).filter((name) => name.startsWith(`${file}.corrupt-`));
     assert.equal(quarantined.length, 1, `expected one quarantined copy of ${file}`);
-    assert.equal(await readFile(join(rootDir, "data", quarantined[0]), "utf8"), '{"truncated":');
+    assert.equal(await readFile(join(rootDir, ...dir, quarantined[0]), "utf8"), '{"truncated":');
   }
 
   const { rootDir: indexRoot, baseUrl } = await startTestServer(t, {}, async (root) => {
@@ -1469,8 +1179,6 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   storedEpisode.ttsPreparation = { prompt: "obsolete" };
   storedEpisode.job = { id: "obsolete-preparation", type: "tts_prepare", status: "completed" };
   await writeFile(episodePath, JSON.stringify(storedEpisode, null, 2));
-  const legacyChatPath = join(rootDir, "data", "chat", "legacy-tts.json");
-  await writeFile(legacyChatPath, JSON.stringify({ threadId: "legacy-tts", kind: "tts", messages: [] }));
   await writeFile(join(clipsDir, `${"e".repeat(64)}.wav`), silentWav());
   const cachedSilence = join(clipsDir, "silence-1200ms.wav");
   await writeFile(cachedSilence, silentWav());
@@ -1492,7 +1200,6 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   assert.equal(cleanedEpisode.job, undefined);
   for (const name of ["outline.json", "transcript.json", "concat.txt"]) await assert.rejects(readFile(join(healthyDir, name)), { code: "ENOENT" });
   for (const name of ["tts-script.md", "tts-script.draft.md"]) await assert.rejects(readFile(join(healthyDir, name)), { code: "ENOENT" });
-  await assert.rejects(readFile(legacyChatPath), { code: "ENOENT" });
   await assert.rejects(readFile(join(clipsDir, `${"e".repeat(64)}.wav`)), { code: "ENOENT" });
   assert.ok((await readFile(cachedSilence)).length > 0);
   assert.equal(await readFile(join(corruptDir, "outline.json"), "utf8"), "preserve");
@@ -1526,219 +1233,14 @@ test("TTS rejects missing FFmpeg before provider calls", async (t) => {
   assert.equal(providerCalls, callsBeforeRender);
 });
 
-test("gpt-5.5/5.6 on the built-in OpenAI connection use the Responses API", async (t) => {
-  withEnv(t, { OPENAI_API_KEY: null });
-
-  const generated = { episodeFormat: { name: "Interview", description: "Focused" }, episodes: [{ number: 1, title: "Only" }] };
-  const responsesCalls = [];
-  const chatCalls = [];
-  const fetchImpl = async (url, options = {}) => {
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "gpt-5.6" }, { id: "gpt-5.5-pro" }, { id: "gpt-4o-mini" }] });
-    if (String(url).endsWith("/responses")) {
-      responsesCalls.push({ url: String(url), options });
-      return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(generated) }] }] });
-    }
-    if (String(url).endsWith("/chat/completions")) {
-      chatCalls.push({ url: String(url), options });
-      return Response.json({ choices: [{ message: { content: JSON.stringify(generated) } }] });
-    }
-    throw new Error(`Unexpected URL ${url}`);
-  };
-  const { baseUrl } = await startTestServer(t, { fetchImpl });
-
-  let response = await sendJson(`${baseUrl}/api/config`, {
-    providers: {
-      mimo: {},
-      elevenlabs: {},
-      openai: {
-        baseUrl: "https://api.openai.com/v1",
-        llmBaseUrl: "https://llm.example/v1",
-        enabled: true,
-        apiKey: "sk-openai-test",
-        activeModels: { "gpt-5.6": { text: true, tts: false }, "gpt-5.5-pro": { text: true, tts: false }, "gpt-4o-mini": { text: true, tts: false } },
-      },
-    },
-    compatibleConnections: [],
-  }, "PUT");
-  assert.equal(response.status, 200);
-
-  const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  response = await sendJson(`${baseUrl}/api/plans`, { name: "Responses plan", speakerProfileId: state.profiles.speakerProfiles[0].id, planningModel: "compat:openai:gpt-5.6", planningEffort: "high", theme: "Reasoning", audience: "Devs", goal: "Test", episodeCount: 1 });
-  let plan = (await response.json()).plan;
-  assert.equal(response.status, 201);
-  assert.equal(plan.planningEffort, "high");
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, {});
-  const generatedBody = await response.json();
-  assert.equal(response.status, 200, generatedBody.error);
-  assert.equal(responsesCalls.length, 1);
-  assert.equal(responsesCalls[0].url, "https://llm.example/v1/responses");
-  assert.equal(header(responsesCalls[0].options, "authorization"), "Bearer sk-openai-test");
-  const responsesRequest = JSON.parse(responsesCalls[0].options.body);
-  assert.equal(responsesRequest.model, "gpt-5.6");
-  assert.equal(typeof responsesRequest.max_output_tokens, "number");
-  assert.equal(responsesRequest.reasoning.effort, "high");
-  assert.equal(responsesRequest.text.format.type, "json_object");
-  assert.equal(responsesRequest.temperature, undefined);
-  assert.equal(responsesRequest.top_p, undefined);
-  assert.equal(typeof responsesRequest.instructions, "string");
-  assert.match(responsesRequest.input, /Reasoning/);
-  assert.equal(chatCalls.filter((call) => call.url.includes("llm.example")).length, 0);
-
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}`, { ...generatedBody.plan, planningModel: "compat:openai:gpt-5.5-pro", planningEffort: "low" }, "PUT");
-  plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, { replaceExisting: true });
-  plan = (await response.json()).plan;
-  assert.equal(response.status, 200);
-  assert.equal(JSON.parse(responsesCalls.at(-1).options.body).reasoning, undefined);
-
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}`, { ...plan, planningModel: "compat:openai:gpt-4o-mini", planningEffort: "bogus" }, "PUT");
-  plan = (await response.json()).plan;
-  assert.equal(response.status, 200);
-  assert.equal(plan.planningEffort, "");
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, { replaceExisting: true });
-  assert.equal(response.status, 200);
-  assert.equal(responsesCalls.length, 2);
-  assert.equal(chatCalls.filter((call) => call.url === "https://llm.example/v1/chat/completions").length, 1);
-});
-
-test("OpenCode Go reuses login credentials and routes both model protocols", async (t) => {
-  withEnv(t, { MIMO_API_KEY: null, ELEVENLABS_API_KEY: null, OPENAI_API_KEY: null, CHATTERBOX_API_KEY: null, OPENCODE_GO_API_KEY: null, XDG_DATA_HOME: process.env.XDG_DATA_HOME });
-
-  const calls = [];
-  const chatModels = ["grok-4.5", "glm-5.2", "glm-5.1", "glm-5", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni", "hy3", "hy3-preview"];
-  const messagesModels = ["minimax-m3", "minimax-m2.7", "minimax-m2.5", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus"];
-  const returnedModels = [...chatModels, ...messagesModels, "future-unknown"];
-  const generatedPlan = { episodeFormat: { name: "OpenCode format", description: "Protocol test" }, episodes: [{ number: 1, title: "Only" }] };
-  const fetchImpl = async (url, options = {}) => {
-    calls.push({ url: String(url), options });
-    if (String(url).endsWith("/models")) return Response.json({ data: returnedModels.map((id) => ({ id })) });
-    if (String(url).endsWith("/chat/completions")) return Response.json({ choices: [{ message: { content: JSON.stringify(generatedPlan) } }] });
-    if (String(url).endsWith("/messages")) return Response.json({ content: [{ type: "text", text: JSON.stringify(generatedPlan) }] });
-    throw new Error(`Unexpected URL ${url}`);
-  };
-  let authPath;
-  const { rootDir, baseUrl } = await startTestServer(t, { fetchImpl }, async (directory) => {
-    const dataHome = join(directory, "xdg");
-    authPath = join(dataHome, "opencode", "auth.json");
-    await mkdir(join(dataHome, "opencode"), { recursive: true });
-    await writeFile(authPath, JSON.stringify({ "opencode-go": { type: "api", key: "go-login-secret" } }), { mode: 0o600 });
-    process.env.XDG_DATA_HOME = dataHome;
-  });
-
-  const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  assert.equal(state.config.providers.opencodeGo.hasApiKey, true);
-  assert.equal(state.config.providers.opencodeGo.credentialSource, "opencode-login");
-  assert.deepEqual(state.config.providers.opencodeGo.activeModels, {});
-  let catalog = await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/models`)).json();
-    return value.providers.opencodeGo.status === "ready" ? value : null;
-  });
-  const discoveredById = new Map(catalog.providers.opencodeGo.discoveredModels.map((model) => [model.rawId, model]));
-  for (const id of chatModels) assert.deepEqual({ protocol: discoveredById.get(id)?.protocol, supported: discoveredById.get(id)?.supported }, { protocol: "chat", supported: true });
-  for (const id of messagesModels) assert.deepEqual({ protocol: discoveredById.get(id)?.protocol, supported: discoveredById.get(id)?.supported }, { protocol: "messages", supported: true });
-  assert.deepEqual({ protocol: discoveredById.get("future-unknown")?.protocol, supported: discoveredById.get("future-unknown")?.supported }, { protocol: null, supported: false });
-  assert.deepEqual(catalog.providers.opencodeGo.textModels, []);
-  assert.equal(header(calls.find((call) => call.url.endsWith("/models")).options, "authorization"), "Bearer go-login-secret");
-
-  state.config.providers.opencodeGo.activeModels = {
-    "kimi-k3": { text: true, tts: true },
-    "minimax-m3": { text: true, tts: false },
-    "future-unknown": { text: true, tts: false },
-  };
-  let response = await sendJson(`${baseUrl}/api/config`, state.config, "PUT");
-  const configured = await response.json();
-  assert.equal(response.status, 200, configured.error);
-  assert.deepEqual(configured.config.providers.opencodeGo.activeModels["kimi-k3"], { text: true, tts: false });
-  assert.equal(configured.config.providers.opencodeGo.activeModels["future-unknown"], undefined);
-  assert.deepEqual(configured.modelCatalog.providers.opencodeGo.textModels.map((model) => model.id), ["compat:opencode-go:kimi-k3", "compat:opencode-go:minimax-m3"]);
-  assert.doesNotMatch(JSON.stringify(configured), /go-login-secret/);
-  assert.doesNotMatch(await readFile(join(rootDir, "data", "config.json"), "utf8"), /go-login-secret/);
-  assert.doesNotMatch(await readFile(join(rootDir, ".env"), "utf8"), /go-login-secret/);
-
-  const generationCalls = () => calls.filter((call) => call.url.endsWith("/chat/completions") || call.url.endsWith("/messages")).length;
-  const callsBeforeUnsupported = generationCalls();
-  response = await sendJson(`${baseUrl}/api/plans`, { name: "Unsupported Go plan", speakerProfileId: state.profiles.speakerProfiles[0].id, planningModel: "compat:opencode-go:future-unknown", theme: "Routing", audience: "Developers", goal: "Reject unknown", episodeCount: 1 });
-  const unsupportedPlan = (await response.json()).plan;
-  assert.equal(response.status, 201);
-  response = await sendJson(`${baseUrl}/api/plans/${unsupportedPlan.id}/generate`, {});
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /Unsupported or inactive text model/i);
-  assert.equal(generationCalls(), callsBeforeUnsupported);
-
-  response = await sendJson(`${baseUrl}/api/plans`, { name: "OpenCode Go plan", speakerProfileId: state.profiles.speakerProfiles[0].id, planningModel: "compat:opencode-go:kimi-k3", theme: "Routing", audience: "Developers", goal: "Verify Go", episodeCount: 1 });
-  let plan = (await response.json()).plan;
-  assert.equal(response.status, 201);
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, {});
-  const generated = await response.json();
-  plan = generated.plan;
-  assert.equal(response.status, 200, generated.error);
-  const chatCall = calls.find((call) => call.url.endsWith("/chat/completions"));
-  assert.equal(chatCall.url, "https://opencode.ai/zen/go/v1/chat/completions");
-  assert.equal(header(chatCall.options, "authorization"), "Bearer go-login-secret");
-  assert.equal(JSON.parse(chatCall.options.body).model, "kimi-k3");
-
-  process.env.OPENCODE_GO_API_KEY = "go-env-secret";
-  response = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" });
-  assert.equal(response.status, 202);
-  await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/models`)).json();
-    return value.providers.opencodeGo.status === "ready" && header(calls.filter((call) => call.url.endsWith("/models")).at(-1)?.options ?? {}, "authorization") === "Bearer go-env-secret" ? value : null;
-  });
-  assert.equal((await (await fetch(`${baseUrl}/api/config`)).json()).providers.opencodeGo.credentialSource, "environment");
-
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}`, { ...plan, planningModel: "compat:opencode-go:minimax-m3" }, "PUT");
-  plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, { replaceExisting: true });
-  assert.equal(response.status, 200);
-  const messagesCall = calls.find((call) => call.url.endsWith("/messages"));
-  assert.equal(messagesCall.url, "https://opencode.ai/zen/go/v1/messages");
-  assert.equal(header(messagesCall.options, "x-api-key"), "go-env-secret");
-  assert.equal(header(messagesCall.options, "anthropic-version"), "2023-06-01");
-  const messagesBody = JSON.parse(messagesCall.options.body);
-  assert.equal(messagesBody.model, "minimax-m3");
-  assert.equal(messagesBody.messages[0].role, "user");
-  assert.equal(typeof messagesBody.max_tokens, "number");
-
-  delete process.env.OPENCODE_GO_API_KEY;
-  await writeFile(authPath, '{"opencode-go":{"type":"api","key":"malformed-secret"', { mode: 0o600 });
-  response = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" });
-  assert.equal(response.status, 202);
-  catalog = await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/models`)).json();
-    return value.providers.opencodeGo.status === "unconfigured" ? value : null;
-  });
-  assert.match(catalog.providers.opencodeGo.error, /auth file contains invalid JSON/);
-  assert.doesNotMatch(JSON.stringify(catalog), /malformed-secret/);
-  const redacted = await (await fetch(`${baseUrl}/api/config`)).json();
-  assert.equal(redacted.providers.opencodeGo.hasApiKey, false);
-  assert.equal(redacted.providers.opencodeGo.credentialSource, null);
-});
-
-test("built-in OpenAI discovers models and uses chat plus TTS endpoints", async (t) => {
+test("built-in OpenAI discovers models and uses the TTS endpoint", async (t) => {
   withEnv(t, { MIMO_API_KEY: null, ELEVENLABS_API_KEY: null, OPENAI_API_KEY: null });
 
   const compatCalls = [];
-  let chatCount = 0;
-  const outline = { segments: Array.from({ length: 5 }, (_, index) => ({ number: index + 1, title: `Part ${index + 1}`, points: ["Point"] })) };
-  const transcript = {
-    title: "Compatible Episode",
-    segments: Array.from({ length: 5 }, (_, index) => ({
-      number: index + 1,
-      title: `Part ${index + 1}`,
-      turns: [
-        { speaker: "Valeria", delivery: "warm", text: longText(`Idea ${index + 1}`) },
-        { speaker: "Diego", delivery: "dry", text: longText(`Reaction ${index + 1}`) },
-      ],
-    })),
-  };
   const fetchImpl = async (url, options = {}) => {
     compatCalls.push({ url: String(url), options });
     if (String(url).endsWith("/models")) {
       return Response.json({ data: [{ id: "gpt-4o-mini" }, { id: "gpt-4o-mini-tts" }, { id: "whisper-1" }] });
-    }
-    if (String(url).endsWith("/chat/completions")) {
-      chatCount += 1;
-      return Response.json({ choices: [{ message: { content: JSON.stringify(chatCount === 1 ? outline : transcript) } }] });
     }
     if (String(url).endsWith("/audio/speech")) {
       return new Response(silentWav(24_000, 1, 0.1), { status: 200, headers: { "Content-Type": "audio/wav" } });
@@ -1753,15 +1255,11 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", async 
       elevenlabs: {},
       openai: {
         baseUrl: "https://api.openai.com/v1",
-        llmBaseUrl: "https://llm.example/v1",
         ttsBaseUrl: "https://tts.example/v1",
         modelsUrl: "https://catalog.example/v1/models",
         enabled: true,
         apiKey: "sk-openai-test",
-        activeModels: {
-          "gpt-4o-mini": { text: true, tts: false },
-          "gpt-4o-mini-tts": { text: false, tts: true },
-        },
+        activeModels: { "gpt-4o-mini-tts": { tts: true } },
       },
     },
     compatibleConnections: [],
@@ -1771,30 +1269,19 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", async 
   assert.equal(savedConfig.config.providers.mimo.hasApiKey, false);
   assert.equal(savedConfig.config.providers.openai.hasApiKey, true);
   assert.doesNotMatch(JSON.stringify(savedConfig), /sk-openai-test/);
-  assert.ok(savedConfig.modelCatalog.providers.openai.textModels.some((model) => model.id === "compat:openai:gpt-4o-mini"));
-  assert.ok(savedConfig.modelCatalog.providers.openai.ttsModels.some((model) => model.id === "compat:openai:gpt-4o-mini-tts"));
+  assert.equal(Object.hasOwn(savedConfig.modelCatalog.providers.openai, "textModels"), false);
+  assert.deepEqual(savedConfig.modelCatalog.providers.openai.ttsModels.map((model) => model.id), ["compat:openai:gpt-4o-mini-tts"]);
 
   const envFile = await readFile(join(rootDir, ".env"), "utf8");
   assert.match(envFile, /OPENAI_API_KEY=sk-openai-test/);
 
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  state.profiles.episodeProfiles[0].outlineModel = "compat:openai:gpt-4o-mini";
-  state.profiles.episodeProfiles[0].transcriptModel = "compat:openai:gpt-4o-mini";
   state.profiles.episodeProfiles[0].language = "en-US";
   state.profiles.speakerProfiles[0].voiceModel = "compat:openai:gpt-4o-mini-tts";
   state.profiles.speakerProfiles[0].speakers[0].voiceId = "alloy";
   state.profiles.speakerProfiles[0].speakers[1].voiceId = "alloy";
   response = await sendJson(`${baseUrl}/api/profiles`, state.profiles, "PUT");
   assert.equal(response.status, 200);
-
-  const episode = await seedEpisode(baseUrl, "Compatible", { knowledge: "# Grounded" });
-
-  response = await fetch(`${baseUrl}/api/episodes/${episode.id}/generate`, { method: "POST" });
-  assert.equal(response.status, 202);
-  await waitFor(async () => {
-    const value = await (await fetch(`${baseUrl}/api/jobs`)).json();
-    return value.jobs.find((job) => job.episodeId === episode.id)?.status === "completed" ? value : null;
-  });
 
   response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "Hello there", cue: "warm" });
   assert.equal(response.status, 200);
@@ -1805,12 +1292,7 @@ test("built-in OpenAI discovers models and uses chat plus TTS endpoints", async 
   assert.equal(preview.readUInt32LE(24), 24_000);
   assert.equal(preview.readUInt16LE(34), 16);
 
-  const chatRequest = compatCalls.find((call) => call.url.endsWith("/chat/completions"));
-  assert.equal(chatRequest.url, "https://llm.example/v1/chat/completions");
-  assert.equal(header(chatRequest.options, "authorization"), "Bearer sk-openai-test");
-  assert.equal(JSON.parse(chatRequest.options.body).max_tokens, undefined);
-  assert.equal(typeof JSON.parse(chatRequest.options.body).max_completion_tokens, "number");
-  assert.match(JSON.parse(chatRequest.options.body).messages[1].content, /NON-NEGOTIABLE LANGUAGE OVERRIDE/);
+  assert.equal(compatCalls.some((call) => call.url.endsWith("/chat/completions")), false);
   const ttsRequest = compatCalls.find((call) => call.url.endsWith("/audio/speech"));
   const ttsBody = JSON.parse(ttsRequest.options.body);
   assert.equal(ttsRequest.url, "https://tts.example/v1/audio/speech");
@@ -1832,7 +1314,7 @@ test("compatible config owns env names and blocks referenced connection removal"
   });
   const providers = { mimo: { baseUrl: "https://api.xiaomimimo.com/v1" }, elevenlabs: {}, openai: { baseUrl: "https://api.openai.com/v1", enabled: false } };
 
-  let response = await sendJson(`${baseUrl}/api/config`, { providers, compatibleConnections: [{ id: "safe_connection", name: "Safe", baseUrl: "https://safe.example/v1", enabled: true, apiKeyEnv: "MIMO_API_KEY", apiKey: "compat-secret", activeModels: { "custom-tts": { text: false, tts: true } } }] }, "PUT");
+  let response = await sendJson(`${baseUrl}/api/config`, { providers, compatibleConnections: [{ id: "safe_connection", name: "Safe", baseUrl: "https://safe.example/v1", enabled: true, apiKeyEnv: "MIMO_API_KEY", apiKey: "compat-secret", activeModels: { "custom-tts": { tts: true } } }] }, "PUT");
   const configured = await response.json();
   assert.equal(response.status, 200);
   assert.match(configured.config.compatibleConnections[0].apiKeyEnv, /^OPENAI_COMPAT_SAFE_[A-F0-9]{12}_API_KEY$/);
@@ -1844,7 +1326,7 @@ test("compatible config owns env names and blocks referenced connection removal"
   assert.equal(response.status, 200);
   await syncProfiles(response, state.profiles);
 
-  const connection = { id: "safe_connection", name: "Safe", baseUrl: "https://safe.example/v1", enabled: true, activeModels: { "custom-tts": { text: false, tts: true } } };
+  const connection = { id: "safe_connection", name: "Safe", baseUrl: "https://safe.example/v1", enabled: true, activeModels: { "custom-tts": { tts: true } } };
   response = await sendJson(`${baseUrl}/api/config`, { providers, compatibleConnections: [{ ...connection, activeModels: {} }] }, "PUT");
   const deactivated = await response.json();
   assert.equal(response.status, 200);
@@ -1890,7 +1372,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", as
     calls.push({ url: String(url), options });
     if (!chatterboxOnline) throw new Error("fetch failed");
     if (String(url).endsWith("/models")) return Response.json({ data: [
-      { id: "chatterbox-turbo", capabilities: { text: false, tts: true } },
+      { id: "chatterbox-turbo", capabilities: { tts: true } },
       { id: "fallback-tts" },
     ] });
     if (String(url).endsWith("/voices")) {
@@ -1907,14 +1389,14 @@ test("Chatterbox discovers and renders active TTS models without an API key", as
   };
   const { rootDir, baseUrl } = await startTestServer(t, { fetchImpl });
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  state.config.providers.chatterbox = { baseUrl: "http://127.0.0.1:8100/v1", modelsUrl: "", enabled: true, activeModels: { "chatterbox-turbo": { text: false, tts: true } } };
+  state.config.providers.chatterbox = { baseUrl: "http://127.0.0.1:8100/v1", modelsUrl: "", enabled: true, activeModels: { "chatterbox-turbo": { tts: true } } };
   let response = await sendJson(`${baseUrl}/api/config`, state.config, "PUT");
   const configured = await response.json();
   assert.equal(response.status, 200);
   assert.deepEqual(configured.modelCatalog.providers.chatterbox.ttsModels.map((model) => model.id), ["compat:chatterbox:chatterbox-turbo"]);
   assert.deepEqual(configured.modelCatalog.providers.chatterbox.discoveredModels.map((model) => model.suggested), [
-    { text: false, tts: true },
-    { text: false, tts: true },
+    { tts: true },
+    { tts: true },
   ]);
   assert.ok(calls.some((call) => call.url === "http://127.0.0.1:8100/v1/models"));
   response = await fetch(`${baseUrl}/api/tts/chatterbox/voices`);
@@ -2023,85 +1505,6 @@ test("Chatterbox discovers and renders active TTS models without an API key", as
   assert.match((await response.json()).error, /Charlie: Chatterbox is unavailable at http:\/\/127\.0\.0\.1:8100\/v1: .*fetch failed/);
 });
 
-test("Podcast Assistant sees Chatterbox voices and tolerates offline discovery", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "assistant-voices-test-key" });
-  let voicesOnline = true;
-  let voiceCalls = 0;
-  let blockVoices = false;
-  let releaseVoices;
-  let markVoicesStarted;
-  const voiceGate = new Promise((resolve) => { releaseVoices = resolve; });
-  const voicesStarted = new Promise((resolve) => { markVoicesStarted = resolve; });
-  t.after(() => releaseVoices());
-  const prompts = [];
-  const fetchImpl = async (url, options = {}) => {
-    if (String(url).endsWith("/voices")) {
-      voiceCalls += 1;
-      if (blockVoices) { markVoicesStarted(); await voiceGate; }
-      if (!voicesOnline) throw new Error("offline");
-      return Response.json({ data: [{ id: "charlie_EN", name: "Charlie", builtin: false }] });
-    }
-    if (String(url).endsWith("/chat/completions")) {
-      const request = JSON.parse(options.body);
-      const prompt = request.messages[1].content;
-      prompts.push({ url: String(url), system: request.messages[0].content, prompt });
-      const exact = prompt.includes("Use exact voice ID charlie_EN");
-      const content = exact
-        ? JSON.stringify({ message: "Create Charlie.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Charlie", voiceModel: "compat:chatterbox:chatterbox-multilingual-v3", speakers: [{ name: "Charlie", voiceId: "charlie_EN" }] } } } })
-        : JSON.stringify({ message: voicesOnline ? "Which Chatterbox voice should Charlie use?" : "Chatterbox voice discovery is unavailable.", questions: ["Choose an exact voice ID."], proposal: null });
-      return Response.json({ choices: [{ message: { content } }] });
-    }
-    return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }, { id: "chatterbox-multilingual-v3", capabilities: { text: false, tts: true } }] });
-  };
-  const { baseUrl } = await startTestServer(t, { fetchImpl });
-  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).providers.mimo.textModels.some((item) => item.id === "mimo-v2.5-pro"));
-  const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  state.config.providers.chatterbox = { baseUrl: "http://127.0.0.1:8100/v1", modelsUrl: "", enabled: true, activeModels: { "chatterbox-multilingual-v3": { text: false, tts: true } } };
-  let response = await sendJson(`${baseUrl}/api/config`, state.config, "PUT");
-  assert.equal(response.status, 200);
-  const originalMimoBaseUrl = state.config.providers.mimo.baseUrl;
-  const planningModel = state.profiles.episodeProfiles[0].outlineModel;
-  response = await sendJson(`${baseUrl}/api/plans`, { name: "Charlie plan", speakerProfileId: state.profiles.speakerProfiles[0].id, planningModel, theme: "Testing", audience: "Developers", goal: "Teach" });
-  const plan = (await response.json()).plan;
-  blockVoices = true;
-  const firstChat = sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Use Chatterbox for Charlie", model: planningModel });
-  await voicesStarted;
-  const changedConfig = structuredClone(state.config);
-  changedConfig.providers.mimo.baseUrl = "http://new-mimo.test/v1";
-  response = await sendJson(`${baseUrl}/api/config`, changedConfig, "PUT");
-  assert.equal(response.status, 200);
-  releaseVoices();
-  response = await firstChat;
-  let chat = await response.json();
-  assert.equal(response.status, 200, chat.error);
-  assert.equal(chat.message.proposal, null);
-  assert.match(prompts[0].system, /ask them to choose before proposing/);
-  assert.match(prompts[0].prompt, /"chatterboxVoices":\[\{"id":"charlie_EN","name":"Charlie","builtin":false\}\]/);
-  assert.match(prompts[0].url, new RegExp(`^${originalMimoBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  assert.equal(voiceCalls, 1);
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Use exact voice ID charlie_EN", model: planningModel });
-  chat = await response.json();
-  assert.equal(response.status, 200, chat.error);
-  assert.equal(chat.message.proposal.speakerProfile.value.speakers[0].voiceId, "charlie_EN");
-  assert.equal(voiceCalls, 2);
-  // B3: the apply path must allow the same discovered Chatterbox voices as the propose path.
-  const chatterboxThread = await (await fetch(`${baseUrl}/api/chat?threadId=${chat.threadId}`)).json();
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: chat.threadId, messageIndex: chatterboxThread.messages.findLastIndex((message) => message.role === "assistant") });
-  const applied = await response.json();
-  assert.equal(response.status, 200, applied.error);
-  assert.deepEqual(applied.warnings, []);
-  assert.equal(applied.profiles.speakerProfiles.find((item) => item.name === "Charlie").speakers[0].voiceId, "charlie_EN");
-  voicesOnline = false;
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Check voices again", model: planningModel });
-  assert.equal(response.status, 200, (await response.clone().json()).error);
-  assert.equal(voiceCalls, 2);
-  assert.equal((await fetch(`${baseUrl}/api/models/refresh`, { method: "POST" })).status, 202);
-  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Refresh voices", model: planningModel });
-  assert.equal(response.status, 200, (await response.clone().json()).error);
-  assert.equal(voiceCalls, 3);
-});
-
 test("profile saves warn for existing unavailable saved models", async (t) => {
   withEnv(t, { MIMO_API_KEY: null, ELEVENLABS_API_KEY: null, OPENAI_API_KEY: null, CHATTERBOX_API_KEY: null });
 
@@ -2173,466 +1576,92 @@ test("content plans support CRUD and appear in state", async (t) => {
   assert.deepEqual((await (await fetch(`${baseUrl}/api/plans`)).json()).plans, []);
 });
 
-test("startup removes replaced assistant histories and keeps Podcast Assistant chats", async (t) => {
-  const now = new Date().toISOString();
-  const thread = (id, kind) => ({ threadId: id, kind, title: id, messages: [], createdAt: now, updatedAt: now, lastPlanId: kind === "planner" ? "missing-plan" : "" });
-  const { rootDir } = await startTestServer(t, {}, async (root) => {
-    const chatDir = join(root, "data", "chat");
-    await mkdir(chatDir, { recursive: true });
-    await writeFile(join(chatDir, "legacy-profile.json"), JSON.stringify(thread("legacy-profile", "profile")));
-    await writeFile(join(chatDir, "legacy-transcript.json"), JSON.stringify(thread("legacy-transcript", "transcript")));
-    await writeFile(join(chatDir, "podcast-assistant.json"), JSON.stringify(thread("podcast-assistant", "planner")));
-  });
-  await assert.rejects(readFile(join(rootDir, "data", "chat", "legacy-profile.json"), "utf8"), /ENOENT/);
-  await assert.rejects(readFile(join(rootDir, "data", "chat", "legacy-transcript.json"), "utf8"), /ENOENT/);
-  assert.match(await readFile(join(rootDir, "data", "chat", "podcast-assistant.json"), "utf8"), /podcast-assistant/);
-});
-
-test("content planner validates generation inputs", async (t) => {
-  const { baseUrl } = await startTestServer(t);
-  let response = await sendJson(`${baseUrl}/api/plans`, { name: "Invalid" });
+test("content plans validate references and save without planning-model fields", async (t) => {
+  const { baseUrl, rootDir } = await startTestServer(t);
+  let response = await sendJson(`${baseUrl}/api/plans`, { name: "Plan", planningModel: "mimo-v2.5-pro", planningEffort: "max" });
+  assert.equal(response.status, 201);
   let plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}`, { ...plan, theme: "Theme", planningModel: "" }, "PUT");
+  for (const key of ["planningModel", "planningEffort"]) assert.equal(Object.hasOwn(plan, key), false, key);
+  response = await sendJson(`${baseUrl}/api/plans/${plan.id}`, { ...plan, theme: "Theme", planningModel: "mimo-v2.5-pro", expectedUpdatedAt: plan.updatedAt }, "PUT");
+  assert.equal(response.status, 200);
   plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, {});
-  assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "Planning model is required.");
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}`, { ...plan, planningModel: "inactive-model" }, "PUT");
-  plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, {});
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /Unsupported or inactive text model/);
+  assert.equal(plan.theme, "Theme");
+  assert.equal(Object.hasOwn(plan, "planningModel"), false);
+  const stored = JSON.parse(await readFile(join(rootDir, "data", "plans", `${plan.id}.json`), "utf8"));
+  assert.equal(Object.hasOwn(stored, "planningModel"), false);
+  assert.equal((await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, {})).status, 404);
   response = await sendJson(`${baseUrl}/api/plans/${plan.id}`, { ...plan, knowledgeBaseId: "missing" }, "PUT");
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "Knowledge base does not exist.");
 });
 
-test("plan generation does not block unrelated writes while waiting for the model", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "test-mimo-key" });
-  let releaseModel;
-  let markModelStarted;
-  const modelGate = new Promise((resolve) => { releaseModel = resolve; });
-  const modelStarted = new Promise((resolve) => { markModelStarted = resolve; });
-  t.after(() => releaseModel());
-  const fetchImpl = async (url) => {
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }] });
-    if (String(url).endsWith("/chat/completions")) {
-      markModelStarted();
-      await modelGate;
-      return Response.json({ choices: [{ message: { content: JSON.stringify({ episodes: [{ number: 1, title: "Episode" }] }) } }] });
-    }
-    throw new Error(`Unexpected URL ${url}`);
-  };
-  const { baseUrl } = await startTestServer(t, { fetchImpl });
-  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
-  const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  let response = await sendJson(`${baseUrl}/api/plans`, { name: "Unlocked", speakerProfileId: state.profiles.speakerProfiles[0].id, episodeFormatId: state.profiles.episodeProfiles[0].id, planningModel: "mimo-v2.5-pro", theme: "Theme", audience: "Audience", goal: "Goal", episodeCount: 1 });
-  const plan = (await response.json()).plan;
-  const generation = fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-  await modelStarted;
-  const mutation = sendJson(`${baseUrl}/api/knowledge`, { name: "concurrent.md", content: "# Concurrent" });
-  const mutationStatus = await Promise.race([mutation.then((result) => result.status), new Promise((resolve) => setTimeout(() => resolve("timeout"), 1_000))]);
-  releaseModel();
-  assert.equal(mutationStatus, 201);
-  response = await generation;
-  assert.equal(response.status, 200);
-});
-
-test("plan generation detects edits even when updatedAt is unchanged", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "test-mimo-key" });
-  let releaseModel;
-  let markModelStarted;
-  const modelGate = new Promise((resolve) => { releaseModel = resolve; });
-  const modelStarted = new Promise((resolve) => { markModelStarted = resolve; });
-  t.after(() => releaseModel());
-  const fetchImpl = async (url) => {
-    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-pro" }] });
-    markModelStarted();
-    await modelGate;
-    return Response.json({ choices: [{ message: { content: JSON.stringify({ episodes: [{ number: 1, title: "Generated" }] }) } }] });
-  };
-  const { rootDir, baseUrl } = await startTestServer(t, { fetchImpl });
-  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
-  const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  let response = await sendJson(`${baseUrl}/api/plans`, { name: "Conflict", speakerProfileId: state.profiles.speakerProfiles[0].id, episodeFormatId: state.profiles.episodeProfiles[0].id, planningModel: "mimo-v2.5-pro", theme: "Original", audience: "Audience", goal: "Goal", episodeCount: 1 });
-  const plan = (await response.json()).plan;
-  const generation = fetch(`${baseUrl}/api/plans/${plan.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-  await modelStarted;
-  const path = join(rootDir, "data", "plans", `${plan.id}.json`);
-  const edited = JSON.parse(await readFile(path, "utf8"));
-  edited.theme = "Edited without changing timestamp";
-  await writeFile(path, JSON.stringify(edited, null, 2) + "\n");
-  releaseModel();
-  response = await generation;
-  assert.equal(response.status, 409);
-  assert.match((await response.json()).error, /changed while content was being generated/);
-  assert.equal(JSON.parse(await readFile(path, "utf8")).theme, edited.theme);
-});
-
-test("plan generation derives intent from chat when setup fields are empty", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "chat-intent-test-key" });
-  const prompts = [];
-  const fetchImpl = async (url, options = {}) => {
-    if (String(url).endsWith("/chat/completions")) {
-      const request = JSON.parse(options.body);
-      const system = request.messages?.[0]?.content || "";
-      const prompt = request.messages?.[1]?.content || "";
-      prompts.push({ system, prompt });
-      const content = system.includes("content planning assistant")
-        ? JSON.stringify({ message: "Noted, urban beekeeping it is.", questions: [] })
-        : JSON.stringify({ seriesTitle: "Bees", episodeFormat: { name: "Chat Format", description: "Derived from chat" }, episodes: [{ number: 1, title: "Only episode" }], detailedEpisode: { number: 1, premise: "Bee premise", knowledgeScope: "Hives", keyPoints: ["Point"], listenerOutcome: "Learn bees", additionalInstructions: "", transcriptPromptGuidance: "" } });
-      return Response.json({ choices: [{ message: { content } }] });
-    }
-    return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-  };
-  const { baseUrl } = await startTestServer(t, { fetchImpl });
-  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).providers.mimo.textModels.some((item) => item.id === "mimo-v2.5-pro"));
+test("plans create episode drafts, and episode and Hosts deletes update plan references", async (t) => {
+  const { rootDir, baseUrl } = await startTestServer(t);
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
   const speakerProfileId = state.profiles.speakerProfiles[0].id;
-  const planningModel = state.profiles.episodeProfiles[0].outlineModel;
-  let response = await sendJson(`${baseUrl}/api/plans`, { name: "Empty setup", speakerProfileId, planningModel, episodeCount: 1 });
-  const plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, {});
+  // Planned episodes come from the agent in phase 2; until then a test writes them into the stored plan.
+  const createPlan = async (body, episodes) => {
+    const created = (await (await sendJson(`${baseUrl}/api/plans`, body)).json()).plan;
+    const path = join(rootDir, "data", "plans", `${created.id}.json`);
+    const stored = { ...JSON.parse(await readFile(path, "utf8")), episodes: episodes.map((item, index) => normalizePlannedEpisode({ number: index + 1, ...item })) };
+    await writeFile(path, JSON.stringify(stored, null, 2));
+    return stored;
+  };
+  const noFormat = await createPlan({ name: "No format", speakerProfileId, theme: "Theme" }, [{ title: "Only" }]);
+  let response = await sendJson(`${baseUrl}/api/plans/${noFormat.id}/create-episodes`, { plannedEpisodeIds: [noFormat.episodes[0].id] });
   assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "Fill Theme, Audience, and Goal, or describe the podcast in the assistant chat first.");
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "A show about urban beekeeping for beginners", model: planningModel });
-  assert.equal(response.status, 200, (await response.clone().json()).error);
-  const threadId = (await response.json()).threadId;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, { chatThreadId: threadId });
-  const generatedBody = await response.json();
-  assert.equal(response.status, 200, generatedBody.error);
-  assert.equal(generatedBody.plan.episodes.length, 1);
-  const generationPrompt = prompts.at(-1).prompt;
-  assert.match(generationPrompt, /USER CONVERSATION/);
-  assert.match(generationPrompt, /urban beekeeping/);
-});
+  assert.equal((await response.json()).error, "Pick an Episode Format for the plan before creating episode drafts.");
 
-test("planner generates plans, creates formats and drafts, and chats", async (t) => {
-  withEnv(t, { MIMO_API_KEY: "planner-test-key" });
-  const generated = {
-    seriesTitle: "Ignored title",
-    episodeFormat: { name: "Interview", description: "Focused format" },
-    episodes: [
-      { number: 1, title: "First" },
-      { number: 2, title: "Second" },
-    ],
-    detailedEpisode: { number: 1, premise: "First premise", knowledgeScope: "Chapter one", keyPoints: ["Point A"], listenerOutcome: "Learn A", additionalInstructions: "Stay focused", transcriptPromptGuidance: "Use a concise opening." },
-  };
-  const fetchImpl = async (url, options = {}) => {
-    if (String(url).endsWith("/chat/completions")) {
-      const request = JSON.parse(options.body);
-      const system = request.messages?.[0]?.content || "";
-      const prompt = request.messages?.[1]?.content || "";
-      const content = system.includes("content planning assistant")
-        ? prompt.includes("Broken speaker JSON")
-          ? prompt.includes("YOUR PREVIOUS RESPONSE WAS REJECTED")
-            ? JSON.stringify({ message: "Recovered.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Recovered Speaker" } } } })
-            : '{"message":"Bad "quote" inside"}'
-          : prompt.includes("Fenced reply")
-          ? '```json\n{"message":"Fenced ok.","questions":[]}\n```'
-          : prompt.includes("Improve shared speaker")
-          ? JSON.stringify({ message: "Improve the shared host profile.", questions: [], proposal: { speakerProfile: { mode: "update", targetId: "speaker-chisme-crianza", value: { description: "Revised without changing existing references." } } } })
-          : prompt.includes("Create partial speaker")
-          ? JSON.stringify({ message: "Create a partial host profile.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Partial Speaker", description: "Valid sibling field", voiceModel: "mimo-v2-tts" } } } })
-          : prompt.includes("Create partial format")
-          ? JSON.stringify({ message: "Create a partial episode format.", questions: [], proposal: { episodeFormat: { mode: "create", value: { name: "Partial Format", description: "Valid format field", outlineModel: "missing-model" } } } })
-          : prompt.includes("Apply partial plan")
-          ? JSON.stringify({ message: "Apply a partial plan patch.", questions: [], proposal: { planPatch: { audience: "Partial audience", planningModel: "missing-model" } } })
-          : prompt.includes("Create a speaker")
-          ? JSON.stringify({ message: "Create a focused host profile.", questions: [], proposal: { speakerProfile: { mode: "create", value: { name: "Assistant Speaker" } } } })
-          : prompt.includes("Improve shared format")
-          ? JSON.stringify({ message: "Improve the shared format.", questions: [], proposal: { episodeFormat: { mode: "update", targetId: "episode-chisme-crianza", value: { description: "Shared format revised.", language: "en-US" } } } })
-          : prompt.includes("Improve this format")
-          ? JSON.stringify({ message: "Make this format more focused.", questions: [], proposal: { episodeFormat: { mode: "update", targetId: "episode-chisme-crianza", value: { name: "Assistant Format", description: "Focused by the Podcast Assistant", targetMinutes: 21 } } }, nextStep: { target: "planner:episodes", action: "none", targetIds: [], reason: "Continue to planned episodes." } })
-          : JSON.stringify({ message: "Narrow audience.", questions: [], proposal: { planPatch: { audience: "Developers", episodeCount: 2 } } })
-        : JSON.stringify(generated);
-      return Response.json({ choices: [{ message: { content } }] });
-    }
-    return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5-tts" }] });
-  };
-  const { rootDir, baseUrl } = await startTestServer(t, { fetchImpl });
-  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).providers.mimo.textModels.some((item) => item.id === "mimo-v2.5-pro"));
-  const state = await (await fetch(`${baseUrl}/api/state`)).json();
-  const speakerProfileId = state.profiles.speakerProfiles[0].id;
-  const planningModel = state.profiles.episodeProfiles[0].outlineModel;
-  let response = await sendJson(`${baseUrl}/api/plans`, { name: "Kept name", speakerProfileId, planningModel, theme: "Build reliable software", audience: "Engineers", goal: "Teach", episodeCount: 2 });
-  let plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/generate`, {});
-  const generatedBody = await response.json();
-  assert.equal(response.status, 200, generatedBody.error);
-  plan = generatedBody.plan;
-  assert.equal(plan.name, "Kept name");
-  assert.ok(plan.episodeFormatId);
-  assert.equal(plan.episodes.length, 2);
-  assert.equal(plan.episodes[0].title, "First");
-  assert.equal(plan.episodes[0].premise, "First premise");
-  assert.equal(plan.episodes[1].premise, "");
-  assert.ok(plan.episodes.every((item) => item.episodeProfileId === plan.episodeFormatId));
-  const autoFormat = generatedBody.profiles.episodeProfiles.find((item) => item.id === plan.episodeFormatId);
-  assert.equal(autoFormat.name, "Interview");
-  assert.equal(autoFormat.language, "es-419");
-  assert.equal(autoFormat.targetMinutes, 18);
-  assert.equal(autoFormat.numSegments, 5);
-  assert.equal(autoFormat.revision, 1);
-  assert.equal(plan.workflowReviews, undefined);
-
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/review`, { stage: "speakerProfile" });
-  assert.equal(response.status, 404);
-  response = await sendJson(`${baseUrl}/api/plans/${plan.id}/detail-episode`, { plannedEpisodeId: plan.episodes[1].id });
-  assert.equal(response.status, 404);
-
-  const revisedProfiles = structuredClone(generatedBody.profiles);
-  revisedProfiles.speakerProfiles.find((item) => item.id === speakerProfileId).description += " Revised.";
-  response = await sendJson(`${baseUrl}/api/profiles`, revisedProfiles, "PUT");
-  const savedProfiles = (await response.json()).profiles;
-  assert.equal(response.status, 200);
-  assert.equal(savedProfiles.speakerProfiles.find((item) => item.id === speakerProfileId).revision, 1);
-
+  const plan = await createPlan({ name: "Kept name", speakerProfileId, episodeFormatId: "episode-chisme-crianza", theme: "Build reliable software", audience: "Engineers", goal: "Teach" }, [
+    { title: "First", premise: "First premise", keyPoints: ["Point A"], transcriptPromptGuidance: "Use a concise opening." },
+    { title: "Second" },
+  ]);
   response = await sendJson(`${baseUrl}/api/plans/${plan.id}/create-episodes`, { plannedEpisodeIds: plan.episodes.map((item) => item.id) });
-  assert.equal(response.status, 200);
   const created = await response.json();
+  assert.equal(response.status, 200, created.error);
   assert.equal(created.episodes.length, 2);
   assert.match(created.episodes[0].additionalInstructions, /Point A/);
+  assert.match(created.episodes[1].additionalInstructions, /Planned episode:\nNone\./);
   assert.equal(created.episodes[0].transcriptPromptGuidance, "Use a concise opening.");
-  assert.ok(created.plan.episodes.every((item) => item.createdEpisodeId));
   assert.equal(created.episodes[0].speakerProfileId, speakerProfileId);
+  assert.ok(created.plan.episodes.every((item) => item.createdEpisodeId));
   assert.ok(await readFile(join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json"), "utf8"));
-
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Improve setup", model: planningModel, planDraft: { audience: "Current draft", episodeCount: null } });
-  const chat = await response.json();
-  assert.equal(response.status, 200, chat.error);
-  assert.equal(chat.message.proposal.planPatch.audience, "Developers");
-  const assistantThread = await (await fetch(`${baseUrl}/api/chat?threadId=${chat.threadId}`)).json();
-  const proposalIndex = assistantThread.messages.findIndex((message) => message.role === "assistant");
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: chat.threadId, messageIndex: proposalIndex });
-  const appliedProposal = await response.json();
-  assert.equal(response.status, 200, appliedProposal.error);
-  assert.equal(appliedProposal.appliedType, "plan");
-  assert.equal(appliedProposal.plan.audience, "Developers");
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: chat.threadId, messageIndex: proposalIndex });
-  assert.equal(response.status, 409);
-  assert.equal((await response.json()).error, "Proposal already applied.");
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Improve this format", model: planningModel, activeContext: { view: "planner", plannerSection: "plan", episodeProfileId: "episode-chisme-crianza" }, workspaceDraft: { name: "Current unsaved format" } });
-  const formatChat = await response.json();
-  assert.equal(response.status, 200, formatChat.error);
-  assert.equal(formatChat.message.proposal.episodeFormat.value.name, "Assistant Format");
-  assert.equal(formatChat.message.nextStep.target, "episodes");
-  const formatThread = await (await fetch(`${baseUrl}/api/chat?threadId=${formatChat.threadId}`)).json();
-  const formatProposalIndex = formatThread.messages.findIndex((message) => message.role === "assistant");
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: formatChat.threadId, messageIndex: formatProposalIndex });
-  const appliedFormat = await response.json();
-  assert.equal(response.status, 200, appliedFormat.error);
-  assert.equal(appliedFormat.appliedType, "episodeFormat");
-  assert.equal(appliedFormat.profiles.episodeProfiles.find((item) => item.id === "episode-chisme-crianza").name, "Assistant Format");
-  assert.equal(appliedFormat.profiles.episodeProfiles.find((item) => item.id === "episode-chisme-crianza").numSegments, 6);
-  assert.equal(appliedFormat.plan.episodeFormatId, "episode-chisme-crianza");
-  assert.ok(appliedFormat.plan.episodes.every((item) => item.episodeProfileId === "episode-chisme-crianza"));
-  assert.equal(appliedFormat.updatedEpisodes, 2);
-  assert.equal(JSON.parse(await readFile(join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json"), "utf8")).episodeProfile.id, "episode-chisme-crianza");
-  response = await sendJson(`${baseUrl}/api/plans`, { name: "Other holder", speakerProfileId, episodeFormatId: "episode-chisme-crianza", planningModel, theme: "Hold the shared profile" });
-  const holderPlan = (await response.json()).plan;
-  assert.equal(response.status, 201);
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Improve shared speaker", model: planningModel, activeContext: { view: "speakers" } });
-  const sharedSpeakerChat = await response.json();
-  assert.equal(response.status, 200, sharedSpeakerChat.error);
-  assert.equal(sharedSpeakerChat.message.proposal.speakerProfile.impact.episodes, 2);
-  const sharedSpeakerThread = await (await fetch(`${baseUrl}/api/chat?threadId=${sharedSpeakerChat.threadId}`)).json();
-  const sharedSpeakerProposalIndex = sharedSpeakerThread.messages.findIndex((message) => message.role === "assistant");
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: sharedSpeakerChat.threadId, messageIndex: sharedSpeakerProposalIndex });
-  const appliedSharedSpeaker = await response.json();
-  assert.equal(response.status, 200, appliedSharedSpeaker.error);
-  const revisedSpeaker = appliedSharedSpeaker.profiles.speakerProfiles.find((item) => item.name === `${state.profiles.speakerProfiles[0].name} — Copy`);
-  assert.ok(revisedSpeaker);
-  assert.equal(revisedSpeaker.description, "Revised without changing existing references.");
-  assert.notEqual(revisedSpeaker.id, speakerProfileId);
-  assert.equal(appliedSharedSpeaker.profiles.speakerProfiles.find((item) => item.id === speakerProfileId).name, state.profiles.speakerProfiles[0].name);
-  assert.equal(appliedSharedSpeaker.plan.speakerProfileId, revisedSpeaker.id);
-  assert.equal(appliedSharedSpeaker.updatedEpisodes, 2);
-  const propagatedEpisode = JSON.parse(await readFile(join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json"), "utf8"));
-  assert.equal(propagatedEpisode.speakerProfileId, revisedSpeaker.id);
-  assert.equal(propagatedEpisode.speakerProfile.id, revisedSpeaker.id);
-  assert.equal((await (await fetch(`${baseUrl}/api/plans/${holderPlan.id}`)).json()).plan.speakerProfileId, speakerProfileId);
-  const appliedThread = await (await fetch(`${baseUrl}/api/chat?threadId=${sharedSpeakerChat.threadId}`)).json();
-  assert.ok(appliedThread.messages[sharedSpeakerProposalIndex].appliedAt);
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Improve shared format", model: planningModel, activeContext: { view: "format" } });
-  const sharedFormatChat = await response.json();
-  assert.equal(response.status, 200, sharedFormatChat.error);
-  const sharedFormatThread = await (await fetch(`${baseUrl}/api/chat?threadId=${sharedFormatChat.threadId}`)).json();
-  const sharedFormatProposalIndex = sharedFormatThread.messages.findIndex((message) => message.role === "assistant");
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: sharedFormatChat.threadId, messageIndex: sharedFormatProposalIndex });
-  const appliedSharedFormat = await response.json();
-  assert.equal(response.status, 200, appliedSharedFormat.error);
-  assert.equal(appliedSharedFormat.appliedType, "episodeFormat");
-  const formatCopy = appliedSharedFormat.profiles.episodeProfiles.find((item) => item.name === "Assistant Format — Copy");
-  assert.ok(formatCopy);
-  assert.equal(formatCopy.description, "Shared format revised.");
-  assert.equal(formatCopy.language, "en-US");
-  assert.notEqual(formatCopy.id, "episode-chisme-crianza");
-  assert.equal(appliedSharedFormat.profiles.episodeProfiles.find((item) => item.id === "episode-chisme-crianza").description, "Focused by the Podcast Assistant");
-  assert.equal(appliedSharedFormat.plan.episodeFormatId, formatCopy.id);
-  assert.ok(appliedSharedFormat.plan.episodes.every((item) => item.episodeProfileId === formatCopy.id));
-  assert.equal(appliedSharedFormat.updatedEpisodes, 2);
-  const formatPropagated = JSON.parse(await readFile(join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json"), "utf8"));
-  assert.equal(formatPropagated.episodeProfileId, formatCopy.id);
-  assert.equal(formatPropagated.episodeProfile.id, formatCopy.id);
-  assert.equal((await (await fetch(`${baseUrl}/api/plans/${holderPlan.id}`)).json()).plan.episodeFormatId, "episode-chisme-crianza");
-  assert.ok((await (await fetch(`${baseUrl}/api/chat?threadId=${sharedFormatChat.threadId}`)).json()).messages[sharedFormatProposalIndex].appliedAt);
-  await fetch(`${baseUrl}/api/plans/${holderPlan.id}`, { method: "DELETE" });
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Improve shared speaker", model: planningModel, activeContext: { view: "speakers" } });
-  const unsharedSpeakerChat = await response.json();
-  const unsharedThread = await (await fetch(`${baseUrl}/api/chat?threadId=${unsharedSpeakerChat.threadId}`)).json();
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: unsharedSpeakerChat.threadId, messageIndex: unsharedThread.messages.findIndex((message) => message.role === "assistant") });
-  const appliedUnshared = await response.json();
-  assert.equal(response.status, 200, appliedUnshared.error);
-  assert.equal(appliedUnshared.profiles.speakerProfiles.filter((item) => item.name.endsWith("— Copy")).length, 1);
-  assert.equal(appliedUnshared.profiles.speakerProfiles.find((item) => item.id === speakerProfileId).description, "Revised without changing existing references.");
-  assert.equal(appliedUnshared.plan.speakerProfileId, speakerProfileId);
-  assert.equal(appliedUnshared.updatedEpisodes, 2);
-  assert.equal(JSON.parse(await readFile(join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json"), "utf8")).speakerProfile.id, speakerProfileId);
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Create a speaker", model: planningModel, activeContext: { view: "planner", plannerSection: "plan" } });
-  const speakerChat = await response.json();
-  assert.equal(response.status, 200, speakerChat.error);
-  const speakerThread = await (await fetch(`${baseUrl}/api/chat?threadId=${speakerChat.threadId}`)).json();
-  const speakerProposalIndex = speakerThread.messages.findIndex((message) => message.role === "assistant");
-  const blockedEpisodePath = join(rootDir, "data", "episodes", created.episodes[0].id, "episode.json");
-  const blockedEpisode = JSON.parse(await readFile(blockedEpisodePath, "utf8"));
-  const profilesPath = join(rootDir, "data", "profiles.json");
-  const profilesWithUnrelatedWarning = JSON.parse(await readFile(profilesPath, "utf8"));
-  const unrelatedSpeaker = structuredClone(profilesWithUnrelatedWarning.speakerProfiles[0]);
-  unrelatedSpeaker.id = "unrelated-stale-speaker";
-  unrelatedSpeaker.name = "Unrelated stale speaker";
-  unrelatedSpeaker.voiceModel = "unrelated-stale-tts";
-  unrelatedSpeaker.speakers = unrelatedSpeaker.speakers.map((speaker) => ({ ...speaker, ttsModelOverride: "" }));
-  profilesWithUnrelatedWarning.speakerProfiles.push(unrelatedSpeaker);
-  await writeFile(profilesPath, JSON.stringify(profilesWithUnrelatedWarning, null, 2));
-  const beforeFailedApply = await (await fetch(`${baseUrl}/api/state`)).json();
-  const beforeFailedPlan = (await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan;
-  await writeFile(blockedEpisodePath, JSON.stringify({ ...blockedEpisode, job: { id: "blocked", type: "tts", status: "running" } }, null, 2));
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: speakerChat.threadId, messageIndex: speakerProposalIndex });
-  assert.equal(response.status, 409);
-  const afterFailedApply = await (await fetch(`${baseUrl}/api/state`)).json();
-  assert.deepEqual(afterFailedApply.profiles, beforeFailedApply.profiles);
-  assert.deepEqual((await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan, beforeFailedPlan);
-  assert.equal((await (await fetch(`${baseUrl}/api/chat?threadId=${speakerChat.threadId}`)).json()).messages[speakerProposalIndex].appliedAt, undefined);
-  await writeFile(blockedEpisodePath, JSON.stringify(blockedEpisode, null, 2));
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: speakerChat.threadId, messageIndex: speakerProposalIndex });
-  const appliedSpeaker = await response.json();
-  assert.equal(response.status, 200, appliedSpeaker.error);
-  const createdSpeaker = appliedSpeaker.profiles.speakerProfiles.find((item) => item.name === "Assistant Speaker");
-  assert.ok(createdSpeaker);
-  assert.doesNotMatch(appliedSpeaker.warnings.join(" "), /unrelated-stale-tts/);
-  assert.equal(appliedSpeaker.plan.speakerProfileId, createdSpeaker.id);
-  const stateAfterSpeakerApply = await (await fetch(`${baseUrl}/api/state`)).json();
-  assert.ok(stateAfterSpeakerApply.profiles.speakerProfiles.some((item) => item.id === createdSpeaker.id));
-  assert.equal(stateAfterSpeakerApply.plans.find((item) => item.id === plan.id).speakerProfileId, createdSpeaker.id);
-
-  const overrideTarget = created.episodes[0];
-  response = await sendJson(`${baseUrl}/api/episodes`, { id: overrideTarget.id, name: overrideTarget.name, episodeProfileId: overrideTarget.episodeProfileId, speakerProfileId: createdSpeaker.id, knowledgeBaseId: "", additionalInstructions: overrideTarget.additionalInstructions, transcriptPromptGuidance: overrideTarget.transcriptPromptGuidance });
-  const overriddenEpisode = await response.json();
-  assert.equal(response.status, 200, overriddenEpisode.error);
-  assert.equal(overriddenEpisode.speakerProfileId, createdSpeaker.id);
-  assert.equal(overriddenEpisode.speakerProfile.id, createdSpeaker.id);
-  const persistedOverride = JSON.parse(await readFile(join(rootDir, "data", "episodes", overrideTarget.id, "episode.json"), "utf8"));
-  assert.equal(persistedOverride.speakerProfile.id, createdSpeaker.id);
-  response = await sendJson(`${baseUrl}/api/episodes`, { id: overrideTarget.id, name: overrideTarget.name, episodeProfileId: overrideTarget.episodeProfileId, speakerProfileId: "", knowledgeBaseId: "", additionalInstructions: overrideTarget.additionalInstructions, transcriptPromptGuidance: overrideTarget.transcriptPromptGuidance });
-  const clearedOverride = await response.json();
-  assert.equal(response.status, 200, clearedOverride.error);
-  assert.equal(clearedOverride.speakerProfileId, "");
-  assert.equal(clearedOverride.speakerProfile.id, speakerProfileId);
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Create partial speaker", model: planningModel, activeContext: { view: "speakers" } });
-  const partialChat = await response.json();
-  assert.equal(response.status, 200, partialChat.error);
-  assert.equal(partialChat.message.proposal.speakerProfile.value.voiceModel, "");
-  const partialThread = await (await fetch(`${baseUrl}/api/chat?threadId=${partialChat.threadId}`)).json();
-  const partialProposalIndex = partialThread.messages.findIndex((message) => message.role === "assistant");
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: partialChat.threadId, messageIndex: partialProposalIndex });
-  const partialApply = await response.json();
-  assert.equal(response.status, 200, partialApply.error);
-  const partialSpeaker = partialApply.profiles.speakerProfiles.find((item) => item.name === "Partial Speaker");
-  assert.equal(partialSpeaker.description, "Valid sibling field");
-  assert.equal(partialSpeaker.voiceModel, "");
-  assert.match(partialApply.warnings.join(" "), /mimo-v2-tts/);
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Create partial format", model: planningModel, activeContext: { view: "formats" } });
-  const partialFormatChat = await response.json();
-  const partialFormatThread = await (await fetch(`${baseUrl}/api/chat?threadId=${partialFormatChat.threadId}`)).json();
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: partialFormatChat.threadId, messageIndex: partialFormatThread.messages.findIndex((message) => message.role === "assistant") });
-  const partialFormatApply = await response.json();
-  assert.equal(response.status, 200, partialFormatApply.error);
-  const partialFormat = partialFormatApply.profiles.episodeProfiles.find((item) => item.name === "Partial Format");
-  assert.equal(partialFormat.description, "Valid format field");
-  assert.equal(partialFormat.outlineModel, "");
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Apply partial plan", model: planningModel });
-  const partialPlanChat = await response.json();
-  const partialPlanThread = await (await fetch(`${baseUrl}/api/chat?threadId=${partialPlanChat.threadId}`)).json();
-  response = await sendJson(`${baseUrl}/api/plans/chat/apply`, { threadId: partialPlanChat.threadId, messageIndex: partialPlanThread.messages.findIndex((message) => message.role === "assistant") });
-  const partialPlanApply = await response.json();
-  assert.equal(response.status, 200, partialPlanApply.error);
-  assert.equal(partialPlanApply.plan.audience, "Partial audience");
-  assert.equal(partialPlanApply.plan.planningModel, "");
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Fenced reply", model: planningModel });
-  const fencedChat = await response.json();
-  assert.equal(response.status, 200, fencedChat.error);
-  assert.equal(fencedChat.message.message, "Fenced ok.");
-  response = await sendJson(`${baseUrl}/api/plans/chat`, { planId: plan.id, text: "Broken speaker JSON", model: planningModel });
-  const recoveredChat = await response.json();
-  assert.equal(response.status, 200, recoveredChat.error);
-  assert.equal(recoveredChat.message.message, "Recovered.");
-  assert.equal(recoveredChat.message.proposal.speakerProfile.value.name, "Recovered Speaker");
-  const chats = await (await fetch(`${baseUrl}/api/chats?kind=planner&planId=${plan.id}`)).json();
-  assert.equal(chats.chats[0].kind, "planner");
-  assert.equal(chats.chats[0].lastPlanId, plan.id);
-
-  const savedEpisodeFormatId = state.profiles.episodeProfiles[0].id;
-  response = await sendJson(`${baseUrl}/api/plans`, { name: "Auto count", speakerProfileId, episodeFormatId: savedEpisodeFormatId, planningModel, theme: "Choose a useful series length", audience: "Engineers", goal: "Teach" });
-  let autoPlan = (await response.json()).plan;
-  assert.equal(response.status, 201);
-  assert.equal(autoPlan.episodeCount, null);
-  response = await sendJson(`${baseUrl}/api/plans/${autoPlan.id}/generate`, {});
-  autoPlan = (await response.json()).plan;
-  assert.equal(response.status, 200);
-  assert.equal(autoPlan.episodeCount, 2);
-  assert.equal(autoPlan.episodes.length, 2);
-  assert.equal(autoPlan.episodeFormatId, savedEpisodeFormatId);
-  assert.equal(autoPlan.episodes[1].premise, "");
-  response = await sendJson(`${baseUrl}/api/plans/${autoPlan.id}/create-episodes`, { plannedEpisodeIds: [autoPlan.episodes[1].id] });
-  const titleOnlyDraft = await response.json();
-  assert.equal(response.status, 200, titleOnlyDraft.error);
-  assert.match(titleOnlyDraft.episodes[0].additionalInstructions, /Planned episode:\nNone\./);
-  await fetch(`${baseUrl}/api/plans/${autoPlan.id}`, { method: "DELETE" });
 
   const deleteTarget = created.episodes[1];
   response = await fetch(`${baseUrl}/api/episodes/${deleteTarget.id}`, { method: "DELETE" });
   assert.equal(response.status, 200);
-  response = await fetch(`${baseUrl}/api/episodes/${deleteTarget.id}`);
-  assert.equal(response.status, 404);
+  assert.equal((await fetch(`${baseUrl}/api/episodes/${deleteTarget.id}`)).status, 404);
   const planAfterDelete = (await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan;
   assert.equal(planAfterDelete.episodes.length, 1);
   assert.ok(planAfterDelete.episodes.every((item) => item.createdEpisodeId !== deleteTarget.id));
-  response = await fetch(`${baseUrl}/api/episodes/${deleteTarget.id}`, { method: "DELETE" });
-  assert.equal(response.status, 404);
+  assert.equal((await fetch(`${baseUrl}/api/episodes/${deleteTarget.id}`, { method: "DELETE" })).status, 404);
 
-  response = await fetch(`${baseUrl}/api/speaker-profiles/unknown-profile`, { method: "DELETE" });
-  assert.equal(response.status, 404);
-  const stateBeforeProfileDelete = await (await fetch(`${baseUrl}/api/state`)).json();
-  const planSpeakerId = stateBeforeProfileDelete.plans.find((item) => item.id === plan.id).speakerProfileId;
-  response = await fetch(`${baseUrl}/api/speaker-profiles/${planSpeakerId}`, { method: "DELETE" });
+  assert.equal((await fetch(`${baseUrl}/api/speaker-profiles/unknown-profile`, { method: "DELETE" })).status, 404);
+  const profiles = structuredClone(state.profiles);
+  profiles.speakerProfiles.push({ ...structuredClone(profiles.speakerProfiles[0]), id: "fallback-hosts", name: "Fallback" });
+  assert.equal((await sendJson(`${baseUrl}/api/profiles`, profiles, "PUT")).status, 200);
+  response = await fetch(`${baseUrl}/api/speaker-profiles/${speakerProfileId}`, { method: "DELETE" });
   const profileDelete = await response.json();
   assert.equal(response.status, 200, profileDelete.error);
-  assert.equal(profileDelete.repointedPlans, 1);
-  const repointedPlan = (await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan;
-  assert.equal(repointedPlan.speakerProfileId, profileDelete.fallbackId);
-  let remainingProfiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles.speakerProfiles;
-  while (remainingProfiles.length > 1) {
-    response = await fetch(`${baseUrl}/api/speaker-profiles/${remainingProfiles[0].id}`, { method: "DELETE" });
-    assert.equal(response.status, 200);
-    remainingProfiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles.speakerProfiles;
-  }
-  response = await fetch(`${baseUrl}/api/speaker-profiles/${remainingProfiles[0].id}`, { method: "DELETE" });
-  assert.equal(response.status, 400);
+  assert.equal(profileDelete.repointedPlans, 2);
+  assert.equal((await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan.speakerProfileId, profileDelete.fallbackId);
+  const remaining = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles.speakerProfiles;
+  assert.equal(remaining.length, 1);
+  assert.equal((await fetch(`${baseUrl}/api/speaker-profiles/${remaining[0].id}`, { method: "DELETE" })).status, 400);
 
-  response = await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "DELETE" });
-  assert.equal(response.status, 200);
-  assert.deepEqual((await (await fetch(`${baseUrl}/api/chats?kind=planner&planId=${plan.id}`)).json()).chats, []);
+  assert.equal((await fetch(`${baseUrl}/api/plans/${plan.id}`, { method: "DELETE" })).status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/plans/${plan.id}`)).status, 404);
+});
+
+test("normalizeGeneratedPlan keeps the plan JSON contract for agent-written plans", () => {
+  const raw = { episodeFormat: { name: "Interview", description: "Focused" }, episodes: [{ number: 1, title: "First" }, { number: 2, title: "Second" }], detailedEpisode: { number: 1, premise: "First premise" } };
+  const result = normalizeGeneratedPlan(raw, { episodeCount: null, episodeFormatId: "" });
+  assert.deepEqual(result.episodeFormat, { name: "Interview", description: "Focused" });
+  assert.equal(result.episodeCount, 2);
+  assert.deepEqual(result.episodes.map((item) => [item.title, item.premise]), [["First", "First premise"], ["Second", ""]]);
+  assert.equal(normalizeGeneratedPlan(raw, { episodeCount: 2, episodeFormatId: "f" }).episodeFormat, null);
+  assert.throws(() => normalizeGeneratedPlan(raw, { episodeCount: 3, episodeFormatId: "f" }), /exactly 3 episodes/);
+  assert.throws(() => normalizeGeneratedPlan({ episodes: [{ number: 2, title: "x" }] }, { episodeCount: null, episodeFormatId: "f" }), /invalid numbering/);
 });
 
 test("index.html stays CSP-safe: no inline style or event-handler attributes", async () => {
