@@ -18,7 +18,7 @@ In the Andes, an *apu* is a "lord": the spirit of a mountain that watches over t
 
 ## Install
 
-Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.1.0 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. You do not need a clone or a server that you start yourself. The plugin install from GitHub works after apupod is published on npm.
+Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.2.0 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. You do not need a clone or a server that you start yourself. The plugin install from GitHub works after apupod is published on npm.
 
 The UI **Settings** view shows these commands with copy buttons, and shows when each harness last connected.
 
@@ -57,7 +57,7 @@ Add the MCP server to `opencode.json` (project) or `~/.config/opencode/opencode.
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.1.0", "mcp"]
+        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.2.0", "mcp"]
       }
     }
   },
@@ -124,7 +124,8 @@ Example prompts: "Use apupod to make a 3-episode podcast about the history of co
 |---|---|
 | `get_workspace` | Overview: host profiles, formats, knowledge bases, plans, episodes, TTS readiness, Jev availability, apupod version and update status, recent MCP connections, UI URL. Call it first. |
 | `open_ui` | Returns the UI URL, optionally deep-linked to a view or an episode. |
-| `list_tts_options` | Active TTS models, languages, cue capabilities, tuning ranges and defaults, and which providers have keys. |
+| `list_tts_options` | Active TTS models, discovered models that can be activated, languages, cue capabilities, tuning ranges and defaults, and which providers have keys. |
+| `set_tts_models` | Activates or deactivates TTS models through the same config save as Settings > Models; refuses to deactivate a model in use. |
 | `list_voices` | Voices for a TTS provider or one active TTS model. |
 | `save_host_profile` | Creates or updates a host profile with 1 to 4 speakers. |
 | `delete_host_profile` | Deletes a host profile; formats and plans move to the first remaining profile. |

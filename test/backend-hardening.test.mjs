@@ -76,7 +76,7 @@ test("B2: profiles.json without both arrays is quarantined at boot and episodes 
   const quarantined = (await readdir(join(rootDir, "data"))).filter((name) => name.startsWith("profiles.json.corrupt-"));
   assert.equal(quarantined.length, 1);
   assert.equal(await readFile(join(rootDir, "data", quarantined[0]), "utf8"), partial);
-  const response = await api("/api/episodes", { name: "After repair", episodeProfileId: "episode-chisme-crianza" });
+  const response = await api("/api/episodes", { name: "After repair", episodeProfileId: "episode-example-format" });
   assert.equal(response.status, 201, response.value.error);
 });
 

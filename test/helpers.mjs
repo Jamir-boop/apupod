@@ -54,7 +54,7 @@ export async function startTestServer(t, { rootDir, ...options } = {}, prepare) 
 // POST a knowledge base, POST an episode on it, and PUT the transcript when one is given.
 export async function seedEpisode(baseUrl, name, { knowledge = "# Source", transcript } = {}) {
   const kb = await (await sendJson(`${baseUrl}/api/knowledge`, { name: "book.md", content: knowledge })).json();
-  const episode = await (await sendJson(`${baseUrl}/api/episodes`, { name, episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: kb.id })).json();
+  const episode = await (await sendJson(`${baseUrl}/api/episodes`, { name, episodeProfileId: "episode-example-format", knowledgeBaseId: kb.id })).json();
   if (transcript !== undefined) await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
   return episode;
 }

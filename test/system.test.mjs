@@ -208,9 +208,9 @@ test("update is refused during a TTS job, runs npm install with the exact args t
   const config = (await api("/api/state")).value.config;
   config.providers.elevenlabs.activeModels = { eleven_v3: { tts: true } };
   assert.equal((await api("/api/config", config, "PUT")).status, 200);
-  await call("save_host_profile", { id: "speaker-chisme-crianza", voiceModel: "eleven_v3", speakers: [{ name: "Valeria", voiceId: "voice-es" }, { name: "Diego", voiceId: "voice-es" }] });
-  const { episodes: [episode] } = await call("create_episodes", { name: "Held render", episodeProfileId: "episode-chisme-crianza" });
-  const { job } = await call("save_script", { episodeId: episode.id, script: "## Uno\nValeria: Hola.\nDiego: Hola.", render: true });
+  await call("save_host_profile", { id: "speaker-example-hosts", voiceModel: "eleven_v3", speakers: [{ name: "Alex", voiceId: "voice-es" }, { name: "Sam", voiceId: "voice-es" }] });
+  const { episodes: [episode] } = await call("create_episodes", { name: "Held render", episodeProfileId: "episode-example-format" });
+  const { job } = await call("save_script", { episodeId: episode.id, script: "## Uno\nAlex: Hola.\nSam: Hola.", render: true });
 
   for (const [path, body, method] of [["/api/system/update", {}, "POST"], ["/api/system/port", { port: await freePort() }, "PUT"]]) {
     const refused = await api(path, body, method);

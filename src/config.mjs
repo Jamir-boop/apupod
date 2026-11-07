@@ -5,8 +5,8 @@ import {
 } from "node:fs/promises";
 import { JEV_MODEL } from "./jev.mjs";
 import { badRequest, conflict, envFileNames, normalizeUrl, validateId } from "./util.mjs";
-import { DEFAULT_MIMO_BASE_URL, DEFAULT_OPENAI_BASE_URL, parseCompatibleModelId, builtInConnectionId } from "./providers/catalog.mjs";
-import { listEpisodes, readJson, writeJsonAtomic, writeTextAtomic, exists } from "./store.mjs";
+import { DEFAULT_MIMO_BASE_URL, DEFAULT_OPENAI_BASE_URL, parseCompatibleModelId, builtInConnectionId, queueModelCatalogRefresh, inactiveTtsModels } from "./providers/catalog.mjs";
+import { listEpisodes, readJson, writeJsonAtomic, writeTextAtomic, exists, serializeMutation, serializeWithLatestModelCatalog } from "./store.mjs";
 
 const ENV_FILE_MODE = 0o600;
 export function defaultConfig() {
@@ -126,10 +126,40 @@ export function redactConfig(config) {
   };
 }
 
-export async function saveConfigRequest(context, value) {
+// PUT /api/config and set_tts_models: save and queue a catalog refresh under the write lock, then return the refreshed catalog.
+const saveAndRefresh = async (context, value, options) => ({ saved: await saveConfigRequest(context, value, options), refresh: queueModelCatalogRefresh(context, { force: true }) });
+const withCatalog = async ({ saved, refresh }) => ({ ...saved, modelCatalog: await refresh.promise });
+
+export async function saveConfig(context, value) {
+  return withCatalog(await serializeMutation(context, () => saveAndRefresh(context, value)));
+}
+
+// Activate or deactivate TTS models by the IDs list_tts_options returns, through the same save as the Settings dialog.
+export async function setTtsModels(context, models, active) {
+  return withCatalog(await serializeWithLatestModelCatalog(context, () => {
+    const value = structuredClone(context.config);
+    const available = new Set(inactiveTtsModels(context).map((model) => model.id));
+    for (const modelId of models) {
+      const parsed = parseCompatibleModelId(modelId);
+      const target = parsed ? connectionProviderConfig(value, parsed.connectionId)
+        : modelId === "mimo-v2.5-tts" ? value.providers.mimo : value.providers.elevenlabs;
+      const rawId = parsed?.modelId || modelId;
+      const isActive = Boolean(target?.activeModels[rawId]?.tts);
+      if (active && !isActive && !available.has(modelId)) throw badRequest(`TTS model "${modelId}" is not available. Use an ID from list_tts_options "available".`);
+      if (active) target.activeModels[rawId] = { tts: true };
+      else if (target) delete target.activeModels[rawId];
+    }
+    return saveAndRefresh(context, value, active ? undefined : { refuseDeactivating: models });
+  }));
+}
+
+export async function saveConfigRequest(context, value, { refuseDeactivating = [] } = {}) {
   const next = validateConfigPayload(value, context.config);
   const dependents = await loadModelDependents(context.paths);
   assertConnectionsCanBeRemoved(context.config, next.config, dependents);
+  // set_tts_models refuses to deactivate a model in use; the Settings dialog warns and saves.
+  const blocked = inactiveModelWarnings(context.config, next.config, { references: dependents.references.filter((reference) => refuseDeactivating.includes(reference.modelId)), corrupt: [] });
+  if (blocked.length) throw conflict(`Cannot deactivate a TTS model in use. ${blocked.join(" ")}`);
   const warnings = inactiveModelWarnings(context.config, next.config, dependents);
   const retainedIds = new Set(next.config.compatibleConnections.map((connection) => connection.id));
   for (const connection of context.config.compatibleConnections) {

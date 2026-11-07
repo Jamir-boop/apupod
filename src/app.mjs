@@ -14,7 +14,7 @@ import { envFileNames, badRequest, conflict, assertSafeId, readJsonBody, assertL
 import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog } from "./providers/catalog.mjs";
 import { fetchElevenLabsVoices, fetchChatterboxVoices } from "./providers/generate.mjs";
 import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpisodes, readJson, writeJsonAtomic, exists, nextUpdatedAt } from "./store.mjs";
-import { defaultConfig, readConfig, activateReferencedModels, redactConfig, saveConfigRequest } from "./config.mjs";
+import { defaultConfig, readConfig, activateReferencedModels, redactConfig, saveConfig } from "./config.mjs";
 import { deleteEpisodeRequest, deleteSpeakerProfileRequest, saveEpisodeRequest, getEpisodeResponse, renameEpisodeRequest, applyLatestProfilesRequest, resolveTranscriptPromptRequest, saveTranscriptRequest, writeProfiles } from "./episodes.mjs";
 import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanResponse, updatePlanRequest, deletePlannedEpisodeRequest, deletePlanRequest, createPlanEpisodesRequest } from "./plans.mjs";
 import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTtsJob, ensureFfmpeg, previewVoice, runProcess } from "./jobs.mjs";
@@ -210,12 +210,7 @@ async function routeRequest(req, res, context) {
   }
 
   if (method === "PUT" && path === "/api/config") {
-    const value = await readJsonBody(req);
-    const { saved, refresh } = await serializeMutation(context, async () => ({
-      saved: await saveConfigRequest(context, value),
-      refresh: queueModelCatalogRefresh(context, { force: true }),
-    }));
-    return sendJson(res, 200, { ...saved, modelCatalog: await refresh.promise });
+    return sendJson(res, 200, await saveConfig(context, await readJsonBody(req)));
   }
 
   if (method === "GET" && path === "/api/models") {

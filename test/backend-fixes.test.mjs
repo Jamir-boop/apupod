@@ -90,7 +90,7 @@ test("saved reserved connection IDs use their custom endpoints and activation ma
 test("ElevenLabs honors discovered legacy limits without cutting tags or SSML breaks", async (t) => {
   const requests = [];
   const { api } = await start(t, { fetchImpl: async (url, options = {}) => {
-    if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json(["eleven_v4", "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"].map((model_id) => ({ model_id, can_do_text_to_speech: true, maximum_text_length_per_request: 60, languages: [{ language_id: "es", name: "Spanish" }] })));
+    if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json(["eleven_v4", "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"].map((model_id) => ({ model_id, can_do_text_to_speech: true, maximum_text_length_per_request: 60, languages: [{ language_id: "es", name: "Spanish" }, { language_id: "en", name: "English" }] })));
     if (String(url).includes("/text-to-speech/")) { const body = JSON.parse(options.body); requests.push(body); assert.ok(body.text.length <= 60); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
     return Response.json({ data: [] });
   } });
@@ -135,7 +135,7 @@ test("empty normalized WAV frames fail conversion, preview, and a multi-turn job
   let returnEmpty = true;
   const calls = [];
   const { api, rootDir } = await start(t, { fetchImpl: async (url, options = {}) => {
-    if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json([{ model_id: "eleven_v3", can_do_text_to_speech: true, languages: [{ language_id: "es", name: "Spanish" }] }]);
+    if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json([{ model_id: "eleven_v3", can_do_text_to_speech: true, languages: [{ language_id: "es", name: "Spanish" }, { language_id: "en", name: "English" }] }]);
     if (String(url).includes("/text-to-speech/")) { const text = JSON.parse(options.body).text; calls.push(text); return new Response(silentWav(24_000, 1, returnEmpty && text.includes("EMPTY") ? 0 : 0.01), { headers: { "Content-Type": "audio/wav" } }); }
     return Response.json({ data: [] });
   } });
@@ -198,7 +198,7 @@ test("legacy ElevenLabs models use their documented request limits when discover
   const limits = { eleven_v3: 5_000, eleven_multilingual_v2: 10_000, eleven_flash_v2_5: 40_000 };
   const requests = [];
   const { api } = await start(t, { fetchImpl: async (url, options = {}) => {
-    if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json(Object.keys(limits).map((model_id) => ({ model_id, can_do_text_to_speech: true, languages: [{ language_id: "es", name: "Spanish" }] })));
+    if (String(url) === "https://api.elevenlabs.io/v1/models") return Response.json(Object.keys(limits).map((model_id) => ({ model_id, can_do_text_to_speech: true, languages: [{ language_id: "es", name: "Spanish" }, { language_id: "en", name: "English" }] })));
     if (String(url).includes("/text-to-speech/")) { const body = JSON.parse(options.body); requests.push(body); assert.ok(body.text.length <= limits[body.model_id]); return new Response(silentWav(), { headers: { "Content-Type": "audio/wav" } }); }
     return Response.json({ data: [] });
   } });

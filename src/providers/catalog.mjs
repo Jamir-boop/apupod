@@ -1,5 +1,5 @@
 import { badRequest, normalizeUrl } from "../util.mjs";
-import { MAX_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, fetchJson, cappedFetch, openAiClient, callOptions, sdkJson, providerError } from "./transport.mjs";
+import { MAX_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, fetchJson, cappedFetch, openAiClient, callOptions, sdkJson, providerError, redactSecrets } from "./transport.mjs";
 
 export const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -285,7 +285,8 @@ function mergeDiscoveredLanguages(catalog) {
 
 function setProviderError(provider, error) {
   provider.status = "error";
-  provider.error = error.message || String(error);
+  // Every provider status error passes the shared key redaction, whatever built it.
+  provider.error = redactSecrets(error.message || String(error));
 }
 
 function compatibleModelId(connectionId, modelId) {
@@ -342,6 +343,21 @@ export function availableModelIds(context) {
     ttsModels: new Set([...providers.mimo.ttsModels, ...providers.elevenlabs.ttsModels, ...openaiTts, ...chatterboxTts, ...compatibleTts].map((model) => typeof model === "string" ? model : model.id)),
     languages: new Set(context.modelCatalog.languages.map((language) => language.id)),
   };
+}
+
+// Discovered, supported TTS models of ready providers that are not active yet: what set_tts_models can activate.
+export function inactiveTtsModels(context) {
+  const providers = context.modelCatalog.providers;
+  return [providers.mimo, providers.elevenlabs, providers.openai, providers.chatterbox, ...(providers.compatible || [])]
+    .filter((provider) => provider.status === "ready")
+    .flatMap((provider) => provider.discoveredModels.filter((model) => model.supported !== false && model.suggested?.tts !== false
+      && !provider.ttsModels.some((item) => item.id === model.id)));
+}
+
+// Language IDs a discovered model reports; a model that reports none (compatible servers) lists every language.
+export function discoveredModelLanguages(context, model) {
+  const codes = model.provider === "mimo" ? MIMO_LANGUAGE_CODES : model.languages?.length ? new Set(model.languages.map((language) => language.id)) : null;
+  return context.modelCatalog.languages.filter((language) => !codes || codes.has(language.apiCode)).map((language) => language.id);
 }
 
 export function isElevenLabsModel(context, model) {

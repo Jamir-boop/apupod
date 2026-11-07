@@ -66,7 +66,7 @@ function render(data) {
   const root = document.getElementById("root");
   root.replaceChildren();
   const head = el("div"); head.className = "card";
-  head.append(el("h1", "apupod"), el("div", data.tts?.ready ? "TTS ready" : "TTS not ready: add a TTS key in Settings", "muted"));
+  head.append(el("h1", "apupod"), el("div", data.tts?.ready ? "TTS ready" : "TTS not ready: " + (data.tts?.hint || "add a TTS key in Settings"), "muted"));
   if (data.url || data.uiUrl) head.append(openButton(data.url || data.uiUrl, "Open apupod"));
   root.append(head);
   const counts = el("div"); counts.className = "grid";

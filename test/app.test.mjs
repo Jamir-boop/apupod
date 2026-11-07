@@ -48,7 +48,7 @@ function longText(label, words = 225) {
 test("default profiles are valid", () => {
   const profiles = structuredClone(DEFAULT_DATA);
   assert.equal(validateProfileData(profiles), true);
-  assert.equal(profiles.episodeProfiles[0].numSegments, 5);
+  assert.equal(profiles.episodeProfiles[0].numSegments, 3);
   assert.equal(Object.hasOwn(profiles.episodeProfiles[0], "defaultBriefing"), false);
 });
 
@@ -56,7 +56,7 @@ test("speaker profiles accept 1 to 4 speakers", () => {
   const solo = structuredClone(DEFAULT_DATA);
   solo.speakerProfiles[0].speakers = [solo.speakerProfiles[0].speakers[0]];
   assert.equal(validateProfileData(solo), true);
-  assert.equal(parseTranscript("## Segmento 1\nValeria: Hola.", solo.speakerProfiles[0].speakers, 1).segments[0].turns.length, 1);
+  assert.equal(parseTranscript("## Segmento 1\nAlex: Hola.", solo.speakerProfiles[0].speakers, 1).segments[0].turns.length, 1);
 
   const panel = structuredClone(DEFAULT_DATA);
   panel.speakerProfiles[0].speakers = Array.from({ length: 4 }, (_, index) => ({
@@ -96,9 +96,9 @@ test("speaker profiles accept 1 to 4 speakers", () => {
   assert.throws(() => validateProfileData(invalidElevenLabs), /ElevenLabs speed must be a number from 0.7 to 1.2/);
 
   const spacedName = structuredClone(DEFAULT_DATA);
-  spacedName.speakerProfiles[0].speakers[0].name = "  Valeria  ";
+  spacedName.speakerProfiles[0].speakers[0].name = "  Alex  ";
   validateProfileData(spacedName);
-  assert.equal(spacedName.speakerProfiles[0].speakers[0].name, "Valeria");
+  assert.equal(spacedName.speakerProfiles[0].speakers[0].name, "Alex");
 });
 
 test("saving Episode Formats derives segment count from target duration", async (t) => {
@@ -128,15 +128,15 @@ test("saving Episode Formats derives segment count from target duration", async 
 test("transcript leadership follows configured speaker count", () => {
   assert.match(transcriptSpeakerRule(["Ana"]), /Use only Ana/);
   assert.match(transcriptSpeakerRule(["Ana", "Luis", "Sara"]), /^Ana is the lead host/);
-  assert.doesNotMatch(transcriptSpeakerRule(["Ana", "Luis"]), /Valeria/);
+  assert.doesNotMatch(transcriptSpeakerRule(["Ana", "Luis"]), /Alex/);
 });
 
 test("transcript warns for fewer segments and rejects invalid counts", () => {
   assert.throws(() => parseTranscript("## Segmento 1\nNarrator: hello", speakers, 1), /Invalid transcript line 2/);
-  const fewer = parseTranscript("## Segmento 1\nValeria: hello", speakers, 5);
+  const fewer = parseTranscript("## Segmento 1\nAlex: hello", speakers, 5);
   assert.match(fewer.warning, /1 of 5 configured segments/);
   assert.throws(() => parseTranscript("", speakers, 5), /at least 1 segment/);
-  const excessive = Array.from({ length: 6 }, (_, index) => `## Segmento ${index + 1}\nValeria: hello`).join("\n");
+  const excessive = Array.from({ length: 6 }, (_, index) => `## Segmento ${index + 1}\nAlex: hello`).join("\n");
   assert.throws(() => parseTranscript(excessive, speakers, 5), /at most 5 segments/);
 });
 
@@ -227,7 +227,7 @@ test("ElevenLabs voices and preview use server-side key", async (t) => {
   assert.equal(response.status, 200);
   await syncProfiles(response, profiles);
 
-  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-chisme-crianza" });
+  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-example-format" });
   let prompt = await response.json();
   assert.match(prompt.lockedPrompt, /eleven_v3/);
   assert.match(prompt.lockedPrompt, /Do not use SSML break tags/);
@@ -237,7 +237,7 @@ test("ElevenLabs voices and preview use server-side key", async (t) => {
   response = await sendJson(`${baseUrl}/api/profiles`, profiles, "PUT");
   assert.equal(response.status, 200);
   await syncProfiles(response, profiles);
-  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-chisme-crianza" });
+  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-example-format" });
   prompt = await response.json();
   assert.match(prompt.lockedPrompt, /<break time="0\.5s" \/>/);
   assert.equal(prompt.capabilities[0].cueMode, "breaks");
@@ -252,7 +252,7 @@ test("ElevenLabs voices and preview use server-side key", async (t) => {
     verifiedLanguages: [{ language: "es", locale: "es-CO", accent: "Colombian" }],
   }], hasMore: false });
 
-  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "Hola", cue: "warm" });
+  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-example-format", speakerProfileId: "speaker-example-hosts", speakerIndex: 0, text: "Hola", cue: "warm" });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "audio/wav");
   const previewWav = Buffer.from(await response.arrayBuffer());
@@ -267,7 +267,7 @@ test("ElevenLabs voices and preview use server-side key", async (t) => {
   assert.deepEqual(request, {
     text: "[warm] Hola",
     model_id: "eleven_v3",
-    language_code: "es",
+    language_code: "en",
     voice_settings: {
       stability: 0.6,
       similarity_boost: 0.7,
@@ -343,7 +343,7 @@ test("Eleven v4 discovers capabilities, preserves tags, splits turns, and reuses
   assert.equal(preview.readUInt16LE(22), 1);
   assert.equal(preview.readUInt32LE(24), 24_000);
   assert.equal(preview.readUInt16LE(34), 16);
-  assert.deepEqual(requests.at(-1), { text: "[warm and calm] [laughs] Hola.", model_id: "eleven_v4", language_code: "es", voice_settings: { stability: 0.6, similarity_boost: 0.8 }, apply_text_normalization: "off", seed: 9 });
+  assert.deepEqual(requests.at(-1), { text: "[warm and calm] [laughs] Hola.", model_id: "eleven_v4", language_code: "en", voice_settings: { stability: 0.6, similarity_boost: 0.8 }, apply_text_normalization: "off", seed: 9 });
   const beforeSsml = requests.length;
   for (const text of ['Hola <break time="0.5s" />.', '<prosody rate="slow">Hola.</prosody>']) {
     response = await sendJson(`${baseUrl}/api/preview`, { ...previewBody, text });
@@ -493,29 +493,29 @@ test("local API seeds data and saves knowledge plus episode", async (t) => {
 
   response = await sendJson(`${baseUrl}/api/episodes`, {
     name: "Ep. 01 — Test",
-    episodeProfileId: "episode-chisme-crianza",
+    episodeProfileId: "episode-example-format",
     knowledgeBaseId: knowledge.id,
     additionalInstructions: "Stay focused.",
   });
   const episode = await response.json();
   assert.equal(response.status, 201);
   assert.equal(episode.status, "draft");
-  assert.equal(episode.episodeProfile.id, "episode-chisme-crianza");
-  assert.equal(episode.speakerProfile.speakers[0].name, "Valeria");
+  assert.equal(episode.episodeProfile.id, "episode-example-format");
+  assert.equal(episode.speakerProfile.speakers[0].name, "Alex");
 
   state.profiles.speakerProfiles[0].speakers[0].name = "Changed later";
   response = await sendJson(`${baseUrl}/api/profiles`, state.profiles, "PUT");
   assert.equal(response.status, 200);
 
-  const transcript = Array.from({ length: 3 }, (_, index) =>
-    `## Segmento ${index + 1} — Test\nValeria [cálida]: Idea ${index + 1}.\nDiego: Reacción ${index + 1}.`
+  const transcript = Array.from({ length: 2 }, (_, index) =>
+    `## Segmento ${index + 1} — Test\nAlex [cálida]: Idea ${index + 1}.\nSam: Reacción ${index + 1}.`
   ).join("\n\n");
   response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
   const saved = await response.json();
   assert.equal(response.status, 200);
   assert.equal(saved.status, "transcript_ready");
-  assert.match(saved.warning, /3 of 5 configured segments/);
-  assert.equal(saved.speakerProfile.speakers[0].name, "Valeria");
+  assert.match(saved.warning, /2 of 3 configured segments/);
+  assert.equal(saved.speakerProfile.speakers[0].name, "Alex");
 
   response = await sendJson(`${baseUrl}/api/episodes/${episode.id}`, { name: "Renamed podcast" }, "PATCH");
   const renamed = await response.json();
@@ -535,7 +535,7 @@ test("knowledge deletion clears plans and episodes", async (t) => {
   const knowledge = await response.json();
   response = await sendJson(`${baseUrl}/api/plans`, { name: "Plan", knowledgeBaseId: knowledge.id });
   const plan = (await response.json()).plan;
-  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Episode", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id });
+  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Episode", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledge.id });
   const episode = await response.json();
 
   const episodePath = join(rootDir, "data", "episodes", episode.id, "episode.json");
@@ -565,9 +565,9 @@ test("transcript word counts use locale-aware segmentation", async (t) => {
   await sendJson(`${baseUrl}/api/profiles`, state.profiles, "PUT");
   let response = await sendJson(`${baseUrl}/api/knowledge`, { name: "book.md", content: "# Source" });
   const knowledge = await response.json();
-  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Chinese", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id });
+  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Chinese", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledge.id });
   const episode = await response.json();
-  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria: ä»Šå¤©æˆ‘ä»¬è®¨è®ºå®¶åº­æ²Ÿé€šã€‚`).join("\n\n");
+  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nAlex: ä»Šå¤©æˆ‘ä»¬è®¨è®ºå®¶åº­æ²Ÿé€šã€‚`).join("\n\n");
   response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
   assert.equal(response.status, 200);
   assert.ok((await response.json()).transcriptWords > 5);
@@ -579,10 +579,10 @@ test("saved episode explicitly applies latest profiles atomically", async (t) =>
   let state = await (await fetch(`${baseUrl}/api/state`)).json();
   let response = await sendJson(`${baseUrl}/api/knowledge`, { name: "book.md", content: "# Source" });
   const knowledge = await response.json();
-  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Snapshot test", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id });
+  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Snapshot test", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledge.id });
   const episode = await response.json();
-  const transcript = Array.from({ length: 5 }, (_, index) =>
-    `## Segmento ${index + 1} — Test\nValeria: Idea ${index + 1}.\nDiego: Reaction ${index + 1}.`
+  const transcript = Array.from({ length: 3 }, (_, index) =>
+    `## Segmento ${index + 1} — Test\nAlex: Idea ${index + 1}.\nSam: Reaction ${index + 1}.`
   ).join("\n\n");
   response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
   assert.equal(response.status, 200);
@@ -600,7 +600,7 @@ test("saved episode explicitly applies latest profiles atomically", async (t) =>
   assert.equal(response.status, 200);
   state = await (await fetch(`${baseUrl}/api/state`)).json();
   assert.equal(state.profiles.episodeProfiles[0].targetMinutes, 19);
-  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).episodeProfile.targetMinutes, 18);
+  assert.equal((await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json()).episodeProfile.targetMinutes, 10);
 
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/profiles`, { method: "PUT" });
   const applied = await response.json();
@@ -614,7 +614,7 @@ test("saved episode explicitly applies latest profiles atomically", async (t) =>
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/profiles`, { method: "PUT" });
   assert.equal((await response.json()).changed, false);
 
-  response = await sendJson(`${baseUrl}/api/episodes`, { id: episode.id, name: "Snapshot test", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id, additionalInstructions: "New generation guidance" });
+  response = await sendJson(`${baseUrl}/api/episodes`, { id: episode.id, name: "Snapshot test", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledge.id, additionalInstructions: "New generation guidance" });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).audioReady, true);
 
@@ -635,7 +635,7 @@ test("saved episode explicitly applies latest profiles atomically", async (t) =>
   assert.equal(response.status, 200);
   const expanded = await response.json();
   assert.equal(expanded.episode.episodeProfile.numSegments, 6);
-  assert.match(expanded.warning, /5 of 6 configured segments/);
+  assert.match(expanded.warning, /3 of 6 configured segments/);
   assert.equal(Object.hasOwn(JSON.parse(await readFile(episodeFile, "utf8")), "warning"), false);
 
   const busy = JSON.parse(await readFile(episodeFile, "utf8"));
@@ -813,13 +813,13 @@ test("repeated manual model refreshes coalesce while config saves still force a 
 
 test("failed transcript replacement restores episode metadata", async (t) => {
   const { rootDir, baseUrl } = await startTestServer(t);
-  let response = await sendJson(`${baseUrl}/api/episodes`, { name: "Rollback", episodeProfileId: "episode-chisme-crianza" });
+  let response = await sendJson(`${baseUrl}/api/episodes`, { name: "Rollback", episodeProfileId: "episode-example-format" });
   const episode = await response.json();
   const directory = join(rootDir, "data", "episodes", episode.id);
   const metadataPath = join(directory, "episode.json");
   const before = await readFile(metadataPath, "utf8");
   await mkdir(join(directory, "transcript.md"));
-  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria: Idea ${index + 1}.`).join("\n\n");
+  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nAlex: Idea ${index + 1}.`).join("\n\n");
   response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
   assert.equal(response.status, 500);
   assert.equal(await readFile(metadataPath, "utf8"), before);
@@ -846,12 +846,13 @@ test("TTS jobs report progress and publish MP3", async (t) => {
   const knowledge = await response.json();
   const profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   profiles.episodeProfiles[0].targetMinutes = 5;
+  profiles.episodeProfiles[0].language = "es-419";
   response = await sendJson(`${baseUrl}/api/profiles`, profiles, "PUT");
   assert.equal(response.status, 200);
   await syncProfiles(response, profiles);
-  response = await sendJson(`${baseUrl}/api/episodes`, { name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id });
+  response = await sendJson(`${baseUrl}/api/episodes`, { name: "TTS", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledge.id });
   const episode = await response.json();
-  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nValeria [${index === 0 ? "quick" : "warm"}]: Idea ${index + 1}.${index === 0 ? "[pause]\nDiego [warm]: Quick reaction." : ""}`).join("\n\n");
+  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nAlex [${index === 0 ? "quick" : "warm"}]: Idea ${index + 1}.${index === 0 ? "[pause]\nSam [warm]: Quick reaction." : ""}`).join("\n\n");
   await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
 
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, { method: "POST" });
@@ -872,7 +873,7 @@ test("TTS jobs report progress and publish MP3", async (t) => {
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /TTS language is defined by the Episode Format/);
 
-  response = await sendJson(`${baseUrl}/api/episodes`, { id: episode.id, name: "TTS", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledge.id });
+  response = await sendJson(`${baseUrl}/api/episodes`, { id: episode.id, name: "TTS", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledge.id });
   assert.equal(response.status, 200);
 
   const clipsDir = join(rootDir, "data", "episodes", episode.id, "clips");
@@ -958,7 +959,7 @@ test("transcript prompt adds cues, supports no KB, and manual transcripts keep s
 
   response = await sendJson(`${baseUrl}/api/episodes`, {
     name: "New episode",
-    episodeProfileId: "episode-chisme-crianza",
+    episodeProfileId: "episode-example-format",
     knowledgeBaseId: "",
     transcriptPromptGuidance: "Keep reactions restrained.",
   });
@@ -973,7 +974,7 @@ test("transcript prompt adds cues, supports no KB, and manual transcripts keep s
   assert.match(prompt.effectivePrompt, /Keep reactions restrained/);
   assert.equal(prompt.capabilities[0].cueMode, "tags");
 
-  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nValeria: Idea ${index + 1}${index === 0 ? " [pause]" : ""}.`).join("\n\n");
+  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nAlex: Idea ${index + 1}${index === 0 ? " [pause]" : ""}.`).join("\n\n");
   response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/transcript`, { transcript }, "PUT");
   assert.equal(response.status, 200, (await response.clone().json()).error);
   const saved = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
@@ -1031,8 +1032,8 @@ test("job history keeps the newest 30 persisted jobs", async (t) => {
 
 // B1/B5 share one stubbed transcript-generation harness.
 async function seedRenderedEpisode(baseUrl, rootDir, name) {
-  const transcript = Array.from({ length: 5 }, (_, index) =>
-    `## Segmento ${index + 1} — Test\nValeria: Idea ${index + 1}.\nDiego: Reaction ${index + 1}.`
+  const transcript = Array.from({ length: 3 }, (_, index) =>
+    `## Segmento ${index + 1} — Test\nAlex: Idea ${index + 1}.\nSam: Reaction ${index + 1}.`
   ).join("\n\n");
   const episode = await seedEpisode(baseUrl, name, { knowledge: "# Grounded", transcript });
   const episodeFile = join(rootDir, "data", "episodes", episode.id, "episode.json");
@@ -1084,7 +1085,7 @@ test("profile saves reject a stale revision instead of overwriting another tab",
 
   const stored = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   assert.equal(stored.speakerProfiles[0].description, "Tab A edit");
-  assert.equal(stored.episodeProfiles[0].targetMinutes, 18);
+  assert.equal(stored.episodeProfiles[0].targetMinutes, 10);
 
   // The ordinary single-tab flow, which adopts the revisions from each response, still saves.
   tabA.episodeProfiles[0].targetMinutes = 21;
@@ -1165,7 +1166,7 @@ test("corrupt config and profiles are quarantined at boot and JSON errors name t
 test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", async (t) => {
   const first = await startTestServer(t);
   const { rootDir } = first;
-  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria: Idea ${index + 1}.`).join("\n\n");
+  const transcript = Array.from({ length: 3 }, (_, index) => `## Segmento ${index + 1}\nAlex: Idea ${index + 1}.`).join("\n\n");
   const episode = await seedEpisode(first.baseUrl, "Healthy", { transcript });
   await first.close();
 
@@ -1217,7 +1218,7 @@ test("TTS rejects missing FFmpeg before provider calls", async (t) => {
   const { baseUrl } = await startTestServer(t, {
     fetchImpl: async () => { providerCalls += 1; return Response.json({ data: [] }); },
   });
-  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nValeria: Idea ${index + 1}.`).join("\n\n");
+  const transcript = Array.from({ length: 5 }, (_, index) => `## Segmento ${index + 1}\nAlex: Idea ${index + 1}.`).join("\n\n");
   const episode = await seedEpisode(baseUrl, "No FFmpeg", { transcript });
   let response;
   const callsBeforeRender = providerCalls;
@@ -1283,7 +1284,7 @@ test("built-in OpenAI discovers models and uses the TTS endpoint", async (t) => 
   response = await sendJson(`${baseUrl}/api/profiles`, state.profiles, "PUT");
   assert.equal(response.status, 200);
 
-  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "Hello there", cue: "warm" });
+  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-example-format", speakerProfileId: "speaker-example-hosts", speakerIndex: 0, text: "Hello there", cue: "warm" });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "audio/wav");
   const preview = Buffer.from(await response.arrayBuffer());
@@ -1419,14 +1420,15 @@ test("Chatterbox discovers and renders active TTS models without an API key", as
   state.profiles.speakerProfiles[0].speakers[0].chatterboxExaggeration = 0.8;
   state.profiles.speakerProfiles[0].speakers[0].chatterboxCfgWeight = 0.25;
   state.profiles.speakerProfiles[0].speakers[0].chatterboxTemperature = 0.65;
+  state.profiles.episodeProfiles[0].language = "es-419";
   response = await sendJson(`${baseUrl}/api/profiles`, state.profiles, "PUT");
   assert.equal(response.status, 200);
   await syncProfiles(response, state.profiles);
-  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-chisme-crianza" });
+  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-example-format" });
   let transcriptPrompt = await response.json();
   assert.match(transcriptPrompt.lockedPrompt, /does not support inline tags/);
   assert.equal(transcriptPrompt.capabilities[0].cueMode, "delivery");
-  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "[laugh] Hola", cue: "warm" });
+  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-example-format", speakerProfileId: "speaker-example-hosts", speakerIndex: 0, text: "[laugh] Hola", cue: "warm" });
   assert.equal(response.status, 200);
   const preview = Buffer.from(await response.arrayBuffer());
   assert.equal(response.headers.get("content-type"), "audio/wav");
@@ -1452,12 +1454,12 @@ test("Chatterbox discovers and renders active TTS models without an API key", as
   response = await sendJson(`${baseUrl}/api/profiles`, state.profiles, "PUT");
   assert.equal(response.status, 200);
   await syncProfiles(response, state.profiles);
-  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-chisme-crianza" });
+  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-example-format" });
   transcriptPrompt = await response.json();
   assert.match(transcriptPrompt.lockedPrompt, /English Turbo/);
   assert.match(transcriptPrompt.lockedPrompt, /\[laugh\]/);
   assert.equal(transcriptPrompt.capabilities[0].cueMode, "tags");
-  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-chisme-crianza", speakerIndex: 0, text: "[laugh] Hello", cue: "warm" });
+  response = await sendJson(`${baseUrl}/api/preview`, { episodeProfileId: "episode-example-format", speakerProfileId: "speaker-example-hosts", speakerIndex: 0, text: "[laugh] Hello", cue: "warm" });
   assert.equal(response.status, 200);
   const ttsCalls = calls.filter((call) => call.url.endsWith("/audio/speech"));
   assert.equal(JSON.parse(ttsCalls.at(-1).options.body).input, "[laugh] Hello");
@@ -1470,7 +1472,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", as
   state.profiles.speakerProfiles.push(charlieProfile);
   response = await sendJson(`${baseUrl}/api/profiles`, state.profiles, "PUT");
   assert.equal(response.status, 200);
-  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Charlie override", episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-charlie" });
+  response = await sendJson(`${baseUrl}/api/episodes`, { name: "Charlie override", episodeProfileId: "episode-example-format", speakerProfileId: "speaker-charlie" });
   const overrideEpisode = await response.json();
   assert.equal(response.status, 201, overrideEpisode.error);
   response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeId: overrideEpisode.id });
@@ -1478,7 +1480,7 @@ test("Chatterbox discovers and renders active TTS models without an API key", as
   assert.equal(response.status, 200, transcriptPrompt.error);
   assert.deepEqual(transcriptPrompt.capabilities.map((item) => item.speaker), ["Charlie"]);
   assert.match(transcriptPrompt.lockedPrompt, /Chatterbox \(Charlie/);
-  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-chisme-crianza", speakerProfileId: "speaker-charlie" });
+  response = await sendJson(`${baseUrl}/api/transcript-prompt/resolve`, { episodeProfileId: "episode-example-format", speakerProfileId: "speaker-charlie" });
   assert.deepEqual((await response.json()).capabilities.map((item) => item.speaker), ["Charlie"]);
   response = await sendJson(`${baseUrl}/api/preview`, { episodeId: overrideEpisode.id, speakerIndex: 0, text: "Hello", cue: "warm" });
   assert.equal(response.status, 200);
@@ -1612,7 +1614,7 @@ test("plans create episode drafts, and episode and Hosts deletes update plan ref
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "Pick an Episode Format for the plan before creating episode drafts.");
 
-  const plan = await createPlan({ name: "Kept name", speakerProfileId, episodeFormatId: "episode-chisme-crianza", theme: "Build reliable software", audience: "Engineers", goal: "Teach" }, [
+  const plan = await createPlan({ name: "Kept name", speakerProfileId, episodeFormatId: "episode-example-format", theme: "Build reliable software", audience: "Engineers", goal: "Teach" }, [
     { title: "First", premise: "First premise", keyPoints: ["Point A"], transcriptPromptGuidance: "Use a concise opening." },
     { title: "Second" },
   ]);

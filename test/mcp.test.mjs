@@ -7,7 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
-const TOOLS = ["get_workspace", "open_ui", "list_tts_options", "list_voices", "save_host_profile", "delete_host_profile", "save_episode_format", "delete_episode_format", "add_knowledge", "get_knowledge", "delete_knowledge", "save_plan", "get_plan", "delete_plan", "create_episodes", "get_episode", "get_script_rules", "save_script", "render_audio", "get_job", "list_jobs", "preview_voice", "rename_episode", "delete_episode", "jev_decide"];
+const TOOLS = ["get_workspace", "open_ui", "list_tts_options", "set_tts_models", "list_voices", "save_host_profile", "delete_host_profile", "save_episode_format", "delete_episode_format", "add_knowledge", "get_knowledge", "delete_knowledge", "save_plan", "get_plan", "delete_plan", "create_episodes", "get_episode", "get_script_rules", "save_script", "render_audio", "get_job", "list_jobs", "preview_voice", "rename_episode", "delete_episode", "jev_decide"];
 const INITIALIZE = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } };
 
 // A test server plus an MCP client that sends the daemon's bearer token.
@@ -175,7 +175,7 @@ test("knowledge, plan, episode, and script tools share the REST rules", async (t
   assert.ok((await ok("get_workspace")).formats.some((format) => format.id === withFormat.createdEpisodeFormatId && format.name === "Agent format"));
 
   const saved = await ok("save_plan", {
-    name: "Series", knowledgeBaseId: knowledgeBase.id, episodeFormatId: "episode-chisme-crianza", theme: "Parenting",
+    name: "Series", knowledgeBaseId: knowledgeBase.id, episodeFormatId: "episode-example-format", theme: "Parenting",
     episodes: [{ number: 1, title: "First", premise: "Opening", keyPoints: ["a", "b"] }, { number: 2, title: "Second" }],
   });
   const plan = saved.plan;
@@ -194,36 +194,36 @@ test("knowledge, plan, episode, and script tools share the REST rules", async (t
   assert.equal(reordered.plan.episodes[0].createdEpisodeId, created.episodes[0].id);
   assert.equal(reordered.plan.theme, "Parenting", "omitted fields keep their values");
 
-  const { episodes: [episode] } = await ok("create_episodes", { name: "New episode", episodeProfileId: "episode-chisme-crianza", knowledgeBaseId: knowledgeBase.id });
-  await fails("create_episodes", { name: "", episodeProfileId: "episode-chisme-crianza" }, /Episode name is required/);
+  const { episodes: [episode] } = await ok("create_episodes", { name: "New episode", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledgeBase.id });
+  await fails("create_episodes", { name: "", episodeProfileId: "episode-example-format" }, /Episode name is required/);
   await fails("create_episodes", { name: "X", episodeProfileId: "missing" }, /Episode Format does not exist/);
 
   const rules = await ok("get_script_rules", { episodeId: episode.id });
-  assert.deepEqual(rules.speakerNames, ["Valeria", "Diego"]);
-  assert.equal(rules.maxSegments, 5);
-  assert.deepEqual(rules.words, { target: 18 * 140, minimum: 18 * 125, perMinute: { target: 140, minimum: 125 } });
-  assert.equal(rules.language.id, "es-419");
-  assert.match(rules.speakerRule, /Valeria is the lead host/);
+  assert.deepEqual(rules.speakerNames, ["Alex", "Sam"]);
+  assert.equal(rules.maxSegments, 3);
+  assert.deepEqual(rules.words, { target: 10 * 140, minimum: 10 * 125, perMinute: { target: 140, minimum: 125 } });
+  assert.equal(rules.language.id, "en-US");
+  assert.match(rules.speakerRule, /Alex is the lead host/);
   assert.match(rules.lockedPrompt, /TTS-AWARE DIALOGUE RULES/);
   assert.equal(rules.speakers[0].provider, "mimo");
   assert.equal(rules.knowledgeBase.id, knowledgeBase.id);
   assert.match(rules.markdownFormat, /## Segment title/);
 
   await fails("save_script", { episodeId: episode.id, script: "## One\nNobody: Hola." }, /Invalid transcript line/);
-  await fails("save_script", { episodeId: episode.id, script: Array.from({ length: 6 }, (_, index) => `## S${index}\nValeria: Hola.`).join("\n") }, /at most 5 segments/);
-  const script = await ok("save_script", { episodeId: episode.id, script: "# Charla corta\n## Uno\nValeria [cálida]: Hola, Diego.\nDiego: Hola, Valeria." });
+  await fails("save_script", { episodeId: episode.id, script: Array.from({ length: 4 }, (_, index) => `## S${index}\nAlex: Hola.`).join("\n") }, /at most 3 segments/);
+  const script = await ok("save_script", { episodeId: episode.id, script: "# Charla corta\n## Uno\nAlex [cálida]: Hola, Sam.\nSam: Hola, Alex." });
   assert.equal(script.episode.name, "Charla corta", "a \"New episode\" takes the script title");
   assert.equal(script.episode.status, "transcript_ready");
   assert.equal(script.stats.segments, 1);
-  assert.ok(script.warnings.some((warning) => /Transcript contains 1 of 5/.test(warning)));
-  assert.ok(script.warnings.some((warning) => /too short: 4 words. Recommended minimum is 2250 words/.test(warning)));
-  const again = await ok("save_script", { episodeId: episode.id, script: "# Otro título\n## Uno\nValeria: Hola." });
+  assert.ok(script.warnings.some((warning) => /Transcript contains 1 of 3/.test(warning)));
+  assert.ok(script.warnings.some((warning) => /too short: 4 words. Recommended minimum is 1250 words/.test(warning)));
+  const again = await ok("save_script", { episodeId: episode.id, script: "# Otro título\n## Uno\nAlex: Hola." });
   assert.equal(again.episode.name, "Charla corta", "only \"New episode\" is renamed");
-  assert.equal((await api(`/api/episodes/${episode.id}`)).value.transcript, "# Otro título\n## Uno\nValeria: Hola.\n");
+  assert.equal((await api(`/api/episodes/${episode.id}`)).value.transcript, "# Otro título\n## Uno\nAlex: Hola.\n");
 
   const fetched = await ok("get_episode", { id: episode.id });
   assert.equal(fetched.audioUrl, null);
-  assert.match(fetched.episode.transcript, /Valeria: Hola/);
+  assert.match(fetched.episode.transcript, /Alex: Hola/);
   assert.equal((await ok("rename_episode", { id: episode.id, name: "  Final\nname " })).episode.name, "Final name");
   await fails("rename_episode", { id: episode.id, name: " " }, /Episode name is required/);
   await fails("get_episode", { id: "missing" }, /Episode does not exist/);
@@ -270,8 +270,8 @@ test("TTS tools list options and voices, save a preview WAV, and render audio wi
   await fails("list_voices", { model: "no-model" }, /is not active/);
   await fails("list_voices", {}, /Give a provider or a model/);
 
-  await ok("save_host_profile", { id: "speaker-chisme-crianza", voiceModel: "eleven_v3", speakers: [{ name: "Valeria", voiceId: "voice-es" }, { name: "Diego", voiceId: "voice-es" }] });
-  const preview = await ok("preview_voice", { speakerProfileId: "speaker-chisme-crianza", episodeProfileId: "episode-chisme-crianza", speakerIndex: 0, text: "Hola" });
+  await ok("save_host_profile", { id: "speaker-example-hosts", voiceModel: "eleven_v3", speakers: [{ name: "Alex", voiceId: "voice-es" }, { name: "Sam", voiceId: "voice-es" }] });
+  const preview = await ok("preview_voice", { speakerProfileId: "speaker-example-hosts", episodeProfileId: "episode-example-format", speakerIndex: 0, text: "Hola" });
   assert.match(preview.url, new RegExp(`^${baseUrl}/previews/[0-9a-f-]{36}\\.wav$`));
   assert.equal(preview.durationSeconds, 0.5);
   const wav = await fetch(preview.url);
@@ -279,12 +279,12 @@ test("TTS tools list options and voices, save a preview WAV, and render audio wi
   assert.equal(wav.headers.get("content-type"), "audio/wav");
   assert.equal(wav.headers.get("cross-origin-resource-policy"), "cross-origin");
   assert.equal(Buffer.from(await wav.arrayBuffer()).length, preview.bytes);
-  await fails("preview_voice", { speakerProfileId: "speaker-chisme-crianza", episodeProfileId: "episode-chisme-crianza", text: "x".repeat(601) }, /1 to 600 characters/);
-  await fails("preview_voice", { speakerProfileId: "missing", episodeProfileId: "episode-chisme-crianza", text: "Hola" }, /Speaker profile does not exist/);
+  await fails("preview_voice", { speakerProfileId: "speaker-example-hosts", episodeProfileId: "episode-example-format", text: "x".repeat(601) }, /1 to 600 characters/);
+  await fails("preview_voice", { speakerProfileId: "missing", episodeProfileId: "episode-example-format", text: "Hola" }, /Speaker profile does not exist/);
 
-  const { episodes: [episode] } = await ok("create_episodes", { name: "Render me", episodeProfileId: "episode-chisme-crianza" });
+  const { episodes: [episode] } = await ok("create_episodes", { name: "Render me", episodeProfileId: "episode-example-format" });
   const beforeRender = await revision();
-  const saved = await ok("save_script", { episodeId: episode.id, script: "## Uno\nValeria: Hola.\nDiego: Hola.", render: true });
+  const saved = await ok("save_script", { episodeId: episode.id, script: "## Uno\nAlex: Hola.\nSam: Hola.", render: true });
   assert.ok(saved.job?.id);
   const done = await waitFor(async () => {
     const { job } = await ok("get_job", { jobId: saved.job.id });
@@ -331,7 +331,7 @@ test("jev_decide reports unavailable without a key and decides with a stubbed Je
   // The key is read when the model catalog refreshes (startup or a Settings save), like the TTS keys.
   withEnv(t, { TYPESAFE_API_KEY: "test-typesafe-key" });
   const { ok } = await connect(t, { fetchImpl });
-  const decided = await ok("jev_decide", { request: "Switch the format to English.", fields: ["language"], focus: { view: "format", episodeProfileId: "episode-chisme-crianza" } });
+  const decided = await ok("jev_decide", { request: "Switch the format to English.", fields: ["language"], focus: { view: "format", episodeProfileId: "episode-example-format" } });
   assert.equal(decided.status, "ready", JSON.stringify(decided.error));
   assert.equal(decided.decisions.route, "episodeFormat");
   assert.equal(decided.selections.language.value, "en-US");
@@ -352,4 +352,74 @@ test("jev_decide reports unavailable without a key and decides with a stubbed Je
   const result = await down.ok("jev_decide", { request: "Switch the format to English." });
   assert.equal(result.status, "unavailable");
   assert.equal(result.error.code, "upstream_error");
+});
+
+const elevenCatalog = async (url) => {
+  if (String(url).endsWith("/v1/models")) return Response.json([
+    { model_id: "eleven_v3", name: "Eleven v3", can_do_text_to_speech: true, languages: [{ language_id: "eng", name: "English" }] },
+    { model_id: "eleven_flash_v2_5", name: "Eleven Flash v2.5", can_do_text_to_speech: true },
+    { model_id: "eleven_v4_turbo", name: "Eleven v4 Turbo", can_do_text_to_speech: true },
+  ]);
+  if (String(url).includes("/v2/voices")) return Response.json({ voices: [{ voice_id: "voice-a", name: "A" }], has_more: false });
+  throw new Error(`Unexpected URL ${url}`);
+};
+
+test("set_tts_models activates discovered models through the config save and refuses to deactivate a model in use", async (t) => {
+  withEnv(t, { ELEVENLABS_API_KEY: "test-eleven-key", MIMO_API_KEY: null, OPENAI_API_KEY: null });
+  const { ok, fails } = await connect(t, { fetchImpl: elevenCatalog });
+  const before = await ok("list_tts_options", { language: "en-US" });
+  assert.deepEqual(before.models, []);
+  assert.deepEqual(before.available.map((model) => model.id).sort(), ["eleven_flash_v2_5", "eleven_v3"], "unsupported realtime models are not offered");
+  const v3 = before.available.find((model) => model.id === "eleven_v3");
+  assert.deepEqual({ ...v3, languages: undefined }, { id: "eleven_v3", name: "Eleven v3", provider: "elevenlabs", capabilities: { cueMode: "tags", squareTags: true, breaks: false }, languages: undefined });
+  assert.ok(v3.languages.includes("en-US"));
+  assert.match(before.tts.hint, /set_tts_models/);
+  assert.doesNotMatch(before.tts.hint, /add a TTS key/i);
+  const workspace = await ok("get_workspace");
+  assert.equal(workspace.tts.ready, false);
+  assert.match(workspace.tts.hint, /set_tts_models/);
+
+  await fails("set_tts_models", { models: ["eleven_made_up"], active: true }, /is not available/);
+  const activated = await ok("set_tts_models", { models: ["eleven_v3"], active: true });
+  assert.deepEqual(activated.models, ["eleven_v3"]);
+  const after = await ok("list_tts_options", { language: "en-US" });
+  assert.deepEqual(after.models.map((model) => model.id), ["eleven_v3"]);
+  assert.deepEqual(after.available.map((model) => model.id), ["eleven_flash_v2_5"]);
+  assert.equal(after.tts.hint, null);
+  await ok("save_host_profile", { name: "Duo", voiceModel: "eleven_v3", speakers: [speaker("Ana", { voiceId: "voice-a" }), speaker("Ben", { voiceId: "voice-a" })] });
+
+  await fails("set_tts_models", { models: ["eleven_v3"], active: false }, /Cannot deactivate a TTS model in use\. TTS model "eleven_v3" is inactive but used by speaker profile "Duo"\./);
+  assert.deepEqual((await ok("list_tts_options")).models.map((model) => model.id), ["eleven_v3"]);
+  await ok("set_tts_models", { models: ["eleven_flash_v2_5"], active: true });
+  assert.deepEqual((await ok("set_tts_models", { models: ["eleven_flash_v2_5"], active: false })).models, ["eleven_v3"]);
+});
+
+test("set_tts_models and PUT /api/config save the same config", async (t) => {
+  withEnv(t, { ELEVENLABS_API_KEY: "test-eleven-key", MIMO_API_KEY: null, OPENAI_API_KEY: null });
+  const viaTool = await connect(t, { fetchImpl: elevenCatalog });
+  await viaTool.ok("set_tts_models", { models: ["eleven_v3"], active: true });
+  const viaRest = await connect(t, { fetchImpl: elevenCatalog });
+  const state = (await viaRest.api("/api/state")).value;
+  state.config.providers.elevenlabs.activeModels = { eleven_v3: { tts: true } };
+  assert.equal((await viaRest.api("/api/config", state.config, "PUT")).status, 200);
+  const read = async (server) => JSON.parse(await readFile(join(server.rootDir, "config.json"), "utf8"));
+  assert.deepEqual(await read(viaTool), await read(viaRest));
+  assert.deepEqual((await viaTool.api("/api/config")).value, (await viaRest.api("/api/config")).value);
+});
+
+test("provider errors never carry key-like text into the state, the catalog, or the tools", async (t) => {
+  withEnv(t, { OPENAI_API_KEY: "sk-proj-realsecretvalue0123456789", ELEVENLABS_API_KEY: null, MIMO_API_KEY: null });
+  const fetchImpl = async (url) => {
+    if (String(url).startsWith("https://api.openai.com/")) return Response.json({ error: { message: "Incorrect API key provided: sk-proj-****abcd. You can find your API key at https://platform.openai.com/account/api-keys.", type: "invalid_request_error", code: "invalid_api_key" } }, { status: 401 });
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  const { ok, api } = await connect(t, { fetchImpl });
+  const options = await ok("list_tts_options");
+  assert.match(options.tts.providers.openai.error, /The provider rejected OPENAI_API_KEY\. Check the key\./);
+  assert.match(options.tts.providers.openai.error, /\[redacted\]/);
+  const leaks = /\bsk-(?!SK")|\*{3}|realsecret/;
+  for (const [label, value] of [
+    ["list_tts_options", options], ["get_workspace", await ok("get_workspace")],
+    ["/api/state", (await api("/api/state")).value], ["/api/models", (await api("/api/models")).value],
+  ]) assert.doesNotMatch(JSON.stringify(value), leaks, label);
 });

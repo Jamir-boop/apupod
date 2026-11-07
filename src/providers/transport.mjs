@@ -40,7 +40,9 @@ export function redactSecrets(text, keys = []) {
   let result = String(text);
   for (const key of keys) if (key?.length >= 6) result = result.replaceAll(key, "[redacted]");
   // Only token-like values, so "Missing bearer token" or "api-key: missing" keep their meaning.
-  return result.replace(/(Bearer\s+|(?i:(?:x-|xi-)?api-key)["']?\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{12,}/g, "$1[redacted]");
+  return result.replace(/(Bearer\s+|(?i:(?:x-|xi-)?api-key)["']?\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{12,}/g, "$1[redacted]")
+    // Key shapes a provider may echo (OpenAI sk-/sk-proj-, ElevenLabs sk_ or 32+ hex) and masked fragments such as "sk-proj-****…RNQA".
+    .replace(/\bsk[-_][\w*…-]{6,}|\b[A-Fa-f0-9]{32,}\b|[\w-]*\*{3,}[\w*…-]*/g, "[redacted]");
 }
 
 // The SDK keeps only body.error of an error body. This keeps the old detail rule: error.message, then detail.message, then raw text.

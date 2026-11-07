@@ -8,8 +8,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import * as z from "zod";
 import { notFound, readJsonBody, sendJson } from "./util.mjs";
 import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpisodes, loadPlan, loadEpisode, resolveEpisodeProfiles, profileRevision, readJson } from "./store.mjs";
-import { redactConfig } from "./config.mjs";
-import { availableModelIds, awaitLatestModelCatalog, modelLanguageError, resolveLanguage, MIMO_VOICES, OPENAI_VOICES } from "./providers/catalog.mjs";
+import { redactConfig, setTtsModels } from "./config.mjs";
+import { availableModelIds, awaitLatestModelCatalog, discoveredModelLanguages, inactiveTtsModels, modelLanguageError, resolveLanguage, MIMO_VOICES, OPENAI_VOICES } from "./providers/catalog.mjs";
 import { ttsCueCapability, fetchElevenLabsVoices, fetchChatterboxVoices, CHATTERBOX_TAGS, CHATTERBOX_DEFAULTS, ELEVENLABS_DEFAULTS, MIMO_INSTRUCTION_PRESETS, TTS_DOCS } from "./providers/generate.mjs";
 import { TRANSCRIPT_TARGET_WORDS_PER_MINUTE, TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE, deleteEpisode, deleteSpeakerProfile, saveEpisodeFromBody, renameEpisode, resolveTranscriptPrompt, saveTranscript, transcriptLengthWarning, transcriptSpeakerRule, parseTranscript, writeProfiles } from "./episodes.mjs";
 import { addKnowledgeBase, readKnowledgeBase, removeKnowledgeBase, saveAgentPlan, deletePlan, createPlanEpisodes } from "./plans.mjs";
@@ -69,7 +69,7 @@ const write = ({ destructive = false, idempotent = false, openWorld = false } = 
 const result = (summary, data) => ({ content: [{ type: "text", text: `${summary}\n\n${JSON.stringify(data, null, 2)}` }], structuredContent: data });
 
 const speakerSchema = z.object({
-  name: z.string().describe("Spoken name used in the script, e.g. \"Valeria\". No colons or square brackets."),
+  name: z.string().describe("Spoken name used in the script, e.g. \"Alex\". No colons or square brackets."),
   backstory: z.string().optional(),
   personality: z.string().optional(),
   style: z.string().optional().describe("Voice and delivery style."),
@@ -139,10 +139,17 @@ function ttsReadiness(context, config) {
   const providers = context.modelCatalog.providers;
   const provider = (name) => ({ status: providers[name].status, hasApiKey: config.providers[name].hasApiKey, error: providers[name].error || null });
   const models = [...availableModelIds(context).ttsModels];
+  // A provider with a key, or a keyless one that is configured (Chatterbox, compatible), needs activation or a fix, not a key.
+  const hasKey = ["mimo", "elevenlabs", "openai", "chatterbox"].some((name) => config.providers[name].hasApiKey || providers[name].status !== "unconfigured")
+    || (providers.compatible || []).some((item) => item.status !== "unconfigured");
   return {
     ready: models.length > 0,
     catalogStatus: context.modelCatalog.status,
     models,
+    hint: models.length ? null : hasKey && inactiveTtsModels(context).length
+      ? "No TTS model is active. Activate one with set_tts_models (model IDs from list_tts_options \"available\") or in Settings > Models."
+      : hasKey ? "No TTS model is active or available. Check the provider status in Settings, then refresh models."
+        : "No TTS provider has a key. Add a TTS key in Settings.",
     providers: {
       mimo: provider("mimo"),
       elevenlabs: provider("elevenlabs"),
@@ -264,7 +271,7 @@ export function createMcpServer(context, origin) {
     _meta: widget(WORKSPACE_WIDGET_URI),
   }, async () => {
     const data = await workspaceOverview(context, origin);
-    return result(`apupod workspace: ${data.hosts.length} host profiles, ${data.formats.length} formats, ${data.knowledgeBases.length} knowledge bases, ${data.plans.length} plans, ${data.episodes.length} episodes. TTS ${data.tts.ready ? "ready" : "not ready"}. UI: ${data.uiUrl}`, data);
+    return result(`apupod workspace: ${data.hosts.length} host profiles, ${data.formats.length} formats, ${data.knowledgeBases.length} knowledge bases, ${data.plans.length} plans, ${data.episodes.length} episodes. TTS ${data.tts.ready ? "ready" : `not ready: ${data.tts.hint}`}. UI: ${data.uiUrl}`, data);
   });
 
   tool("open_ui", {
@@ -284,7 +291,7 @@ export function createMcpServer(context, origin) {
 
   tool("list_tts_options", {
     title: "List TTS options",
-    description: "Active TTS models with provider, supported languages, and cue capability (square-bracket tags, ElevenLabs breaks, or delivery-only) for a language; providers with keys; tuning ranges and defaults; Chatterbox tags; MiMo presets.",
+    description: "Active TTS models (`models`) with provider, supported languages, and cue capability (square-bracket tags, ElevenLabs breaks, or delivery-only) for a language; discovered but inactive models (`available`) that set_tts_models can activate; providers with keys; tuning ranges and defaults; Chatterbox tags; MiMo presets.",
     inputSchema: { language: z.string().optional().describe("Language ID for cue capabilities, e.g. \"es-419\". Default en-US.") },
     annotations: READ,
   }, async ({ language = "en-US" }) => {
@@ -295,8 +302,27 @@ export function createMcpServer(context, origin) {
       const { provider, cueMode, squareTags, breaks } = ttsCueCapability(context, model, target);
       return { id: model, provider, cue: { cueMode, squareTags, breaks }, languages: context.modelCatalog.languages.filter((item) => !modelLanguageError(context, model, item)).map((item) => item.id) };
     });
-    const data = { language: target.id, models, tts: ttsReadiness(context, config), settings: TTS_SETTINGS, chatterboxTags: CHATTERBOX_TAGS, mimoInstructionPresets: Object.keys(MIMO_INSTRUCTION_PRESETS), languages: context.modelCatalog.languages.map(({ id: languageId, name, defaultAccent }) => ({ id: languageId, name, defaultAccent })), docs: TTS_DOCS };
-    return result(`${models.length} active TTS models: ${models.map((model) => model.id).join(", ") || "none (add a TTS key in Settings)"}.`, data);
+    const available = inactiveTtsModels(context).map((model) => {
+      const { cueMode, squareTags, breaks } = ttsCueCapability(context, model.id, target);
+      return { id: model.id, name: model.name || model.id, provider: model.provider, capabilities: { cueMode, squareTags, breaks }, languages: discoveredModelLanguages(context, model) };
+    });
+    const tts = ttsReadiness(context, config);
+    const data = { language: target.id, models, available, tts, settings: TTS_SETTINGS, chatterboxTags: CHATTERBOX_TAGS, mimoInstructionPresets: Object.keys(MIMO_INSTRUCTION_PRESETS), languages: context.modelCatalog.languages.map(({ id: languageId, name, defaultAccent }) => ({ id: languageId, name, defaultAccent })), docs: TTS_DOCS };
+    return result(`${models.length} active TTS models: ${models.map((model) => model.id).join(", ") || `none. ${tts.hint}`}${available.length ? ` ${available.length} available to activate: ${available.map((model) => model.id).join(", ")}.` : ""}`, data);
+  });
+
+  tool("set_tts_models", {
+    title: "Set active TTS models",
+    description: "Activate (active: true) or deactivate (active: false) TTS models by the IDs list_tts_options returns (`available` to activate, `models` to deactivate). Uses the same config save as Settings > Models and refreshes the model catalog. Deactivating a model that a host profile or saved episode uses is refused. Writes local config only; deactivation can make profiles unrenderable, so it is marked destructive. Returns the active model list.",
+    inputSchema: {
+      models: z.array(z.string().min(1)).min(1).describe("TTS model IDs from list_tts_options."),
+      active: z.boolean().describe("true activates the models; false deactivates them."),
+    },
+    annotations: write({ destructive: true, idempotent: true }),
+  }, async ({ models, active }) => {
+    const saved = await setTtsModels(context, models, active);
+    const activeModels = [...availableModelIds(context).ttsModels];
+    return result(`${active ? "Activated" : "Deactivated"} ${models.join(", ")}. ${activeModels.length} active TTS models: ${activeModels.join(", ") || "none"}.`, { models: activeModels, warnings: saved.warnings });
   });
 
   tool("list_voices", {
