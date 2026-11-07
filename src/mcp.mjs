@@ -308,7 +308,7 @@ export function createMcpServer(context, origin) {
     });
     const tts = ttsReadiness(context, config);
     const data = { language: target.id, models, available, tts, settings: TTS_SETTINGS, chatterboxTags: CHATTERBOX_TAGS, mimoInstructionPresets: Object.keys(MIMO_INSTRUCTION_PRESETS), languages: context.modelCatalog.languages.map(({ id: languageId, name, defaultAccent }) => ({ id: languageId, name, defaultAccent })), docs: TTS_DOCS };
-    return result(`${models.length} active TTS models: ${models.map((model) => model.id).join(", ") || `none. ${tts.hint}`}${available.length ? ` ${available.length} available to activate: ${available.map((model) => model.id).join(", ")}.` : ""}`, data);
+    return result(`${models.length} active TTS models: ${models.length ? `${models.map((model) => model.id).join(", ")}.` : `none. ${tts.hint}`}${available.length ? ` ${available.length} available to activate: ${available.map((model) => model.id).join(", ")}.` : ""}`, data);
   });
 
   tool("set_tts_models", {
