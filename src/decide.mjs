@@ -1,9 +1,9 @@
 // Deterministic Jev candidates built from the live workspace. Jev picks only from these options; nothing here calls a text model.
-import { enforceJevSelections } from "./jev.mjs";
+import { decideAssistantConfiguration, enforceJevSelections } from "./jev.mjs";
 import { badRequest, oneLine } from "./util.mjs";
-import { MIMO_VOICES, OPENAI_VOICES, parseCompatibleModelId, compatibleConnection, availableModelIds, isElevenLabsModel, modelLanguageError } from "./providers/catalog.mjs";
+import { MIMO_VOICES, OPENAI_VOICES, parseCompatibleModelId, compatibleConnection, availableModelIds, isElevenLabsModel, modelLanguageError, modelRuntimeSnapshot } from "./providers/catalog.mjs";
 import { OPENAI_TTS_NO_INSTRUCTIONS, fetchElevenLabsVoices, fetchChatterboxVoices } from "./providers/generate.mjs";
-import { isActiveJob } from "./store.mjs";
+import { isActiveJob, loadEpisode, loadPlan, readJson } from "./store.mjs";
 
 export const JEV_TUNING_FIELDS = ["chatterboxExaggeration", "chatterboxCfgWeight", "chatterboxTemperature", "mimoTemperature", "mimoTopP", "mimoInstructionPreset", "mimoInstructionText", "elevenlabsStability", "elevenlabsSimilarityBoost", "elevenlabsStyle", "elevenlabsSpeed", "elevenlabsUseSpeakerBoost", "elevenlabsSeed", "elevenlabsTextNormalization"];
 
@@ -226,4 +226,47 @@ export function enforceAssistantDecision(parsed, result, profiles, initial, focu
     proposal = { [route]: { mode: result.decisions.profileAction, targetId: target.id, value } };
   } else proposal = { [route]: Array.isArray(raw) ? value.rows : raw.changes ? { ...raw, ...(route === "episodePatch" ? { episodeId: focusEpisode.id } : {}), changes: value } : value };
   return { ...parsed, proposal, nextStep: null };
+}
+
+// Routes whose full pass needs the agent's proposed value (host names and count, or the planned-episode patch rows).
+const PROPOSAL_ROUTES = new Set(["speakerProfile", "plannedEpisodePatches"]);
+
+/** The jev_decide tool: an optional typed check of the agent's reading of a request, against the live workspace.
+ * Without TYPESAFE_API_KEY it returns status "unavailable" (not an error). `fields` limits the configuration fields
+ * Jev may change; the others keep their current values. A `proposal` ({[route]: value}) is locked to Jev's choices.
+ */
+export async function jevDecide(context, { request, fields, planId, episodeId, focus = {}, proposal = null }) {
+  const runtime = await modelRuntimeSnapshot(context);
+  const apiKey = runtime.credentials.TYPESAFE_API_KEY;
+  if (!apiKey) return { status: "unavailable", reason: "TYPESAFE_API_KEY is not set. Jev checks are optional; add the key in Settings to use them." };
+  const [profiles, knowledge] = await Promise.all([readJson(context.paths.profiles), readJson(context.paths.knowledgeIndex)]);
+  const plan = planId ? await loadPlan(context.paths, planId)
+    : { id: "", name: "", theme: "", goal: "", language: profiles.episodeProfiles[0]?.language || "", speakerProfileId: "", episodeFormatId: "", knowledgeBaseId: "", episodes: [] };
+  const focusEpisode = episodeId ? await loadEpisode(context.paths, episodeId, false) : null;
+  const targets = profileTargets(profiles, plan, focus);
+  const base = { context: runtime, plan, profiles, profileTargets: targets, focusEpisode, knowledge, voiceCatalog: await voiceCatalog(runtime, profiles), text: request };
+  const state = {
+    request,
+    plan: plan.id ? { id: plan.id, name: plan.name, theme: plan.theme, goal: plan.goal, language: plan.language, episodeCount: plan.episodeCount ?? null } : null,
+    profileTargets: targets,
+    focusEpisode: focusEpisode && { id: focusEpisode.id, name: focusEpisode.name, status: focusEpisode.status },
+  };
+  const allowed = Array.isArray(fields) && fields.length ? new Set(fields) : null;
+  const restrict = (candidates) => async (input) => {
+    const value = await candidates(input);
+    return input.phase === "fields" && allowed && Array.isArray(value) ? value.map((field) => allowed.has(field.id) ? field : { ...field, locked: true }) : value;
+  };
+  const run = (candidates) => decideAssistantConfiguration({ fetchImpl: runtime.fetchImpl, apiKey, state, candidates: restrict(candidates) });
+  const view = (result, extra = {}) => ({ status: result.status, decisions: result.decisions, selections: result.selections, questionsNeeded: result.questionsNeeded, receipt: result.receipt, ...(result.error ? { error: result.error } : {}), ...extra });
+  const initial = await run(jevCandidates({ ...base, preliminary: true }));
+  const route = initial.decisions.route;
+  if (initial.status !== "ready" || ["question", "nextStep", "keep_current", "not_requested"].includes(route) || ["keep_current", "not_requested"].includes(initial.decisions.profileAction)) return view(initial);
+  const raw = proposal?.[route];
+  if (PROPOSAL_ROUTES.has(route) && !raw) {
+    const count = initial.selections.speakerCount?.value;
+    return view(initial, { status: "needs_proposal", reason: `Call jev_decide again with proposal.${route}${count ? ` (exactly ${count} speakers with names)` : ""} to decide its configuration fields.` });
+  }
+  const result = await run(jevCandidates({ ...base, proposed: raw?.value || raw?.changes || raw, initial }));
+  if (result.status !== "ready" || !raw) return view(result);
+  return view(result, { proposal: enforceAssistantDecision({ message: request, proposal, nextStep: null }, result, profiles, initial, focusEpisode, targets).proposal });
 }

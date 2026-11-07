@@ -7,7 +7,7 @@ import {
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { badRequest, conflict, notFound, oneLine, normalizeDelivery, validateId, requireText, validateNumber, validateOptionalNumber, validateOptionalInteger, assertSafeId, readJsonBody, sendJson } from "./util.mjs";
-import { TTS_MODELS, LANGUAGE_OPTIONS, resolveLanguage } from "./providers/catalog.mjs";
+import { TTS_MODELS, LANGUAGE_OPTIONS, resolveLanguage, availableModelIds } from "./providers/catalog.mjs";
 import { CHATTERBOX_DEFAULTS, ELEVENLABS_DEFAULTS, MIMO_INSTRUCTION_PRESETS, CHATTERBOX_TAGS, TTS_CUE_RE, ELEVEN_BREAK_RE, ELEVEN_BREAK_ANY_RE, TTS_DOCS, ttsCueCapability, chatterboxSettings, mimoTtsSettings, assertElevenLabsMarkup, elevenLabsSettings } from "./providers/generate.mjs";
 import { isActiveJob, planPath, planIndexItem, listPlans, loadPlan, savePlan, nextUpdatedAt, profileRevision, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, writeTextAtomic, exists } from "./store.mjs";
 import { collectModelReferences } from "./config.mjs";
@@ -16,6 +16,10 @@ export const TRANSCRIPT_TARGET_WORDS_PER_MINUTE = 140;
 export const TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE = 125;
 
 export async function deleteEpisodeRequest(res, context, id) {
+  sendJson(res, 200, await deleteEpisode(context, id));
+}
+
+export async function deleteEpisode(context, id) {
   const episode = await loadEpisode(context.paths, id, false);
   if (isActiveJob(episode.job)) throw conflict("Wait for the episode's active job to finish before deleting it.");
   // ponytail: linear scan over all plans, index it if plans ever number in the hundreds
@@ -47,10 +51,14 @@ export async function deleteEpisodeRequest(res, context, id) {
   } catch (error) {
     console.warn(`[episode:${id}] deletion committed; deferred cleanup failed: ${error.message || error}`);
   }
-  sendJson(res, 200, { id, deleted: true });
+  return { id, deleted: true };
 }
 
 export async function deleteSpeakerProfileRequest(res, context, id) {
+  sendJson(res, 200, await deleteSpeakerProfile(context, id));
+}
+
+export async function deleteSpeakerProfile(context, id) {
   const { paths } = context;
   const profiles = await readJson(paths.profiles);
   const target = profiles.speakerProfiles.find((item) => item.id === id);
@@ -88,7 +96,7 @@ export async function deleteSpeakerProfileRequest(res, context, id) {
     for (const write of applied.reverse()) await writeJsonAtomic(write.path, write.before).catch(() => {});
     throw error;
   }
-  sendJson(res, 200, { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length, profiles: nextProfiles, previousProfilesUpdatedAt: profiles.updatedAt ?? null, beforeRevisions });
+  return { id, deleted: true, fallbackId: fallback.id, repointedPlans: plans.length, profiles: nextProfiles, previousProfilesUpdatedAt: profiles.updatedAt ?? null, beforeRevisions };
 }
 
 export function derivedNumSegments(targetMinutes) {
@@ -152,12 +160,17 @@ export async function getEpisodeResponse(res, paths, id) {
 }
 
 export async function renameEpisodeRequest(req, res, paths, id) {
-  const episode = await loadEpisode(paths, id, true);
+  await loadEpisode(paths, id, false);
   const body = await readJsonBody(req);
-  const name = oneLine(body.name || "");
+  sendJson(res, 200, await renameEpisode(paths, id, body.name));
+}
+
+export async function renameEpisode(paths, id, value) {
+  const episode = await loadEpisode(paths, id, true);
+  const name = oneLine(value || "");
   if (!name) throw badRequest("Episode name is required.");
   await updateEpisode(paths, episode, { name });
-  sendJson(res, 200, await loadEpisode(paths, id, true));
+  return loadEpisode(paths, id, true);
 }
 
 export async function applyLatestProfilesRequest(res, paths, id) {
@@ -268,7 +281,7 @@ Speaker direction:
 ${directions}`;
 }
 
-function transcriptPromptState(context, speakerProfile, episodeProfile, language, guidance = "") {
+export function transcriptPromptState(context, speakerProfile, episodeProfile, language, guidance = "") {
   const lockedPrompt = transcriptPromptRules(context, speakerProfile, episodeProfile, language);
   const customGuidance = String(guidance || "").trim();
   return {
@@ -321,7 +334,10 @@ export function validateTranscriptCues(context, segments, speakerProfile, langua
 }
 
 export async function resolveTranscriptPromptRequest(req, res, context) {
-  const body = await readJsonBody(req);
+  sendJson(res, 200, await resolveTranscriptPrompt(context, await readJsonBody(req)));
+}
+
+export async function resolveTranscriptPrompt(context, body) {
   const episodeId = String(body.episodeId || "").trim();
   const episodeProfileId = String(body.episodeProfileId || "").trim();
   const speakerProfileId = String(body.speakerProfileId || "").trim();
@@ -341,20 +357,29 @@ export async function resolveTranscriptPromptRequest(req, res, context) {
     if (!speakerProfile) throw badRequest("Speaker profile does not exist.");
   }
   const language = resolveLanguage(context, episodeProfile.language);
-  sendJson(res, 200, transcriptPromptState(context, speakerProfile, episodeProfile, language, guidance));
+  return transcriptPromptState(context, speakerProfile, episodeProfile, language, guidance);
 }
 
 export async function saveTranscriptRequest(req, res, context, id) {
+  const episode = await loadEpisode(context.paths, id, false);
+  if (isActiveJob(episode.job)) throw conflict("Wait for the active episode job to finish.");
+  const body = await readJsonBody(req);
+  sendJson(res, 200, await saveTranscript(context, id, body.transcript));
+}
+
+// renameFromTitle: an episode still named "New episode" takes the script's "# Title" line, as the old transcript job did.
+export async function saveTranscript(context, id, value, { renameFromTitle = false } = {}) {
   const { paths } = context;
   const episode = await loadEpisode(paths, id, false);
   if (isActiveJob(episode.job)) throw conflict("Wait for the active episode job to finish.");
-  const body = await readJsonBody(req);
-  const transcript = String(body.transcript || "");
+  const transcript = String(value || "");
+  const title = renameFromTitle && episode.name.trim() === "New episode" ? oneLine(transcript.match(/^#\s+(.+)$/m)?.[1] || "") : "";
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(paths, episode);
   const parsed = parseTranscript(transcript, speakerProfile.speakers, episodeProfile.numSegments);
   validateTranscriptCues(context, parsed.segments, speakerProfile, resolveLanguage(context, episodeProfile.language));
   const updated = {
     ...episode,
+    ...(title ? { name: title } : {}),
     status: "transcript_ready",
     audioReady: false,
     transcriptWords: transcriptWordCount(parsed.segments, episodeProfile.language),
@@ -374,7 +399,27 @@ export async function saveTranscriptRequest(req, res, context, id) {
     }
     throw error;
   }
-  sendJson(res, 200, { ...updated, transcript: transcript.trim() + "\n", warning: parsed.warning });
+  return { ...updated, transcript: transcript.trim() + "\n", warning: parsed.warning };
+}
+
+export function transcriptLengthWarning(words, targetMinutes) {
+  const minimumWords = Math.round(targetMinutes * TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE);
+  return words < minimumWords
+    ? `Transcript is too short: ${words} words. Recommended minimum is ${minimumWords} words for ${targetMinutes} minutes. Rendering may fail duration validation.`
+    : "";
+}
+
+// PUT /api/profiles and the MCP profile tools. The caller holds serializeWithLatestModelCatalog and passes the stored profiles.
+export async function writeProfiles(context, value, current) {
+  const models = availableModelIds(context);
+  mergeSavedProfileSelections(models, current);
+  validateProfileData(value, models);
+  assertProfileRevisionsCurrent(value, current);
+  await assertProfilesCompatibleWithEpisodes(context.paths, value, current);
+  applyProfileRevisions(value, current);
+  value.updatedAt = nextUpdatedAt(current.updatedAt);
+  await writeJsonAtomic(context.paths.profiles, value);
+  return { profiles: value, warnings: modelReferenceWarnings(value, availableModelIds(context)) };
 }
 
 export function validateProfileData(value, models = {

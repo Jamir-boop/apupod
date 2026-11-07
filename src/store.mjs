@@ -18,9 +18,27 @@ export async function serializeMutation(context, action) {
   context.mutationTail = new Promise((resolvePromise) => { release = resolvePromise; });
   await previous;
   try {
-    return await action();
+    const result = await action();
+    // The UI polls GET /api/revision and reloads when this changes; job progress writes come through here too.
+    context.revision += 1;
+    return result;
   } finally {
     release();
+  }
+}
+
+const RETRY_MODEL_MUTATION = Symbol("retry-model-mutation");
+
+// Wait for any pending model catalog refresh, so a write validates against the latest active models.
+export async function serializeWithLatestModelCatalog(context, action) {
+  for (;;) {
+    const latest = context.latestModelRefresh;
+    if (latest) await latest.promise;
+    const result = await serializeMutation(context, () => {
+      if (latest !== context.latestModelRefresh) return RETRY_MODEL_MUTATION;
+      return action();
+    });
+    if (result !== RETRY_MODEL_MUTATION) return result;
   }
 }
 

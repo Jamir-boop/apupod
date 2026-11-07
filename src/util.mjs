@@ -151,7 +151,8 @@ export async function sendFile(req, res, path, contentType, contentSecurityPolic
       "Content-Type": contentType,
       "Cache-Control": contentType.startsWith("audio/") ? "no-store" : "no-cache",
       "X-Content-Type-Options": "nosniff",
-      "Cross-Origin-Resource-Policy": "same-origin",
+      // Audio is cross-origin so MCP App widgets (sandboxed iframes on the host's origin) can play it; URLs carry unguessable IDs.
+      "Cross-Origin-Resource-Policy": contentType.startsWith("audio/") ? "cross-origin" : "same-origin",
       "Accept-Ranges": "bytes",
     };
     if (contentType.startsWith("text/html")) {

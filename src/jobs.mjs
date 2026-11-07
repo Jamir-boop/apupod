@@ -158,6 +158,10 @@ async function isNormalizedWav(path) {
 }
 
 export async function listJobsResponse(res, context) {
+  sendJson(res, 200, await listJobs(context));
+}
+
+export async function listJobs(context) {
   // Read only the episodes that recent jobs name: this runs on every 1 s poll, and job writes already call rememberJob.
   const names = new Map();
   for (const episodeId of new Set([...context.recentJobs.values()].map((job) => job.episodeId))) {
@@ -168,7 +172,7 @@ export async function listJobsResponse(res, context) {
     .filter((job) => names.has(job.episodeId))
     .map((job) => ({ ...job, episodeName: names.get(job.episodeId) || job.episodeId }))
     .sort((a, b) => String(b.queuedAt || b.updatedAt).localeCompare(String(a.queuedAt || a.updatedAt)));
-  sendJson(res, 200, { activeJobId: context.activeJobId, jobs });
+  return { activeJobId: context.activeJobId, jobs };
 }
 
 export function rememberJob(context, job) {
@@ -179,7 +183,11 @@ export function rememberJob(context, job) {
 }
 
 export async function enqueueTtsJob(req, res, context, id) {
-  const body = await readOptionalJsonBody(req);
+  sendJson(res, 202, { job: await enqueueTts(context, id, await readOptionalJsonBody(req)) });
+}
+
+// The caller holds serializeWithLatestModelCatalog and has run ensureFfmpeg.
+export async function enqueueTts(context, id, body = {}) {
   if (String(body.languageOverride || "").trim()) throw badRequest("TTS language is defined by the Episode Format.");
   const episode = await loadEpisode(context.paths, id, true);
   if (isActiveJob(episode.job)) throw conflict("Episode already has an active job.");
@@ -209,9 +217,9 @@ export async function enqueueTtsJob(req, res, context, id) {
     type: "tts",
     previousAudioReady: episode.audioReady === true && await exists(join(episodeDir(context.paths, id), "episode.mp3")),
   });
-  sendJson(res, 202, { job });
   console.log(`[job:${job.id}] queued tts for ${id}`);
   queueMicrotask(() => void drainQueue(context));
+  return job;
 }
 
 export async function ensureFfmpeg(context) {
@@ -276,7 +284,14 @@ async function updateJob(context, queued, jobChanges, episodeChanges = {}) {
 
 export async function previewVoice(req, res, context) {
   const runtime = await modelRuntimeSnapshot(context);
-  const body = await readJsonBody(req);
+  const bytes = await previewVoiceAudio(context, await readJsonBody(req), runtime);
+  res.writeHead(200, { "Content-Type": "audio/wav", "Content-Length": bytes.length, "Cache-Control": "no-store" });
+  res.end(bytes);
+}
+
+// Returns normalized 24 kHz mono 16-bit WAV bytes.
+export async function previewVoiceAudio(context, body, runtime) {
+  runtime ??= await modelRuntimeSnapshot(context);
   let episodeProfile;
   let profile;
   if (body.episodeId) {
@@ -299,9 +314,7 @@ export async function previewVoice(req, res, context) {
   if (!text || text.length > 600) throw badRequest("Preview text must contain 1 to 600 characters.");
   await ensureFfmpeg(context);
   const audio = await synthesizeTurn(runtime, profile, speaker, text, String(body.cue || "warm and conversational"), language);
-  const bytes = await normalizePreviewAudio(audio, speaker.name, model);
-  res.writeHead(200, { "Content-Type": "audio/wav", "Content-Length": bytes.length, "Cache-Control": "no-store" });
-  res.end(bytes);
+  return normalizePreviewAudio(audio, speaker.name, model);
 }
 
 async function runTtsJob(context, queued, runtime) {

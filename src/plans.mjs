@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -7,7 +8,7 @@ import { basename, extname, join } from "node:path";
 import { badRequest, conflict, notFound, readJsonBody, sendJson } from "./util.mjs";
 import { LANGUAGE_OPTIONS } from "./providers/catalog.mjs";
 import { isActiveJob, planPath, planIndexItem, loadPlan, savePlan, nextUpdatedAt, listEpisodes, episodeDir, readJson, writeJsonAtomic } from "./store.mjs";
-import { saveEpisodeFromBody } from "./episodes.mjs";
+import { saveEpisodeFromBody, writeProfiles } from "./episodes.mjs";
 
 const PLAN_MAX_THEME_CHARS = 20_000;
 export const PLAN_MAX_TEXT_CHARS = 50_000;
@@ -15,7 +16,10 @@ export const PLAN_MAX_EPISODES = 100;
 const PLAN_MAX_KEY_POINTS = 20;
 
 export async function createKnowledgeBase(req, res, paths) {
-  const body = await readJsonBody(req);
+  sendJson(res, 201, await addKnowledgeBase(paths, await readJsonBody(req)));
+}
+
+export async function addKnowledgeBase(paths, body) {
   const name = String(body.name || "").trim();
   const content = String(body.content || "");
   if (!name || extname(name).toLowerCase() !== ".md") throw badRequest("Knowledge base must be a .md file.");
@@ -38,10 +42,24 @@ export async function createKnowledgeBase(req, res, paths) {
     await rm(join(paths.knowledge, `${id}.md`), { force: true });
     throw error;
   }
-  sendJson(res, 201, item);
+  return item;
+}
+
+// Bounded read for agents: offset and limit count UTF-16 characters, like `characters` in the index.
+export async function readKnowledgeBase(paths, id, { offset = 0, limit = 20_000 } = {}) {
+  const item = (await readJson(paths.knowledgeIndex)).find((entry) => entry.id === id);
+  if (!item) throw notFound("Knowledge base not found.");
+  const text = await readFile(join(paths.knowledge, `${id}.md`), "utf8");
+  const content = text.slice(offset, offset + limit);
+  const end = offset + content.length;
+  return { ...item, offset, content, nextOffset: end < text.length ? end : null };
 }
 
 export async function deleteKnowledgeBase(res, context, id) {
+  sendJson(res, 200, await removeKnowledgeBase(context, id));
+}
+
+export async function removeKnowledgeBase(context, id) {
   const { paths } = context;
   const knowledgeIndex = await readJson(paths.knowledgeIndex);
   const item = knowledgeIndex.find((entry) => entry.id === id);
@@ -74,7 +92,7 @@ export async function deleteKnowledgeBase(res, context, id) {
     for (const write of applied.reverse()) await writeJsonAtomic(write.path, write.before).catch(() => {});
     throw error;
   }
-  sendJson(res, 200, { id, deleted: true, cleared: { plans: plans.length, episodes: episodes.length } });
+  return { id, deleted: true, cleared: { plans: plans.length, episodes: episodes.length } };
 }
 
 function planText(value, label, max = PLAN_MAX_TEXT_CHARS, required = false) {
@@ -197,6 +215,10 @@ export async function deletePlannedEpisodeRequest(res, paths, planId, plannedEpi
 }
 
 export async function deletePlanRequest(res, context, id) {
+  sendJson(res, 200, await deletePlan(context, id));
+}
+
+export async function deletePlan(context, id) {
   await loadPlan(context.paths, id);
   const index = await readJson(context.paths.plansIndex);
   await writeJsonAtomic(context.paths.plansIndex, index.filter((item) => item.id !== id));
@@ -206,17 +228,18 @@ export async function deletePlanRequest(res, context, id) {
     await writeJsonAtomic(context.paths.plansIndex, index);
     throw error;
   }
-  sendJson(res, 200, { id, deleted: true });
+  return { id, deleted: true };
 }
 
-// The plan JSON contract the old planner model returned: titles for every episode, detail for episode 1, and an Episode Format when none is selected.
+// The plan JSON contract for agent-written plans: every episode in order (numbered from 1), optional extra detail
+// for episode 1, and an Episode Format when the plan has none selected.
 export function normalizeGeneratedPlan(raw, plan) {
-  if (!raw || typeof raw !== "object" || !Array.isArray(raw.episodes)) throw badRequest("Content planner response is invalid.");
-  if (plan.episodeCount == null && (raw.episodes.length < 1 || raw.episodes.length > PLAN_MAX_EPISODES)) throw badRequest(`Content planner must return from 1 to ${PLAN_MAX_EPISODES} episodes.`);
-  if (plan.episodeCount != null && raw.episodes.length !== plan.episodeCount) throw badRequest(`Content planner must return exactly ${plan.episodeCount} episodes.`);
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.episodes)) throw badRequest("Plan episodes are invalid.");
+  if (plan.episodeCount == null && (raw.episodes.length < 1 || raw.episodes.length > PLAN_MAX_EPISODES)) throw badRequest(`Plan must contain from 1 to ${PLAN_MAX_EPISODES} episodes.`);
+  if (plan.episodeCount != null && raw.episodes.length !== plan.episodeCount) throw badRequest(`Plan must contain exactly ${plan.episodeCount} episodes.`);
   const episodes = raw.episodes.map((item, index) => {
-    if (item?.number !== index + 1) throw badRequest(`Generated episode ${index + 1} has invalid numbering.`);
-    return normalizePlannedEpisode({ number: item.number, title: item.title, id: randomUUID(), episodeProfileId: "" });
+    if (item?.number !== index + 1) throw badRequest(`Planned episode ${index + 1} has invalid numbering.`);
+    return normalizePlannedEpisode({ ...item, episodeProfileId: item.episodeProfileId || "" });
   });
   if (raw.detailedEpisode != null) {
     if (!raw.detailedEpisode || typeof raw.detailedEpisode !== "object" || Array.isArray(raw.detailedEpisode) || raw.detailedEpisode.number !== 1) throw badRequest("Detailed episode must reference episode 1.");
@@ -224,7 +247,7 @@ export function normalizeGeneratedPlan(raw, plan) {
   }
   let episodeFormat = null;
   if (!plan.episodeFormatId) {
-    if (!raw.episodeFormat || typeof raw.episodeFormat !== "object" || Array.isArray(raw.episodeFormat)) throw badRequest("Content planner must return an Episode Format.");
+    if (!raw.episodeFormat || typeof raw.episodeFormat !== "object" || Array.isArray(raw.episodeFormat)) throw badRequest("Pick an Episode Format for the plan (episodeFormatId), or describe a new one (episodeFormat name and description).");
     episodeFormat = {
       name: planText(raw.episodeFormat.name, "Episode Format name", PLAN_MAX_TEXT_CHARS, true).trim(),
       description: planText(raw.episodeFormat.description, "Episode Format description", PLAN_MAX_TEXT_CHARS, true).trim(),
@@ -246,9 +269,57 @@ function buildPlannedAdditionalInstructions(plan, episode) {
   ].join("\n\n");
 }
 
+// Create or update a plan with the planned episode list an agent wrote. Fields not given keep their saved values.
+// Planned episodes keep their ID and created-episode link when the input names an existing ID. The caller holds the lock.
+export async function saveAgentPlan(context, input) {
+  const { paths } = context;
+  const { id, expectedUpdatedAt, episodes: rawEpisodes, episodeFormat: rawFormat, ...fields } = input;
+  const current = id ? await loadPlan(paths, id) : null;
+  if (current && expectedUpdatedAt !== undefined && expectedUpdatedAt !== current.updatedAt) throw conflict("Content plan changed in another tab. Reload the plan before saving your changes.");
+  const profiles = await readJson(paths.profiles);
+  const plan = current
+    ? normalizePlanInput({ ...current, ...fields, episodes: undefined }, current)
+    : normalizePlanInput({ ...fields, episodes: [], name: fields.name || "New Content Plan", speakerProfileId: fields.speakerProfileId || profiles.speakerProfiles[0]?.id || "", episodeCount: fields.episodeCount ?? null });
+  let nextProfiles = null;
+  if (rawEpisodes != null) {
+    const generated = normalizeGeneratedPlan({ episodes: rawEpisodes, episodeFormat: rawFormat }, { episodeFormatId: plan.episodeFormatId, episodeCount: fields.episodeCount ?? null });
+    const previous = new Map((current?.episodes || []).map((item) => [item.id, item]));
+    generated.episodes.forEach((episode, index) => {
+      const kept = previous.get(rawEpisodes[index]?.id);
+      if (!kept) return;
+      episode.id = kept.id;
+      episode.createdEpisodeId = kept.createdEpisodeId;
+      previous.delete(kept.id);
+    });
+    const dropped = [...previous.values()].find((item) => item.createdEpisodeId);
+    if (dropped) throw conflict(`Planned episode "${dropped.title}" already has a created episode. Keep its ID in the list, or delete the created episode first.`);
+    plan.episodes = generated.episodes;
+    plan.episodeCount = generated.episodeCount;
+    if (generated.episodeFormat) {
+      nextProfiles = structuredClone(profiles);
+      const format = { id: `episode-format-${randomUUID()}`, ...generated.episodeFormat, speakerProfileId: plan.speakerProfileId, language: plan.language, targetMinutes: plan.targetMinutes };
+      nextProfiles.episodeProfiles.push(format);
+      plan.episodeFormatId = format.id;
+    }
+  }
+  await validatePlanReferences(context, plan, { profiles: nextProfiles || profiles });
+  if (nextProfiles) await writeProfiles(context, nextProfiles, profiles);
+  try {
+    await savePlan(paths, plan);
+  } catch (error) {
+    if (nextProfiles) await writeJsonAtomic(paths.profiles, profiles);
+    throw error;
+  }
+  return { plan, ...(nextProfiles ? { createdEpisodeFormatId: plan.episodeFormatId } : {}) };
+}
+
 export async function createPlanEpisodesRequest(req, res, context, id) {
   const body = await readJsonBody(req);
-  const selected = Array.isArray(body.plannedEpisodeIds) ? [...new Set(body.plannedEpisodeIds.map(String))] : [];
+  sendJson(res, 200, await createPlanEpisodes(context, id, body.plannedEpisodeIds));
+}
+
+export async function createPlanEpisodes(context, id, plannedEpisodeIds) {
+  const selected = Array.isArray(plannedEpisodeIds) ? [...new Set(plannedEpisodeIds.map(String))] : [];
   if (!selected.length) throw badRequest("Select at least one planned episode.");
   const plan = await loadPlan(context.paths, id);
   const profiles = await readJson(context.paths.profiles);
@@ -276,5 +347,5 @@ export async function createPlanEpisodesRequest(req, res, context, id) {
     await Promise.all(createdIds.map((episodeId) => rm(episodeDir(context.paths, episodeId), { recursive: true, force: true })));
     throw error;
   }
-  sendJson(res, 200, { plan, episodes });
+  return { plan, episodes };
 }

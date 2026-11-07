@@ -12,6 +12,8 @@
     "test": "node --test --test-force-exit test/*.test.mjs"
   },
   "dependencies": {
-    "openai": "7.34.0"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "openai": "7.34.0",
+    "zod": "4.6.7"
   }
 }

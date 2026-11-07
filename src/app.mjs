@@ -1,4 +1,6 @@
+import { randomBytes } from "node:crypto";
 import {
+  chmod,
   mkdir,
   readFile,
   rename,
@@ -10,13 +12,14 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { DEFAULT_DATA } from "./defaults.mjs";
 import { badRequest, conflict, assertSafeId, readJsonBody, assertLocalRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
-import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog, availableModelIds } from "./providers/catalog.mjs";
+import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog } from "./providers/catalog.mjs";
 import { fetchElevenLabsVoices, fetchChatterboxVoices } from "./providers/generate.mjs";
-import { serializeMutation, listPlans, listEpisodes, readJson, writeJsonAtomic, exists, nextUpdatedAt } from "./store.mjs";
+import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpisodes, readJson, writeJsonAtomic, writeTextAtomic, exists, nextUpdatedAt } from "./store.mjs";
 import { defaultConfig, readConfig, activateReferencedModels, redactConfig, saveConfigRequest } from "./config.mjs";
-import { deleteEpisodeRequest, deleteSpeakerProfileRequest, saveEpisodeRequest, getEpisodeResponse, renameEpisodeRequest, applyLatestProfilesRequest, resolveTranscriptPromptRequest, saveTranscriptRequest, validateProfileData, assertProfileRevisionsCurrent, applyProfileRevisions, mergeSavedProfileSelections, modelReferenceWarnings, assertProfilesCompatibleWithEpisodes } from "./episodes.mjs";
+import { deleteEpisodeRequest, deleteSpeakerProfileRequest, saveEpisodeRequest, getEpisodeResponse, renameEpisodeRequest, applyLatestProfilesRequest, resolveTranscriptPromptRequest, saveTranscriptRequest, writeProfiles } from "./episodes.mjs";
 import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanResponse, updatePlanRequest, deletePlannedEpisodeRequest, deletePlanRequest, createPlanEpisodesRequest } from "./plans.mjs";
 import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTtsJob, ensureFfmpeg, previewVoice } from "./jobs.mjs";
+import { handleMcpRequest, readWorkspaceState } from "./mcp.mjs";
 export { validateProfileData, transcriptSpeakerRule, parseTranscript } from "./episodes.mjs";
 export { clipCacheKey, writeAudioAsWav, runProcess } from "./jobs.mjs";
 
@@ -63,6 +66,8 @@ async function createAppContext(options = {}) {
     activeJobId: null,
     recentJobs: new Map(),
     mutationTail: Promise.resolve(),
+    revision: 0,
+    mcpToken: await ensureMcpToken(paths.mcpToken),
     ffmpegCheck: null,
   };
   await cleanupInterruptedEpisodeDeletes(paths);
@@ -88,18 +93,16 @@ export async function createPodcastServer(options = {}) {
   return server;
 }
 
-const RETRY_MODEL_MUTATION = Symbol("retry-model-mutation");
-
-async function serializeWithLatestModelCatalog(context, action) {
-  for (;;) {
-    const latest = context.latestModelRefresh;
-    if (latest) await latest.promise;
-    const result = await serializeMutation(context, () => {
-      if (latest !== context.latestModelRefresh) return RETRY_MODEL_MUTATION;
-      return action();
-    });
-    if (result !== RETRY_MODEL_MUTATION) return result;
+// The bearer token the stdio bridge sends to /mcp. Created once, readable only by the user.
+async function ensureMcpToken(path) {
+  if (await exists(path)) {
+    await chmod(path, 0o600);
+    const token = (await readFile(path, "utf8")).trim();
+    if (token.length >= 32) return token;
   }
+  const token = randomBytes(32).toString("base64url");
+  await writeTextAtomic(path, `${token}\n`, 0o600);
+  return token;
 }
 
 // Tests pass dataDir and configDir, or a rootDir that holds data/, config.json, .env and public/.
@@ -117,6 +120,8 @@ function makePaths({ rootDir, dataDir, configDir }) {
     plans: join(data, "plans"),
     plansIndex: join(data, "plans", "index.json"),
     episodes: join(data, "episodes"),
+    previews: join(data, "previews"),
+    mcpToken: join(config, "mcp-token"),
     publicIndex: join(app, "public", "index.html"),
     publicIcon: join(app, "public", "icon.png"),
     env: join(config, ".env"),
@@ -178,14 +183,14 @@ async function routeRequest(req, res, context) {
     return sendFile(req, res, context.paths.publicIcon, "image/png");
   }
 
+  if (path === "/mcp") return handleMcpRequest(req, res, context);
+
   if (method === "GET" && path === "/api/state") {
-    const [profiles, knowledgeBases, plans, episodes] = await Promise.all([
-      readJson(context.paths.profiles),
-      readJson(context.paths.knowledgeIndex),
-      listPlans(context.paths),
-      listEpisodes(context.paths),
-    ]);
-    return sendJson(res, 200, { profiles, knowledgeBases, plans, episodes, config: redactConfig(context.config) });
+    return sendJson(res, 200, await readWorkspaceState(context));
+  }
+
+  if (method === "GET" && path === "/api/revision") {
+    return sendJson(res, 200, { revision: context.revision });
   }
 
   if (method === "GET" && path === "/api/config") {
@@ -220,17 +225,9 @@ async function routeRequest(req, res, context) {
     const expectedUpdatedAt = value?.expectedUpdatedAt;
     if (value && typeof value === "object") delete value.expectedUpdatedAt;
     const result = await serializeWithLatestModelCatalog(context, async () => {
-      const models = availableModelIds(context);
       const current = await readJson(context.paths.profiles);
       if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== (current.updatedAt ?? null)) throw conflict("Profiles changed somewhere else after this page loaded. Reload the page, then apply the change again.");
-      mergeSavedProfileSelections(models, current);
-      validateProfileData(value, models);
-      assertProfileRevisionsCurrent(value, current);
-      await assertProfilesCompatibleWithEpisodes(context.paths, value, current);
-      applyProfileRevisions(value, current);
-      value.updatedAt = nextUpdatedAt(current.updatedAt);
-      await writeJsonAtomic(context.paths.profiles, value);
-      return { profiles: value, warnings: modelReferenceWarnings(value, availableModelIds(context)) };
+      return writeProfiles(context, value, current);
     });
     return sendJson(res, 200, result);
   }
@@ -312,6 +309,11 @@ async function routeRequest(req, res, context) {
       await ensureFfmpeg(context);
       return serializeWithLatestModelCatalog(context, () => enqueueTtsJob(req, res, context, id));
     }
+  }
+
+  const previewMatch = path.match(/^\/previews\/([a-zA-Z0-9_-]+)\.wav$/);
+  if (method === "GET" && previewMatch) {
+    return sendFile(req, res, join(context.paths.previews, `${previewMatch[1]}.wav`), "audio/wav");
   }
 
   const artifactMatch = path.match(/^\/artifacts\/([a-zA-Z0-9_-]+)\/episode\.mp3$/);
