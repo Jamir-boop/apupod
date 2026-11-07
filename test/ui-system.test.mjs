@@ -23,7 +23,7 @@ test("Settings opens with the System area: checklist, harnesses, port and token,
   assert.match(panel, /claude plugin marketplace add Jamir-boop\/apupod\nclaude plugin install apupod@apupod/);
   assert.match(panel, /codex plugin marketplace add Jamir-boop\/apupod\ncodex plugin add apupod@apupod/);
   const opencode = JSON.parse(unescape(panel.match(/<pre id="harnessOpenCode"><code>([^<]+)<\/code><\/pre>/)[1]));
-  assert.deepEqual(opencode.mcp.servers.apupod, { type: "local", command: ["npx", "-y", `apupod@${version}`, "mcp"] });
+  assert.deepEqual(opencode.mcp.servers.apupod, { type: "local", command: ["npx", "-y", `github:Jamir-boop/apupod#v${version}`, "mcp"] });
   for (const id of ["harnessClaude", "harnessCodex", "harnessOpenCode"]) assert.match(panel, new RegExp(`<button type="button" data-copy="${id}">`));
 });
 

@@ -27,8 +27,9 @@ A release sets the same version in all of these places:
 
 - `package.json` (and `package-lock.json`, through `npm version`).
 - `.claude-plugin/plugin.json` and the root `plugin.json`.
-- The npx pin `apupod@<version>` in `.mcp.json`, `mcp.json`, `examples/opencode.json`,
+- The npx pin `github:Jamir-boop/apupod#v<version>` in `.mcp.json`, `mcp.json`, `examples/opencode.json`,
   and the OpenCode snippet in the Settings view (`public/index.html`).
+- Then push the commit and the tag `v<version>`: the plugins run that tag from GitHub.
 
 `test/packaging.test.mjs` fails when one of them differs.
 

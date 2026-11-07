@@ -18,7 +18,7 @@ In the Andes, an *apu* is a "lord": the spirit of a mountain that watches over t
 
 ## Install
 
-Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y apupod@1.1.0 mcp`, so npm downloads the pinned apupod package for you. The bridge connects to the apupod daemon, or starts it in the background if it is not running. You do not need a clone or a server that you start yourself. The plugin install from GitHub works after apupod is published on npm.
+Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.1.0 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. You do not need a clone or a server that you start yourself. The plugin install from GitHub works after apupod is published on npm.
 
 The UI **Settings** view shows these commands with copy buttons, and shows when each harness last connected.
 
@@ -57,7 +57,7 @@ Add the MCP server to `opencode.json` (project) or `~/.config/opencode/opencode.
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["npx", "-y", "apupod@1.1.0", "mcp"]
+        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.1.0", "mcp"]
       }
     }
   },

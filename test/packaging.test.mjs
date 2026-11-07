@@ -17,7 +17,7 @@ test("src/mcp.mjs registers the 25 tools", () => {
   assert.equal(TOOLS.size, 25);
 });
 
-test("plugin manifests are valid, versioned and licensed with package.json, and run the pinned npm bridge", () => {
+test("plugin manifests are valid, versioned and licensed with package.json, and run the bridge pinned to the release tag", () => {
   const claude = json(".claude-plugin/plugin.json");
   const portable = json("plugin.json");
   for (const manifest of [claude, portable]) {
@@ -29,8 +29,8 @@ test("plugin manifests are valid, versioned and licensed with package.json, and 
   assert.match(read("LICENSE"), /^MIT License\n\nCopyright \(c\) 2026 Jamir-boop\n/);
   assert.equal(portable.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
 
-  // Release: the npx pin in every harness config equals the package.json version.
-  const npx = ["-y", `apupod@${pkg.version}`, "mcp"];
+  // Release: every harness config runs the GitHub tag v<package.json version> through npx.
+  const npx = ["-y", `github:Jamir-boop/apupod#v${pkg.version}`, "mcp"];
   assert.deepEqual(json(".mcp.json").mcpServers.apupod, { command: "npx", args: npx });
   const mcp = json("mcp.json");
   assert.equal(mcp.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
@@ -38,7 +38,7 @@ test("plugin manifests are valid, versioned and licensed with package.json, and 
   const opencode = json("examples/opencode.json").mcp.servers.apupod;
   assert.deepEqual(opencode, { type: "local", command: ["npx", ...npx] });
   // The UI shows the same OpenCode snippet.
-  assert.ok(read("public/index.html").includes(`&quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;apupod@${pkg.version}&quot;, &quot;mcp&quot;]`), "the UI OpenCode snippet pins the package.json version");
+  assert.ok(read("public/index.html").includes(`&quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;github:Jamir-boop/apupod#v${pkg.version}&quot;, &quot;mcp&quot;]`), "the UI OpenCode snippet pins the package.json version");
   assert.ok(existsSync(join(ROOT, "bin/apupod.mjs")));
 });
 
