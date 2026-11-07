@@ -51,6 +51,9 @@ export const LANGUAGE_OPTIONS = [
 const MIMO_LANGUAGE_CODES = new Set(["en", "zh"]);
 const ELEVEN_LANGUAGE_CODES = new Map(`afr:af amh:am ara:ar hye:hy asm:as aze:az bel:be ben:bn bos:bs bul:bg mya:my cat:ca hrv:hr ces:cs dan:da nld:nl eng:en est:et fin:fi fra:fr ful:ff glg:gl kat:ka deu:de ell:el guj:gu hau:ha heb:he hin:hi hun:hu isl:is ind:id ita:it jpn:ja jav:jv kan:kn kaz:kk kor:ko kir:ky lao:lo lav:lv lin:ln lit:lt lug:lg ltz:lb mkd:mk msa:ms mal:ml mlt:mt cmn:zh zho:zh mri:mi mar:mr mon:mn nep:ne nob:no nor:no oci:oc ori:or pus:ps fas:fa pol:pl por:pt pan:pa ron:ro rus:ru srp:sr sna:sn snd:sd slk:sk slv:sl som:so spa:es swa:sw swe:sv tgk:tg tam:ta tel:te tha:th tur:tr ukr:uk urd:ur uzb:uz vie:vi cym:cy wol:wo zul:zu gle:ga nya:ny`.split(" ").map((pair) => pair.split(":")));
 
+// ISO 639-1 to ISO 639-2 for the MP3 language tag; the later pair wins (zho over cmn, nor over nob).
+export const ISO_639_2_CODES = new Map([...ELEVEN_LANGUAGE_CODES].map(([long, short]) => [short, long]));
+
 export function createModelCatalog(credentials = null) {
   const credential = (name) => credentials ? credentials[name] || "" : process.env[name]?.trim() || "";
   return {

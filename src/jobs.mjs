@@ -11,16 +11,16 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawn } from "node:child_process";
-import { httpError, badRequest, conflict, serviceUnavailable, ID_RE, readJsonBody, readOptionalJsonBody, sendJson } from "./util.mjs";
+import { httpError, badRequest, conflict, serviceUnavailable, ID_RE, readJsonBody, readOptionalJsonBody, sendJson, runProcess } from "./util.mjs";
 import { MAX_AUDIO_RESPONSE_BYTES } from "./providers/transport.mjs";
 import { LANGUAGE_OPTIONS, modelRuntimeSnapshot, resolveLanguage, modelLanguageError, assertTtsLanguageCompatibility } from "./providers/catalog.mjs";
 import { turnClipDescriptor, spokenTextForModel, synthesizeTurn, assertWav } from "./providers/generate.mjs";
 import { serializeMutation, isActiveJob, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, exists } from "./store.mjs";
 import { parseTranscript } from "./episodes.mjs";
+import { readAlbums, episodeAlbum, tagEpisodeMp3 } from "./albums.mjs";
 
-const FFMPEG_TIMEOUT_MS = 900_000;
-const PROCESS_KILL_SIGNAL = "SIGKILL";
+// app.mjs and system.mjs import runProcess from here.
+export { runProcess };
 
 export async function interruptStaleJobs(paths) {
   for (const episode of await listEpisodes(paths)) {
@@ -364,13 +364,16 @@ async function runTtsJob(context, queued, runtime) {
   await updateJob(context, queued, { phase: "combining", message: "Combining MP3…" });
   const targetSeconds = episodeProfile.targetMinutes * 60;
   const mp3Result = await assembleMp3(clipPaths, episodeDir(context.paths, episode.id), targetSeconds * 0.9, episodeProfile.targetMinutes);
+  // shortcut: album tags are read once here; an album change during this step is skipped by retagEpisodes (active job) and needs a re-save or re-render.
+  const albums = await readAlbums(context.paths);
+  const tagWarning = episodeAlbum(albums, episode.id) ? await tagEpisodeMp3(context.paths, episode, albums) : null;
   await pruneClipCache(clipsDir, usedKeys);
   await updateJob(context, queued, {}, {
     status: "ready",
     audioReady: true,
     lastError: null,
   });
-  return { warning: mp3Result?.warning || "" };
+  return { warning: [mp3Result?.warning, tagWarning].filter(Boolean).join(" ") };
 }
 
 export function clipCacheKey(value) {
@@ -484,25 +487,4 @@ async function assembleMp3(clipPaths, directory, minimumSeconds, targetMinutes) 
     await rm(listPath, { force: true });
     await rm(temporary, { force: true });
   }
-}
-
-export async function runProcess(command, args, timeoutMs = FFMPEG_TIMEOUT_MS) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    // Not spawn({ timeout }): a spawn that fails with ENOENT never emits "exit", so Node keeps its
-    // own timer armed for the whole timeout and pins the event loop.
-    const timer = setTimeout(() => { timedOut = true; child.kill(PROCESS_KILL_SIGNAL); }, timeoutMs).unref();
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
-    child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      if (code === 0) resolvePromise(stdout);
-      else if (timedOut) reject(new Error(`${command} timed out after ${timeoutMs} ms and was stopped with ${signal || PROCESS_KILL_SIGNAL}: ${stderr.trim()}`));
-      else reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
-    });
-  });
 }

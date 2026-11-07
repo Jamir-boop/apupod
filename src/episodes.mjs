@@ -11,6 +11,7 @@ import { TTS_MODELS, LANGUAGE_OPTIONS, resolveLanguage, availableModelIds } from
 import { CHATTERBOX_DEFAULTS, ELEVENLABS_DEFAULTS, MIMO_INSTRUCTION_PRESETS, CHATTERBOX_TAGS, TTS_CUE_RE, ELEVEN_BREAK_RE, ELEVEN_BREAK_ANY_RE, TTS_DOCS, ttsCueCapability, chatterboxSettings, mimoTtsSettings, assertElevenLabsMarkup, elevenLabsSettings } from "./providers/generate.mjs";
 import { isActiveJob, planPath, planIndexItem, listPlans, loadPlan, savePlan, nextUpdatedAt, profileRevision, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, writeTextAtomic, exists } from "./store.mjs";
 import { collectModelReferences } from "./config.mjs";
+import { removeEpisodeFromAlbums, restoreAlbums, retagEpisodes } from "./albums.mjs";
 
 export const TRANSCRIPT_TARGET_WORDS_PER_MINUTE = 140;
 export const TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE = 125;
@@ -34,14 +35,17 @@ export async function deleteEpisode(context, id) {
   if (await exists(staged)) throw conflict("An interrupted deletion must be cleaned up by restarting the server.");
   // ponytail: no cross-file journal; a crash before staging leaves the intact episode retryable but may detach plan links.
   const applied = [];
+  let albumChange = null;
   try {
     for (const update of updates) {
       await savePlan(context.paths, update.after);
       applied.push(update);
     }
+    albumChange = await removeEpisodeFromAlbums(context.paths, id);
     await rename(directory, staged);
   } catch (error) {
     const rollbackErrors = [];
+    if (albumChange) await restoreAlbums(context.paths, albumChange.before).catch((rollbackError) => rollbackErrors.push(rollbackError));
     for (const update of applied.reverse()) await savePlan(context.paths, update.before, { restore: true }).catch((rollbackError) => rollbackErrors.push(rollbackError));
     if (rollbackErrors.length) throw new AggregateError([error, ...rollbackErrors], "Episode deletion failed and could not be fully rolled back.");
     throw error;
@@ -51,7 +55,9 @@ export async function deleteEpisode(context, id) {
   } catch (error) {
     console.warn(`[episode:${id}] deletion committed; deferred cleanup failed: ${error.message || error}`);
   }
-  return { id, deleted: true };
+  // The remaining tracks of the edition get new track numbers.
+  const warnings = albumChange ? await retagEpisodes(context, albumChange.retag) : [];
+  return { id, deleted: true, ...(warnings.length ? { warnings } : {}) };
 }
 
 export async function deleteSpeakerProfileRequest(res, context, id) {

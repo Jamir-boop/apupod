@@ -7,7 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
-const TOOLS = ["get_workspace", "open_ui", "list_tts_options", "set_tts_models", "list_voices", "save_host_profile", "delete_host_profile", "save_episode_format", "delete_episode_format", "add_knowledge", "get_knowledge", "delete_knowledge", "save_plan", "get_plan", "delete_plan", "create_episodes", "get_episode", "get_script_rules", "save_script", "render_audio", "get_job", "list_jobs", "preview_voice", "rename_episode", "apply_latest_profiles", "delete_episode", "jev_decide"];
+const TOOLS = ["get_workspace", "open_ui", "list_tts_options", "set_tts_models", "list_voices", "save_host_profile", "delete_host_profile", "save_episode_format", "delete_episode_format", "add_knowledge", "get_knowledge", "delete_knowledge", "save_plan", "get_plan", "delete_plan", "create_episodes", "get_episode", "get_script_rules", "save_script", "render_audio", "get_job", "list_jobs", "preview_voice", "rename_episode", "apply_latest_profiles", "delete_episode", "save_album", "get_album", "delete_album", "set_album_cover", "jev_decide"];
 const INITIALIZE = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } };
 
 // A test server plus an MCP client that sends the daemon's bearer token.

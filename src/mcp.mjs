@@ -14,6 +14,7 @@ import { ttsCueCapability, fetchElevenLabsVoices, fetchChatterboxVoices, CHATTER
 import { TRANSCRIPT_TARGET_WORDS_PER_MINUTE, TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE, deleteEpisode, deleteSpeakerProfile, saveEpisodeFromBody, renameEpisode, applyLatestProfiles, resolveTranscriptPrompt, saveTranscript, transcriptLengthWarning, transcriptSpeakerRule, parseTranscript, writeProfiles } from "./episodes.mjs";
 import { addKnowledgeBase, readKnowledgeBase, removeKnowledgeBase, saveAgentPlan, deletePlan, createPlanEpisodes } from "./plans.mjs";
 import { listJobs, enqueueTts, ensureFfmpeg, previewVoiceAudio } from "./jobs.mjs";
+import { readAlbums, albumView, episodeAlbumView, saveAlbum, deleteAlbum, setAlbumCover, MAX_COVER_BYTES } from "./albums.mjs";
 import { jevDecide, voiceCatalog } from "./decide.mjs";
 import { JEV_MODEL } from "./jev.mjs";
 import { VERSION, mcpClientList, recordMcpClients } from "./system.mjs";
@@ -23,13 +24,14 @@ const PREVIEW_MAX_AGE_MS = 60 * 60 * 1000;
 
 // GET /api/state and get_workspace.
 export async function readWorkspaceState(context) {
-  const [profiles, knowledgeBases, plans, episodes] = await Promise.all([
+  const [profiles, knowledgeBases, plans, episodes, albums] = await Promise.all([
     readJson(context.paths.profiles),
     readJson(context.paths.knowledgeIndex),
     listPlans(context.paths),
     listEpisodes(context.paths),
+    readAlbums(context.paths),
   ]);
-  return { profiles, knowledgeBases, plans, episodes, config: redactConfig(context.config) };
+  return { profiles, knowledgeBases, plans, episodes, albums, config: redactConfig(context.config) };
 }
 
 export async function handleMcpRequest(req, res, context) {
@@ -175,6 +177,7 @@ async function workspaceOverview(context, origin) {
     knowledgeBases: state.knowledgeBases,
     plans: state.plans,
     episodes: state.episodes.map((episode) => ({ id: episode.id, name: episode.name, status: episode.status, audioReady: episode.audioReady === true, transcriptWords: episode.transcriptWords ?? null, episodeProfileId: episode.episodeProfileId ?? null, knowledgeBaseId: episode.knowledgeBaseId ?? null, job: jobView(episode.job), updatedAt: episode.updatedAt })),
+    albums: state.albums.map((album) => ({ id: album.id, title: album.title, revision: album.revision, hasCover: Boolean(album.cover), editions: album.editions.map((edition) => ({ language: edition.language, title: edition.title || album.title, tracks: edition.episodeIds.length })) })),
     tts: ttsReadiness(context, state.config),
     jev: { available: state.config.assistantDecision.hasApiKey, model: JEV_MODEL },
     // The last update check the Settings view ran (no network call here), and the most recent MCP initialize per client.
@@ -184,6 +187,7 @@ async function workspaceOverview(context, origin) {
 
 async function episodeView(context, origin, episodeId, extra = {}) {
   const episode = await loadEpisode(context.paths, episodeId, true);
+  const album = episodeAlbumView(await readAlbums(context.paths), episode.id);
   let stats = { segments: null, words: episode.transcriptWords ?? null, targetMinutes: null };
   try {
     const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
@@ -195,9 +199,12 @@ async function episodeView(context, origin, episodeId, extra = {}) {
     audioUrl: episode.audioUrl ? `${origin}${episode.audioUrl}` : null,
     uiUrl: `${origin}/?view=episode&episode=${encodeURIComponent(episode.id)}`,
     stats,
+    ...(album ? { album } : {}),
     ...extra,
   };
 }
+
+const albumSummary = ({ album, warnings = [] }) => `Album "${album.title}" (${album.id}), revision ${album.revision}: ${album.editions.map((edition) => `${edition.language} "${edition.displayTitle}" ${edition.tracks.length} tracks`).join("; ") || "no editions"}.${album.cover ? " Has a cover." : ""}${warnings.length ? ` Warnings: ${warnings.join(" ")}` : ""}`;
 
 const episodeSummary = (view) => `Episode "${view.episode.name}" (${view.episode.id}): ${view.episode.status}${view.audioUrl ? `, audio ${view.audioUrl}` : ""}.`;
 
@@ -267,13 +274,13 @@ export function createMcpServer(context, origin) {
 
   tool("get_workspace", {
     title: "Get workspace",
-    description: "Overview of the apupod workspace: host profiles, Episode Formats, knowledge bases, plans, episodes (IDs, names, status), TTS readiness, Jev availability, the apupod version and update status, recent MCP client connections, and the UI URL. Call this first.",
+    description: "Overview of the apupod workspace: host profiles, Episode Formats, knowledge bases, plans, episodes (IDs, names, status), albums (editions per language with track counts), TTS readiness, Jev availability, the apupod version and update status, recent MCP client connections, and the UI URL. Call this first.",
     inputSchema: {},
     annotations: READ,
     _meta: widget(WORKSPACE_WIDGET_URI),
   }, async () => {
     const data = await workspaceOverview(context, origin);
-    return result(`apupod workspace: ${data.hosts.length} host profiles, ${data.formats.length} formats, ${data.knowledgeBases.length} knowledge bases, ${data.plans.length} plans, ${data.episodes.length} episodes. TTS ${data.tts.ready ? "ready." : `not ready: ${data.tts.hint}`} UI: ${data.uiUrl}`, data);
+    return result(`apupod workspace: ${data.hosts.length} host profiles, ${data.formats.length} formats, ${data.knowledgeBases.length} knowledge bases, ${data.plans.length} plans, ${data.episodes.length} episodes, ${data.albums.length} albums. TTS ${data.tts.ready ? "ready." : `not ready: ${data.tts.hint}`} UI: ${data.uiUrl}`, data);
   });
 
   tool("open_ui", {
@@ -682,6 +689,65 @@ export function createMcpServer(context, origin) {
   }, async ({ id: episodeId }) => {
     const data = await serializeMutation(context, () => deleteEpisode(context, episodeId));
     return result(`Deleted episode ${episodeId}.`, data);
+  });
+
+  tool("save_album", {
+    title: "Save album",
+    description: "Create (no id) or update (id) an album. An album groups episodes in track order; each language has one edition of the same album (for example en-US and es-419), and the editions are translations of each other. `editions` replaces the whole edition list: each edition has a language ID, an optional title (default: the album title), and episodeIds in track order. Every episode must exist, use its edition's language (from its Episode Format), and be in at most one album edition. expectedRevision rejects the save if the album changed since you read it. Rendered MP3s of the affected episodes get new ID3 tags (album, track, artist, language, cover); episodes that leave the album keep only their title tag. Episodes with an active render job are skipped and reported in warnings.",
+    inputSchema: {
+      id: id("Album").optional(),
+      expectedRevision: z.number().int().optional(),
+      title: z.string().optional().describe("Album title; required for a new album."),
+      description: z.string().optional(),
+      editions: z.array(z.object({
+        language: z.string().describe("Language ID, e.g. \"en-US\" or \"es-419\"."),
+        title: z.string().optional().describe("Edition title, e.g. \"Spill the Prompt (Español)\". Default: the album title."),
+        episodeIds: z.array(z.string()).describe("Episode IDs in track order."),
+      })).optional(),
+    },
+    annotations: write({ idempotent: true }),
+  }, async (input) => {
+    const data = await serializeMutation(context, () => saveAlbum(context, input));
+    return result(`Saved ${albumSummary(data)}`, data);
+  });
+
+  tool("get_album", {
+    title: "Get album",
+    description: "An album with its editions and their tracks (episode ID, name, status, audioReady) in order.",
+    inputSchema: { id: id("Album") },
+    annotations: READ,
+  }, async ({ id: albumId }) => {
+    const album = (await readAlbums(paths)).find((item) => item.id === albumId);
+    if (!album) throw notFound("Album not found.");
+    const data = await albumView(paths, album);
+    return result(albumSummary(data), data);
+  });
+
+  tool("delete_album", {
+    title: "Delete album",
+    description: "Delete an album and its cover. Its episodes and their audio are kept; their MP3s lose the album tags.",
+    inputSchema: { id: id("Album") },
+    annotations: write({ destructive: true, idempotent: true }),
+  }, async ({ id: albumId }) => {
+    const data = await serializeMutation(context, () => deleteAlbum(context, albumId));
+    return result(`Deleted album ${albumId}; its episodes are kept.${data.warnings.length ? ` Warnings: ${data.warnings.join(" ")}` : ""}`, data);
+  });
+
+  tool("set_album_cover", {
+    title: "Set album cover",
+    description: `Set an album cover from a PNG or JPEG image the user supplied (imageBase64 + mimeType, at most ${MAX_COVER_BYTES / 1024 / 1024} MB decoded), or remove it (remove: true). Rendered MP3s of the album get the cover as attached picture.`,
+    inputSchema: {
+      albumId: id("Album"),
+      imageBase64: z.string().max(Math.ceil(MAX_COVER_BYTES / 3) * 4 + 4).optional().describe("Base64 image data."),
+      mimeType: z.enum(["image/png", "image/jpeg"]).optional(),
+      remove: z.boolean().optional(),
+    },
+    annotations: write({ idempotent: true }),
+  }, async ({ albumId, imageBase64, mimeType, remove }) => {
+    if (remove ? imageBase64 !== undefined : imageBase64 === undefined || !mimeType) throw new Error("Give imageBase64 and mimeType, or remove: true.");
+    const bytes = remove ? null : Buffer.from(imageBase64, "base64");
+    const data = await serializeMutation(context, () => setAlbumCover(context, albumId, bytes, mimeType));
+    return result(`${remove ? "Removed the cover of" : "Set the cover of"} ${albumSummary(data)}`, data);
   });
 
   tool("jev_decide", {

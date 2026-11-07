@@ -4,6 +4,10 @@ import {
   readFile,
 } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
+import { spawn } from "node:child_process";
+
+const FFMPEG_TIMEOUT_MS = 900_000;
+const PROCESS_KILL_SIGNAL = "SIGKILL";
 
 // Names whose process.env value came from the config-dir .env (loaded or saved through Settings).
 // A replacement daemon must re-read the file instead of inheriting these values.
@@ -215,4 +219,25 @@ function parseByteRange(value, size) {
     end = Math.min(end, size - 1);
   }
   return { start, end, partial: true };
+}
+
+export async function runProcess(command, args, timeoutMs = FFMPEG_TIMEOUT_MS) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    // Not spawn({ timeout }): a spawn that fails with ENOENT never emits "exit", so Node keeps its
+    // own timer armed for the whole timeout and pins the event loop.
+    const timer = setTimeout(() => { timedOut = true; child.kill(PROCESS_KILL_SIGNAL); }, timeoutMs).unref();
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) resolvePromise(stdout);
+      else if (timedOut) reject(new Error(`${command} timed out after ${timeoutMs} ms and was stopped with ${signal || PROCESS_KILL_SIGNAL}: ${stderr.trim()}`));
+      else reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
+    });
+  });
 }

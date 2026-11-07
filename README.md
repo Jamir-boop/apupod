@@ -18,7 +18,7 @@ In the Andes, an *apu* is a "lord": the spirit of a mountain that watches over t
 
 ## Install
 
-Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.3.0 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. If the running daemon is older than the bridge (for example after a plugin update) and no TTS job is queued or running, the bridge replaces it with the new version; a busy daemon is kept until a later connect. You do not need a clone or a server that you start yourself.
+Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.4.0 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. If the running daemon is older than the bridge (for example after a plugin update) and no TTS job is queued or running, the bridge replaces it with the new version; a busy daemon is kept until a later connect. You do not need a clone or a server that you start yourself.
 
 The UI **Settings** view shows these commands with copy buttons, and shows when each harness last connected.
 
@@ -57,7 +57,7 @@ Add the MCP server to `opencode.json` (project) or `~/.config/opencode/opencode.
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.3.0", "mcp"]
+        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.4.0", "mcp"]
       }
     }
   },
@@ -98,7 +98,7 @@ apupod refuses a port change or an update while a TTS job is queued or running. 
 
 apupod never depends on the current directory.
 
-- Data dir: `$APUPOD_DATA_DIR`, else `$XDG_DATA_HOME/apupod`, else `~/.local/share/apupod`. It holds `profiles.json` (host profiles and Episode Formats), `plans/`, `knowledge/` (Markdown knowledge bases), `episodes/` (scripts, audio, clip cache), `previews/` (voice previews, removed after one hour), and `runtime/` (apupod versions that Settings > Update installed).
+- Data dir: `$APUPOD_DATA_DIR`, else `$XDG_DATA_HOME/apupod`, else `~/.local/share/apupod`. It holds `profiles.json` (host profiles and Episode Formats), `albums.json` and `albums/` (albums and covers), `plans/`, `knowledge/` (Markdown knowledge bases), `episodes/` (scripts, audio, clip cache), `previews/` (voice previews, removed after one hour), and `runtime/` (apupod versions that Settings > Update installed).
 - Config dir: `$APUPOD_CONFIG_DIR`, else `$XDG_CONFIG_HOME/apupod`, else `~/.config/apupod`. It holds `config.json` (TTS connections, no secrets), `.env` (keys), `mcp-token` (the bridge bearer token), `daemon.json` (PID and URL of the running daemon), and `daemon.log`.
 
 The `data/` folder in this repository is an archive of the old app. apupod does not read it.
@@ -114,9 +114,14 @@ Ask your agent for a podcast. The `apupod` skill guides it through these steps:
 5. Create the episode drafts: `create_episodes`.
 6. Write each script: `get_script_rules`, then `save_script` (skill `apupod-script`).
 7. Render the audio: `render_audio`, then follow it with `get_job`.
-8. Listen in the chat (where the host shows widgets) or in the UI Player.
+8. Group a series into an album (optional): `save_album`.
+9. Listen in the chat (where the host shows widgets) or in the UI Player.
 
 Example prompts: "Use apupod to make a 3-episode podcast about the history of coffee, with two hosts." "Write and render the next apupod episode."
+
+## Albums
+
+An album groups episodes in track order. Each language has one edition of the same album: for example, "Spill the Prompt" with an English edition (en-US) and a Spanish edition (es-419) of the same episodes. An episode is in at most one album edition, and its Episode Format language must match the edition language. apupod writes ID3 tags (title, album, track, artist, language, genre, cover) into the rendered MP3s with an FFmpeg stream copy, and updates them when the album changes. Deleting an album keeps its episodes and audio. Albums are saved in `albums.json` in the data dir, covers in `albums/<id>/`.
 
 ## Tools
 
@@ -148,6 +153,10 @@ Example prompts: "Use apupod to make a 3-episode podcast about the history of co
 | `rename_episode` | Renames an episode. |
 | `apply_latest_profiles` | Refreshes an episode's snapshot of its Episode Format and host profile from the saved profiles. |
 | `delete_episode` | Deletes an episode with its script and audio. |
+| `save_album` | Creates or updates an album: title, description, and one edition per language with episodes in track order. Re-tags the rendered MP3s. |
+| `get_album` | Reads an album with its editions and tracks. |
+| `delete_album` | Deletes an album and its cover; its episodes and audio stay. |
+| `set_album_cover` | Sets (PNG or JPEG, at most 2 MB) or removes an album cover. |
 | `jev_decide` | Optional TypeSafe Jev check that picks configuration values only from the live workspace options. Saves nothing. |
 
 ## Widgets

@@ -262,6 +262,11 @@
     .episode-more[open] > summary, .player-more[open] > summary, .speaker-advanced[open] > summary { margin-bottom: 10px; color: var(--text); }
     .episode-more { flex: 1 1 100%; padding-top: 8px; border-top: 1px solid var(--line); }
     .episode-more .episode-row-actions { padding-top: 2px; }
+    .album-group { display: grid; gap: 8px; }
+    .album-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+    .album-head h4 { margin: 0; }
+    .album-cover { width: 56px; height: 56px; object-fit: cover; border: 1px solid var(--line-strong); border-radius: 2px; }
+    .album-edition { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
     .episode-group-title { margin: 14px 0 4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
     #episodeSettings { margin: 10px 0; padding: 10px; border: 1px solid var(--line); background: var(--surface); }
     #episodeSettings summary { cursor: pointer; font-weight: 700; color: var(--muted); }
@@ -745,6 +750,7 @@
           <section class="panel">
             <h3>Rendered Episodes</h3>
             <div id="playerLibrary" class="player-list"><p class="muted">Loading rendered episodes…</p></div>
+            <input id="albumCoverFile" type="file" accept="image/png,image/jpeg" aria-label="Album cover image (PNG or JPEG, at most 2 MB)" hidden>
           </section>
           <section class="panel">
             <div class="view-header"><div><h3>Up Next</h3><p class="muted">Upcoming episodes only.</p></div><button id="clearPlayerQueue" type="button" class="icon-btn" title="Clear queue" aria-label="Clear queue" disabled><svg class="icon" aria-hidden="true"><use href="#i-list-x"/></svg></button></div>
@@ -792,7 +798,7 @@ codex plugin add apupod@apupod</code></pre>
     &quot;servers&quot;: {
       &quot;apupod&quot;: {
         &quot;type&quot;: &quot;local&quot;,
-        &quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;github:Jamir-boop/apupod#v1.3.0&quot;, &quot;mcp&quot;]
+        &quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;github:Jamir-boop/apupod#v1.4.0&quot;, &quot;mcp&quot;]
       }
     }
   }
@@ -2349,6 +2355,8 @@ codex plugin add apupod@apupod</code></pre>
       const job = jobsState.jobs.find((item) => item.episodeId === episode.id && ["queued", "running"].includes(item.status));
       const scriptChip = episode.transcriptWords > 0 ? `<span class="episode-chip done">Script${icon("check")}<span class="sr-only"> ready</span></span>` : `<span class="episode-chip">Script${icon("minus")}<span class="sr-only"> not ready</span></span>`;
       const audioChip = job?.type === "tts" ? '<span class="episode-chip running">Audio: rendering…</span>' : episode.audioReady ? `<span class="episode-chip done">Audio${icon("check")}<span class="sr-only"> ready</span></span>` : `<span class="episode-chip">Audio${icon("minus")}<span class="sr-only"> not ready</span></span>`;
+      const inAlbum = episodeAlbum(episode.id);
+      const albumChip = inAlbum ? `<span class="episode-chip">${escapeHtml(`Album: ${editionLabel(inAlbum.album, inAlbum.edition)}, track ${inAlbum.track}`)}</span>` : "";
       const format = state.profiles.episodeProfiles.find((item) => item.id === episode.episodeProfileId);
       const hostId = episode.speakerProfileId || format?.speakerProfileId || "";
       const hostOptions = state.profiles.speakerProfiles.map((item) => option(item.id, item.name, item.id === hostId)).join("");
@@ -2356,7 +2364,7 @@ codex plugin add apupod@apupod</code></pre>
         ? `<button class="primary" data-play-episode="${escapeHtml(episode.id)}">${icon("play")}Play</button>`
         : `<button class="primary" data-open-episode="${escapeHtml(episode.id)}">${icon("external-link")}Open script</button>`;
       return `<div class="episode-row" data-episode-row="${escapeHtml(episode.id)}">
-        <div class="episode-row-head"><h3>${escapeHtml(label)}</h3><div class="episode-row-chips">${scriptChip}${audioChip}</div><div class="episode-primary">${primary}</div></div>
+        <div class="episode-row-head"><h3>${escapeHtml(label)}</h3><div class="episode-row-chips">${scriptChip}${audioChip}${albumChip}</div><div class="episode-primary">${primary}</div></div>
         <details class="episode-more"><summary>Hosts and more actions</summary><div class="episode-row-actions">
           <label>Hosts<select data-episode-host="${escapeHtml(episode.id)}"${job ? " disabled" : ""}>${hostOptions}</select></label>
           <div class="actions"><button class="icon-btn" data-open-episode="${escapeHtml(episode.id)}" title="Open script" aria-label="Open ${escapeHtml(label)}">${icon("external-link")}</button>${episode.audioReady ? `<button class="icon-btn" data-play-episode="${escapeHtml(episode.id)}" title="Play" aria-label="Play ${escapeHtml(label)}">${icon("play")}</button>` : ""}<button class="danger icon-btn" data-delete-episode="${escapeHtml(episode.id)}" title="Delete episode" aria-label="Delete ${escapeHtml(label)}"${job ? " disabled" : ""}>${icon("trash-2")}</button></div>
@@ -2902,6 +2910,106 @@ codex plugin add apupod@apupod</code></pre>
       $("bottomPlayerSpeed").value = speed;
     }
 
+    function playerRowHtml(episode, label = episode.name, extraActions = "") {
+      const audio = $("playerAudio");
+      const current = episode.id === playingEpisodeId;
+      const queued = playerQueue.includes(episode.id);
+      const date = episode.updatedAt ? ` - Updated ${new Date(episode.updatedAt).toLocaleString()}` : "";
+      const detail = `${episode.episodeProfile?.name || "Rendered episode"}${date}`;
+      const playing = current && !audio.paused;
+      const audioUrl = episode.audioUrl || `/artifacts/${encodeURIComponent(episode.id)}/episode.mp3`;
+      return `<div class="player-row"><div><strong>${escapeHtml(label)}</strong><br><span class="muted">${escapeHtml(detail)}</span></div><div class="player-primary"><button type="button" class="primary" data-play-episode="${escapeHtml(episode.id)}"${playing ? " disabled" : ""}>${icon(playing ? "audio-lines" : "play")}${playing ? "Playing" : current ? "Resume" : "Play"}</button></div><details class="player-more"><summary>More actions</summary><div class="player-row-actions"><button type="button" class="icon-btn" data-rename-episode="${escapeHtml(episode.id)}" title="Rename" aria-label="Rename ${escapeHtml(episode.name)}">${icon("pencil")}</button><button type="button" class="icon-btn" data-queue-episode="${escapeHtml(episode.id)}" title="${current ? "Current" : queued ? "Queued" : "Add to queue"}" aria-label="Queue ${escapeHtml(episode.name)}"${current || queued ? " disabled" : ""}>${icon("list-plus")}</button><a class="icon-btn" download href="${escapeHtml(audioUrl)}" title="Download MP3" aria-label="Download ${escapeHtml(episode.name)}">${icon("download")}</a>${extraActions}</div></details></div>`;
+    }
+
+    // The album, edition, and track number of an episode, or null.
+    function episodeAlbum(episodeId) {
+      for (const album of state?.albums || []) {
+        for (const edition of album.editions) {
+          const index = edition.episodeIds.indexOf(episodeId);
+          if (index >= 0) return { album, edition, track: index + 1 };
+        }
+      }
+      return null;
+    }
+
+    function editionLabel(album, edition) {
+      return `${languageById(edition.language)?.name || edition.language}: ${edition.title || album.title}`;
+    }
+
+    // Albums first (editions per language, tracks in order), then rendered episodes in no album.
+    function playerLibraryHtml(episodes) {
+      const ready = new Map(episodes.map((episode) => [episode.id, episode]));
+      const inAlbum = new Set();
+      const parts = [];
+      for (const album of state?.albums || []) {
+        album.editions.forEach((edition) => edition.episodeIds.forEach((id) => inAlbum.add(id)));
+        const editions = album.editions.map((edition) => ({ edition, tracks: edition.episodeIds.map((id, index) => ({ episode: ready.get(id), track: index + 1 })).filter((item) => item.episode) })).filter((item) => item.tracks.length);
+        if (!editions.length) continue;
+        const albumId = escapeHtml(album.id);
+        const cover = album.cover ? `<img class="album-cover" src="/api/albums/${encodeURIComponent(album.id)}/cover?v=${encodeURIComponent(album.revision)}" alt="Cover of ${escapeHtml(album.title)}">` : "";
+        const actions = `<details class="player-more"><summary>Album actions</summary><div class="player-row-actions"><button type="button" class="icon-btn" data-rename-album="${albumId}" title="Rename album" aria-label="Rename album ${escapeHtml(album.title)}">${icon("pencil")}</button><button type="button" class="icon-btn" data-upload-cover="${albumId}" title="Upload cover" aria-label="Upload cover for ${escapeHtml(album.title)}">${icon("upload")}</button>${album.cover ? `<button type="button" class="danger icon-btn" data-remove-cover="${albumId}" title="Remove cover" aria-label="Remove cover of ${escapeHtml(album.title)}">${icon("x")}</button>` : ""}</div></details>`;
+        parts.push(`<section class="album-group" aria-label="Album ${escapeHtml(album.title)}"><div class="album-head">${cover}<h4>${escapeHtml(album.title)}</h4>${actions}</div>${editions.map(({ edition, tracks }) => `<div class="album-edition"><div class="episode-group-title">${escapeHtml(editionLabel(album, edition))}</div><button type="button" data-play-edition="${albumId}" data-language="${escapeHtml(edition.language)}">${icon("play")}Play edition</button></div>${tracks.map(({ episode, track }) => playerRowHtml(episode, `${track}. ${episode.name}`, `<button type="button" class="danger icon-btn" data-remove-from-edition="${escapeHtml(episode.id)}" title="Remove from album" aria-label="Remove ${escapeHtml(episode.name)} from ${escapeHtml(editionLabel(album, edition))}">${icon("list-x")}</button>`)).join("")}`).join("")}</section>`);
+      }
+      const others = episodes.filter((episode) => !inAlbum.has(episode.id));
+      if (others.length && parts.length) parts.push('<div class="episode-group-title">Other episodes</div>');
+      parts.push(...others.map((episode) => playerRowHtml(episode)));
+      return parts.join("");
+    }
+
+    async function playEdition(albumId, language) {
+      const edition = state.albums.find((item) => item.id === albumId)?.editions.find((item) => item.language === language);
+      const ready = new Set(renderedEpisodes().map((episode) => episode.id));
+      const ids = (edition?.episodeIds || []).filter((id) => ready.has(id));
+      if (!ids.length) throw new Error("The edition has no rendered episodes.");
+      playerQueue = ids.slice(1);
+      await playEpisode(ids[0]);
+    }
+
+    async function saveAlbumChange(albumId, change, message) {
+      const album = state.albums.find((item) => item.id === albumId);
+      if (!album) throw new Error("Album is unavailable.");
+      const body = change(structuredClone(album));
+      if (!body) return;
+      const saved = await api(`/api/albums/${encodeURIComponent(albumId)}`, { method: "PUT", body: JSON.stringify({ ...body, expectedRevision: album.revision }) });
+      await refreshState();
+      notify([message, ...(saved.warnings || [])].join(" "), saved.warnings?.length ? "warning" : "ok");
+    }
+
+    function renameAlbum(albumId) {
+      return saveAlbumChange(albumId, (album) => {
+        const title = prompt("Album title", album.title)?.trim();
+        return title && title !== album.title ? { title } : null;
+      }, "Album renamed.");
+    }
+
+    function removeFromEdition(episodeId) {
+      const found = episodeAlbum(episodeId);
+      if (!found) return;
+      const name = playerEpisode(episodeId)?.name || "this episode";
+      if (!confirm(`Remove "${name}" from ${editionLabel(found.album, found.edition)}? The episode and its audio stay.`)) return;
+      return saveAlbumChange(found.album.id, (album) => ({ editions: album.editions.map((edition) => ({ ...edition, episodeIds: edition.episodeIds.filter((id) => id !== episodeId) })) }), "Episode removed from the album.");
+    }
+
+    async function uploadAlbumCover() {
+      const input = $("albumCoverFile");
+      const file = input.files?.[0];
+      const albumId = input.dataset.albumId;
+      input.value = "";
+      if (!file || !albumId) return;
+      if (!["image/png", "image/jpeg"].includes(file.type)) throw new Error("The cover must be a PNG or JPEG image.");
+      if (file.size > 2 * 1024 * 1024) throw new Error("The cover image exceeds 2 MB.");
+      const saved = await api(`/api/albums/${encodeURIComponent(albumId)}/cover`, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+      await refreshState();
+      notify(["Album cover saved.", ...(saved.warnings || [])].join(" "), saved.warnings?.length ? "warning" : "ok");
+    }
+
+    async function removeAlbumCover(albumId) {
+      if (!confirm("Remove the album cover?")) return;
+      const saved = await api(`/api/albums/${encodeURIComponent(albumId)}/cover`, { method: "DELETE" });
+      await refreshState();
+      notify(["Album cover removed.", ...(saved.warnings || [])].join(" "), saved.warnings?.length ? "warning" : "ok");
+    }
+
     function renderPlayer() {
       sanitizePlayerQueue();
       const episodes = renderedEpisodes();
@@ -2911,15 +3019,7 @@ codex plugin add apupod@apupod</code></pre>
       $("playerReady").innerHTML = latest && !playingEpisodeId ? `<div><strong>Your latest episode is ready</strong><span>${escapeHtml(latest.name)}</span></div><button type="button" class="primary" data-play-episode="${escapeHtml(latest.id)}">${icon("play")}Play episode</button>` : "";
       $("playerLibrary").innerHTML = !state
         ? '<p class="muted">Loading rendered episodes…</p>'
-        : episodes.length ? episodes.map((episode) => {
-          const current = episode.id === playingEpisodeId;
-          const queued = playerQueue.includes(episode.id);
-          const date = episode.updatedAt ? ` - Updated ${new Date(episode.updatedAt).toLocaleString()}` : "";
-          const detail = `${episode.episodeProfile?.name || "Rendered episode"}${date}`;
-          const playing = current && !audio.paused;
-          const audioUrl = episode.audioUrl || `/artifacts/${encodeURIComponent(episode.id)}/episode.mp3`;
-          return `<div class="player-row"><div><strong>${escapeHtml(episode.name)}</strong><br><span class="muted">${escapeHtml(detail)}</span></div><div class="player-primary"><button type="button" class="primary" data-play-episode="${escapeHtml(episode.id)}"${playing ? " disabled" : ""}>${icon(playing ? "audio-lines" : "play")}${playing ? "Playing" : current ? "Resume" : "Play"}</button></div><details class="player-more"><summary>More actions</summary><div class="player-row-actions"><button type="button" class="icon-btn" data-rename-episode="${escapeHtml(episode.id)}" title="Rename" aria-label="Rename ${escapeHtml(episode.name)}">${icon("pencil")}</button><button type="button" class="icon-btn" data-queue-episode="${escapeHtml(episode.id)}" title="${current ? "Current" : queued ? "Queued" : "Add to queue"}" aria-label="Queue ${escapeHtml(episode.name)}"${current || queued ? " disabled" : ""}>${icon("list-plus")}</button><a class="icon-btn" download href="${escapeHtml(audioUrl)}" title="Download MP3" aria-label="Download ${escapeHtml(episode.name)}">${icon("download")}</a></div></details></div>`;
-        }).join("") : '<p class="muted">No rendered episodes yet. <a href="#tts">Open TTS Generator</a> to render one.</p>';
+        : episodes.length ? playerLibraryHtml(episodes) : '<p class="muted">No rendered episodes yet. <a href="#tts">Open TTS Generator</a> to render one.</p>';
       $("playerQueue").innerHTML = playerQueue.length ? playerQueue.map((id, index) => {
         const episode = playerEpisode(id);
         return `<div class="player-row"><div><strong>${index + 1}. ${escapeHtml(episode.name)}</strong></div><div class="player-row-actions"><button type="button" class="icon-btn" data-move-queued="${escapeHtml(id)}" data-offset="-1" title="Move up" aria-label="Move ${escapeHtml(episode.name)} up"${index === 0 ? " disabled" : ""}>${icon("chevron-up")}</button><button type="button" class="icon-btn" data-move-queued="${escapeHtml(id)}" data-offset="1" title="Move down" aria-label="Move ${escapeHtml(episode.name)} down"${index === playerQueue.length - 1 ? " disabled" : ""}>${icon("chevron-down")}</button><button type="button" class="icon-btn" data-remove-queued="${escapeHtml(id)}" title="Remove from queue" aria-label="Remove ${escapeHtml(episode.name)} from queue">${icon("x")}</button></div></div>`;
@@ -3278,6 +3378,7 @@ codex plugin add apupod@apupod</code></pre>
     });
     $("uploadKnowledge").addEventListener("click", () => $("knowledgeFile").click());
     $("knowledgeFile").addEventListener("change", guard(uploadKnowledge));
+    $("albumCoverFile").addEventListener("change", guard(uploadAlbumCover));
     $("saveEpisodeSettings").addEventListener("click", guard(saveEpisodeSettings));
     $("buildEpisodeProfile").addEventListener("change", () => renderEpisodeSettingsFields());
     $("episodeList").addEventListener("click", (event) => {
@@ -3338,6 +3439,19 @@ codex plugin add apupod@apupod</code></pre>
       if (rename) return renameRenderedEpisode(rename.dataset.renameEpisode);
       const play = event.target.closest("[data-play-episode]");
       if (play) return playEpisode(play.dataset.playEpisode);
+      const edition = event.target.closest("[data-play-edition]");
+      if (edition) return playEdition(edition.dataset.playEdition, edition.dataset.language);
+      const renameAlbumButton = event.target.closest("[data-rename-album]");
+      if (renameAlbumButton) return renameAlbum(renameAlbumButton.dataset.renameAlbum);
+      const upload = event.target.closest("[data-upload-cover]");
+      if (upload) {
+        $("albumCoverFile").dataset.albumId = upload.dataset.uploadCover;
+        return $("albumCoverFile").click();
+      }
+      const removeCover = event.target.closest("[data-remove-cover]");
+      if (removeCover) return removeAlbumCover(removeCover.dataset.removeCover);
+      const leave = event.target.closest("[data-remove-from-edition]");
+      if (leave) return removeFromEdition(leave.dataset.removeFromEdition);
       const queue = event.target.closest("[data-queue-episode]");
       if (queue) return queueEpisode(queue.dataset.queueEpisode);
       const move = event.target.closest("[data-move-queued]");

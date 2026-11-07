@@ -472,7 +472,7 @@ test("the job poll does not rebuild an unchanged episode list or Activity panel 
   const context = { state: { episodes: [episode], profiles: { episodeProfiles: [{ id: "f" }], speakerProfiles: [{ id: "s", name: "Hosts" }] } }, activePlan: null,
     jobsState: { jobs: [{ id: "j1", episodeId: "e1", type: "transcript", status: "running", message: "1%" }] }, startingEpisodeIds: new Set(), lastEpisodeListHtml: "", lastServerActivityHtml: "",
     document: { activeElement: null, querySelectorAll: () => [] }, CSS: { escape: (value) => value }, $: (id) => id === "serverActivity" ? activity : list };
-  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "renderEpisodeList", "activeJobs", "renderServerActivity"], context);
+  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "episodeAlbum", "editionLabel", "renderEpisodeList", "activeJobs", "renderServerActivity"], context);
   context.renderEpisodeList();
   context.jobsState.jobs[0].message = "2%";
   context.renderEpisodeList();
@@ -545,7 +545,7 @@ test("a real episode list change keeps open row menus and refocuses the same row
     if (selector.endsWith("details.episode-more")) return { setAttribute: (name) => opened.push([selector, name]) };
     return { disabled: false, focus: () => { focused = selector; } };
   };
-  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "renderEpisodeList"], context);
+  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "episodeAlbum", "editionLabel", "renderEpisodeList"], context);
   context.renderEpisodeList();
   assert.equal(list.writes, 1);
   assert.deepEqual(opened, [['[data-episode-row="e1"] details.episode-more', "open"]]);
@@ -565,7 +565,7 @@ test("a rebuilt episode list refocuses the same control when several in the row 
   list.contains = () => true;
   list.querySelectorAll = (selector) => selector === '[data-episode-row="e1"] [data-open-episode]' ? (list.writes ? after : before) : [];
   list.querySelector = () => null;
-  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "renderEpisodeList"], context);
+  install(["option", "escapeHtml", "icon", "planEpisodeRows", "episodeRowHtml", "episodeAlbum", "editionLabel", "renderEpisodeList"], context);
   context.renderEpisodeList();
   assert.equal(list.writes, 1);
   assert.equal(focused, "new more-open");
@@ -745,9 +745,12 @@ test("notifications and toasts add and remove single nodes in their live regions
 
 test("episode chips, removal confirms, and the shared accent list", () => {
   const context = { state: { profiles: { episodeProfiles: [], speakerProfiles: [] } }, jobsState: { jobs: [] }, startingEpisodeIds: new Set() };
-  install(["option", "escapeHtml", "icon", "episodeRowHtml"], context);
+  install(["option", "escapeHtml", "icon", "episodeRowHtml", "episodeAlbum", "editionLabel"], context);
   assert.match(context.episodeRowHtml({ id: "e", transcriptWords: 0 }, "E"), /Script<svg[^]*?<\/svg><span class="sr-only"> not ready<\/span>/);
   assert.match(context.episodeRowHtml({ id: "e", transcriptWords: 9, audioReady: true }, "E"), /Script<svg[^]*?<\/svg><span class="sr-only"> ready<\/span>[^]*Audio<svg[^]*?<\/svg><span class="sr-only"> ready<\/span>/);
+  context.languageById = (id) => ({ "es-419": { name: "Spanish (Latin America)" } })[id];
+  context.state.albums = [{ id: "a", title: "Spill <the> Prompt", editions: [{ language: "es-419", title: "", episodeIds: ["x", "e"] }] }];
+  assert.match(context.episodeRowHtml({ id: "e", transcriptWords: 0 }, "E"), /<span class="episode-chip">Album: Spanish \(Latin America\): Spill &lt;the&gt; Prompt, track 2<\/span>/, "the album chip is text, escaped");
 
   const profile = { id: "s", speakers: [{ name: "Ana" }, { name: "Ben" }] };
   const speakers = { activeSpeakerProfileId: "s", activeSpeakerIndex: 0, state: { profiles: { speakerProfiles: [profile] } }, syncSpeakerForm: noop, confirm: () => false };

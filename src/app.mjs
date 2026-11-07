@@ -20,6 +20,7 @@ import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanRes
 import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTtsJob, ensureFfmpeg, previewVoice, runProcess } from "./jobs.mjs";
 import { handleMcpRequest, readWorkspaceState } from "./mcp.mjs";
 import { handleSystemRequest, restartDaemon, writeMcpToken } from "./system.mjs";
+import { handleAlbumRequest } from "./albums.mjs";
 export { validateProfileData, transcriptSpeakerRule, parseTranscript } from "./episodes.mjs";
 export { clipCacheKey, writeAudioAsWav, runProcess } from "./jobs.mjs";
 
@@ -129,6 +130,8 @@ function makePaths({ rootDir, dataDir, configDir }) {
     knowledgeIndex: join(data, "knowledge", "index.json"),
     plans: join(data, "plans"),
     plansIndex: join(data, "plans", "index.json"),
+    albums: join(data, "albums.json"),
+    albumCovers: join(data, "albums"),
     episodes: join(data, "episodes"),
     previews: join(data, "previews"),
     mcpToken: join(config, "mcp-token"),
@@ -158,6 +161,7 @@ async function ensureData(paths) {
     quarantineCorruptJson(paths.config),
     quarantineCorruptJson(paths.knowledgeIndex, Array.isArray),
     quarantineCorruptJson(paths.plansIndex, Array.isArray),
+    quarantineCorruptJson(paths.albums, Array.isArray),
   ]);
   if (!(await exists(paths.profiles))) {
     await writeJsonAtomic(paths.profiles, { ...DEFAULT_DATA, updatedAt: nextUpdatedAt() });
@@ -284,6 +288,8 @@ async function routeRequest(req, res, context) {
     assertSafeId(speakerMatch[1]);
     return serializeMutation(context, () => deleteSpeakerProfileRequest(res, context, speakerMatch[1]));
   }
+
+  if (path === "/api/albums" || path.startsWith("/api/albums/")) return handleAlbumRequest(req, res, context, method, path);
 
   const plannedEpisodeMatch = path.match(/^\/api\/plans\/([a-zA-Z0-9_-]+)\/episodes\/([a-zA-Z0-9_-]+)$/);
   if (plannedEpisodeMatch && method === "DELETE") {
