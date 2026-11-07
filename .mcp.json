@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "apupod": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/apupod.mjs", "mcp"]
+      "command": "npx",
+      "args": ["-y", "apupod@1.1.0", "mcp"]
     }
   }
 }

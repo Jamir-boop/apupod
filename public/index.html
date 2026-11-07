@@ -178,6 +178,23 @@
     .connection-head strong { overflow-wrap: anywhere; }
     .connection-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .config-status { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
+    .system-label { margin: 18px 0 8px; color: var(--muted); font: 700 11px/1.2 ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .system-checklist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+    .system-checklist li { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .system-checklist li > span:nth-child(2) { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+    .system-checklist small { color: var(--muted); font-size: 12px; }
+    .status-pill.warning { color: var(--accent); border-color: var(--accent); border-style: dotted; }
+    .system-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 12px 0 0; font-size: 12px; }
+    .system-facts dt { color: var(--muted); }
+    .system-facts dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+    .harness-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+    .harness { display: grid; gap: 8px; align-content: start; padding: 10px; border: 1px solid var(--line); background: var(--surface); }
+    .harness h5, #mcpClientsTitle { margin: 0; font-size: 13px; }
+    #mcpClientsTitle { margin: 14px 0 6px; }
+    .harness pre, .update-log { margin: 0; padding: 8px; overflow: auto; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 2px; font: 12px/1.45 ui-monospace, monospace; white-space: pre; }
+    .update-log { max-height: 220px; margin-top: 10px; white-space: pre-wrap; }
+    .harness > button { justify-self: start; }
+    @media (max-width: 820px) { .system-checklist li { grid-template-columns: 1fr; } }
     dialog { width: min(720px, calc(100% - 32px)); max-height: 86vh; padding: 0; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); }
     dialog::backdrop { background: var(--overlay); }
     .dialog-body { display: grid; gap: 10px; padding: 14px; }
@@ -747,6 +764,55 @@
           <div class="actions"><button id="saveConfig" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg>Save config</button></div>
         </div>
         <div class="view-body">
+        <section id="systemPanel" class="panel" aria-labelledby="systemTitle">
+          <div class="provider-head"><h3 id="systemTitle">System</h3><button id="systemRefresh" type="button" class="icon-btn" title="Check again" aria-label="Check system again"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg></button></div>
+          <p id="systemStatus" class="muted" role="status" aria-live="polite">Loading system status…</p>
+          <h4 id="systemChecklistTitle" class="system-label">Setup checklist</h4>
+          <ul id="systemChecklist" class="system-checklist" aria-labelledby="systemChecklistTitle"></ul>
+          <dl id="systemFacts" class="system-facts"></dl>
+          <h4 class="system-label">Connect harnesses</h4>
+          <div class="harness-list">
+            <section class="harness" aria-labelledby="harnessClaudeTitle">
+              <h5 id="harnessClaudeTitle">Claude Code CLI and Claude desktop</h5>
+              <pre id="harnessClaude"><code>claude plugin marketplace add Jamir-boop/apupod
+claude plugin install apupod@apupod</code></pre>
+              <button type="button" data-copy="harnessClaude"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>Copy commands</button>
+            </section>
+            <section class="harness" aria-labelledby="harnessCodexTitle">
+              <h5 id="harnessCodexTitle">ChatGPT desktop app and Codex CLI</h5>
+              <pre id="harnessCodex"><code>codex plugin marketplace add Jamir-boop/apupod
+codex plugin add apupod@apupod</code></pre>
+              <button type="button" data-copy="harnessCodex"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>Copy commands</button>
+            </section>
+            <section class="harness" aria-labelledby="harnessOpenCodeTitle">
+              <h5 id="harnessOpenCodeTitle">OpenCode (opencode.json)</h5>
+              <pre id="harnessOpenCode"><code>{
+  &quot;$schema&quot;: &quot;https://opencode.ai/config.json&quot;,
+  &quot;mcp&quot;: {
+    &quot;servers&quot;: {
+      &quot;apupod&quot;: {
+        &quot;type&quot;: &quot;local&quot;,
+        &quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;apupod@1.1.0&quot;, &quot;mcp&quot;]
+      }
+    }
+  }
+}</code></pre>
+              <button type="button" data-copy="harnessOpenCode"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>Copy snippet</button>
+            </section>
+          </div>
+          <h5 id="mcpClientsTitle">MCP connections</h5>
+          <ul id="mcpClients" class="system-checklist" aria-labelledby="mcpClientsTitle"></ul>
+          <h4 class="system-label">Port and MCP token</h4>
+          <div class="grid">
+            <label>Daemon port<input id="systemPort" type="number" min="1024" max="65535" step="1" inputmode="numeric" aria-describedby="systemPortHelp"></label>
+          </div>
+          <p id="systemPortHelp" class="muted">From 1024 to 65535. apupod restarts on the new port, and this page opens the new address. Running bridges reconnect by themselves.</p>
+          <div class="actions"><button id="changePort" type="button"><svg class="icon" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Change port</button><button id="rotateMcpToken" type="button" class="danger"><svg class="icon" aria-hidden="true"><use href="#i-key-round"/></svg>New MCP token</button></div>
+          <h4 class="system-label">Update</h4>
+          <p id="updateSummary" class="muted"></p>
+          <div class="actions"><button id="checkUpdate" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Check for updates</button><button id="runUpdate" type="button" class="primary" disabled><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Update apupod</button></div>
+          <pre id="updateLog" class="update-log" tabindex="0" aria-label="Update log" hidden></pre>
+        </section>
         <section class="panel">
           <div class="model-refresh-row"><div id="configModelStatus" class="model-status" role="status" aria-live="polite"></div><button id="configRefreshModels" class="icon-btn" title="Refresh models" aria-label="Refresh models"><svg class="icon" aria-hidden="true"><use href="#i-refresh-cw"/></svg></button></div>
           <div id="configProviders"></div>
@@ -830,6 +896,9 @@
     let jobsState = { activeJobId: null, jobs: [] };
     let currentEpisode = null;
     let configState = null;
+    let systemState = null;
+    let updatePollTimer = null;
+    let updatePollsLeft = 0;
     let activeSpeakerProfileId = viewSelections.speakerProfileId || "";
     let activeEpisodeProfileId = viewSelections.episodeProfileId || "";
     let formatFormId = "";
@@ -1141,7 +1210,7 @@
       if (selected === "transcript") renderTranscriptSections();
       if (selected === "tts") renderTtsView();
       if (selected === "player") renderPlayer();
-      if (selected === "config") renderConfigView();
+      if (selected === "config") { renderConfigView(); loadSystem(); }
       if (selected === "format") renderFormatView();
       if (selected === "episodes") renderEpisodeList();
       renderWorkspace();
@@ -1609,6 +1678,128 @@
       ].join("");
       renderModelStatus();
       updateSaveButtons();
+    }
+
+    // Settings > System: setup checklist, harness connections, port and MCP token, and updates (GET /api/system).
+    function timeAgo(iso, now = Date.now()) {
+      const seconds = Math.round((now - Date.parse(iso)) / 1000);
+      if (!Number.isFinite(seconds)) return "";
+      if (seconds < 60) return "just now";
+      if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
+      if (seconds < 86400) return `${Math.round(seconds / 3600)} h ago`;
+      return `${Math.round(seconds / 86400)} d ago`;
+    }
+
+    function renderSystem(system) {
+      const SYSTEM_STATUS = { ok: ["ready", "OK"], missing: ["error", "Missing"], warning: ["warning", "Check"] };
+      systemState = system;
+      const missing = system.checks.filter((item) => item.status === "missing").length;
+      $("systemStatus").textContent = missing ? `${missing} setup item${missing === 1 ? " is" : "s are"} missing.` : "Setup is complete.";
+      $("systemChecklist").innerHTML = system.checks.map((item) => {
+        const [kind, word] = SYSTEM_STATUS[item.status] || SYSTEM_STATUS.warning;
+        const action = item.card && item.status !== "ok" ? `<button type="button" data-settings-card="${escapeHtml(item.card)}">${icon("key-round")}Open card</button>` : "";
+        return `<li><span class="status-pill ${kind}">${word}</span><span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.hint || "")}</small></span>${action}</li>`;
+      }).join("");
+      $("systemFacts").innerHTML = [["Data dir", system.dataDir], ["Config dir", system.configDir], ["Daemon", `PID ${system.daemon.pid}, port ${system.daemon.port}, ${system.daemon.url}`]]
+        .map(([term, value]) => `<dt>${term}</dt><dd>${escapeHtml(value)}</dd>`).join("");
+      $("mcpClients").innerHTML = system.mcpClients.length
+        ? system.mcpClients.map((client) => `<li><span class="status-pill ready">Seen</span><span><strong>Last connected: ${escapeHtml(`${client.name} ${client.version}`.trim())}, ${escapeHtml(timeAgo(client.at))}</strong><small>MCP protocol ${escapeHtml(client.protocolVersion || "unknown")}</small></span></li>`).join("")
+        : '<li><span class="status-pill">None</span><span><strong>No harness has connected since apupod started.</strong><small>Install a plugin above, then start a new session in your harness.</small></span></li>';
+      if (document.activeElement !== $("systemPort")) $("systemPort").value = system.daemon.port ?? "";
+      const { update, updateJob: job } = system;
+      const summary = {
+        available: `apupod ${update.current} is running. Version ${update.latest} is available.`,
+        current: `apupod ${update.current} is the latest version.`,
+        "not-published": `apupod ${update.current} is running. apupod is not published on npm yet.`,
+        offline: `apupod ${update.current} is running. Could not reach the npm registry.`,
+      }[update.status] || `apupod ${update.current} is running. Could not check for updates: ${update.error}`;
+      const jobText = job ? { running: `Installing apupod ${job.version}…`, restarting: `Restarting on apupod ${job.version}…`, installed: job.message, failed: `Update failed: ${job.error}` }[job.status] : "";
+      const jobLine = !jobText ? "" : job.status === "failed" ? `<br><span class="error">${icon("circle-x")} Error: ${escapeHtml(jobText)}</span>` : job.status === "installed" ? `<br><span class="warning">${icon("triangle-alert")} Warning: ${escapeHtml(jobText)}</span>` : `<br>${escapeHtml(jobText)}`;
+      $("updateSummary").innerHTML = `${escapeHtml(summary)} <a href="${escapeHtml(update.changesUrl)}" target="_blank" rel="noopener noreferrer">${update.status === "available" ? "What changed" : "Releases"}</a>${jobLine}`;
+      $("runUpdate").disabled = update.status !== "available" || ["running", "restarting"].includes(job?.status);
+      $("updateLog").textContent = job?.log || "";
+      $("updateLog").hidden = !job?.log;
+    }
+
+    async function loadSystem(refresh = false) {
+      try {
+        renderSystem(await api(`/api/system${refresh ? "?refresh=1" : ""}`));
+      } catch (error) {
+        $("systemStatus").textContent = `System status failed: ${error.message || error}`;
+      }
+    }
+
+    async function copyFrom(id) {
+      try {
+        await navigator.clipboard.writeText($(id).textContent);
+        notify("Copied to the clipboard.", "ok");
+      } catch {
+        getSelection().selectAllChildren($(id));
+        notify("Copy failed. The text is selected: press Ctrl+C (Cmd+C on macOS).", "warning");
+      }
+    }
+
+    function openSettingsCard(card) {
+      const [kind, id] = card.split(":", 2);
+      const selector = kind === "decision" ? "[data-assistant-decision]" : `[data-${kind === "provider" ? "provider" : "compatible"}-id="${CSS.escape(id || "")}"]`;
+      const row = document.querySelector(`#configProviders ${selector}`);
+      if (!row) return;
+      row.open = true;
+      row.scrollIntoView({ block: "nearest" });
+      (row.querySelector('[data-field="apiKey"]') || row.querySelector("summary")).focus();
+    }
+
+    async function changePort() {
+      const port = Number($("systemPort").value);
+      if (!Number.isInteger(port) || port < 1024 || port > 65535) return notify("Port must be an integer from 1024 to 65535.", "error");
+      if (!confirm(`Restart apupod on port ${port}? This page then opens http://127.0.0.1:${port}/.`)) return;
+      const { url } = await api("/api/system/port", { method: "PUT", body: JSON.stringify({ port }) });
+      $("systemStatus").textContent = `apupod restarts on ${url}…`;
+      // The new address is another origin (connect-src 'self'), so wait until this daemon stops, then open it.
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        try { await api("/api/revision"); } catch { break; }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      setTimeout(() => { location.href = `${url}#config`; }, 1500);
+    }
+
+    async function rotateMcpToken() {
+      if (!confirm("Create a new MCP token? The old token stops working. Running apupod bridges read the new token by themselves.")) return;
+      await api("/api/system/mcp-token", { method: "POST" });
+      notify("New MCP token saved.", "ok");
+      await loadSystem();
+    }
+
+    async function runUpdate() {
+      if (!confirm(`Update apupod to ${systemState?.update.latest}? apupod installs it with npm, then restarts.`)) return;
+      $("runUpdate").disabled = true;
+      try {
+        const { updateJob } = await api("/api/system/update", { method: "POST" });
+        notify(`Installing apupod ${updateJob.version}…`);
+      } catch (error) {
+        await loadSystem();
+        throw error;
+      }
+      updatePollsLeft = 200;
+      await pollUpdate();
+    }
+
+    // Poll until the install fails, or the restarted daemon reports another version (then reload the page).
+    async function pollUpdate() {
+      clearTimeout(updatePollTimer);
+      const before = systemState?.version;
+      let system = null;
+      try { system = await api("/api/system"); } catch {}
+      if (system && before && system.version !== before) {
+        location.reload();
+        return;
+      }
+      if (system) renderSystem(system);
+      const job = system?.updateJob;
+      if ((!system || ["running", "restarting"].includes(job?.status)) && --updatePollsLeft > 0) updatePollTimer = setTimeout(pollUpdate, 1500);
+      else if (job?.status === "failed") notify(`Update failed: ${job.error}`, "error");
+      else if (job?.status === "installed") notify(job.message, "warning");
+      else if (!system) notify("apupod did not come back after the update. See daemon.log in the config dir.", "error");
     }
 
     function renderSettingsAfterAsync(render = renderConfigView, sync = true) {
@@ -3060,6 +3251,17 @@
     $("saveProfiles").addEventListener("click", guard(saveProfiles));
     $("addCompatibleConnection").addEventListener("click", addCompatibleConnection);
     $("saveConfig").addEventListener("click", guard(saveConfig));
+    $("systemRefresh").addEventListener("click", guard(() => loadSystem(true)));
+    $("checkUpdate").addEventListener("click", guard(() => loadSystem(true)));
+    $("changePort").addEventListener("click", guard(changePort));
+    $("rotateMcpToken").addEventListener("click", guard(rotateMcpToken));
+    $("runUpdate").addEventListener("click", guard(runUpdate));
+    $("systemPanel").addEventListener("click", (event) => {
+      const copy = event.target.closest("[data-copy]");
+      if (copy) return void copyFrom(copy.dataset.copy);
+      const card = event.target.closest("[data-settings-card]");
+      if (card) openSettingsCard(card.dataset.settingsCard);
+    });
     $("view-config").addEventListener("input", (event) => {
       if (event.target.id === "knowledgeFile") return;
       configDirty = true;

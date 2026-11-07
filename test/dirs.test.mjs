@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createPodcastServer, loadEnvFile, resolveDirs } from "../src/app.mjs";
+import { environmentWithoutEnvFile } from "../src/util.mjs";
 import { JEV_MODEL } from "../src/jev.mjs";
 import { createApi, withEnv } from "./helpers.mjs";
 
@@ -34,6 +35,10 @@ test("loadEnvFile sets only missing variables and ignores a missing file", async
   await loadEnvFile(join(dir, ".env"));
   assert.equal(process.env.APUPOD_PROBE_FILE, "from-file");
   assert.equal(process.env.APUPOD_PROBE_PROCESS, "from-process");
+  // A replacement daemon re-reads the file, so it must not inherit values that came from it.
+  const inherited = environmentWithoutEnvFile();
+  assert.equal(Object.hasOwn(inherited, "APUPOD_PROBE_FILE"), false);
+  assert.equal(inherited.APUPOD_PROBE_PROCESS, "from-process");
   await loadEnvFile(join(dir, "missing.env"));
 });
 

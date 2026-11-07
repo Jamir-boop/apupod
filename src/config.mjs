@@ -4,7 +4,7 @@ import {
   rm,
 } from "node:fs/promises";
 import { JEV_MODEL } from "./jev.mjs";
-import { badRequest, conflict, normalizeUrl, validateId } from "./util.mjs";
+import { badRequest, conflict, envFileNames, normalizeUrl, validateId } from "./util.mjs";
 import { DEFAULT_MIMO_BASE_URL, DEFAULT_OPENAI_BASE_URL, parseCompatibleModelId, builtInConnectionId } from "./providers/catalog.mjs";
 import { listEpisodes, readJson, writeJsonAtomic, writeTextAtomic, exists } from "./store.mjs";
 
@@ -152,6 +152,7 @@ export async function saveConfigRequest(context, value) {
   for (const [key, envValue] of Object.entries(next.envPatch)) {
     if (envValue == null) delete process.env[key];
     else process.env[key] = envValue;
+    envFileNames.add(key);
   }
   context.config = next.config;
   return { config: redactConfig(context.config), warnings };
@@ -272,7 +273,7 @@ function slugEnv(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 20);
 }
 
-async function updateEnvFile(path, patch) {
+export async function updateEnvFile(path, patch) {
   const current = await exists(path) ? await readFile(path, "utf8") : "";
   const lines = current ? current.split(/\r?\n/) : [];
   const seen = new Set();

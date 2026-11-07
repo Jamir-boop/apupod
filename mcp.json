@@ -3,9 +3,8 @@
   "mcpServers": {
     "apupod": {
       "type": "stdio",
-      "command": "node",
-      "args": ["${PLUGIN_ROOT}/bin/apupod.mjs", "mcp"],
-      "cwd": "${PLUGIN_ROOT}"
+      "command": "npx",
+      "args": ["-y", "apupod@1.1.0", "mcp"]
     }
   }
 }

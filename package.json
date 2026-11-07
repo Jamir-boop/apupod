@@ -1,6 +1,6 @@
 {
   "name": "apupod",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Agent-driven local podcast studio: MCP tools and skills for hosts, plans, scripts, and TTS audio, with a browser UI.",
   "keywords": [
     "podcast",
@@ -13,6 +13,7 @@
     "codex",
     "opencode"
   ],
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Jamir-boop/apupod.git"
@@ -30,7 +31,8 @@
     ".mcp.json",
     "plugin.json",
     "mcp.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=24"

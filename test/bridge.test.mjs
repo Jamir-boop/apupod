@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,4 +95,80 @@ test("`apupod serve` fails clearly when another program owns the port, and --ver
   const result = await run(["serve"], { ...getDefaultEnvironment(), APUPOD_DATA_DIR: join(root, "data"), APUPOD_CONFIG_DIR: join(root, "config"), PORT: String(blocker.address().port) });
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Port \d+ is in use by another program/);
+});
+
+// Stop each daemon this test saw; daemons are detached, so the test kills them by PID.
+async function stopDaemons(pids) {
+  for (const pid of pids) {
+    if (!alive(pid)) continue;
+    process.kill(pid, "SIGTERM");
+    await waitFor(() => !alive(pid), 5_000).catch(() => process.kill(pid, "SIGKILL"));
+  }
+}
+
+test("a running `apupod mcp` bridge keeps working after the MCP token rotates and the daemon restarts on a new port", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "apupod-restart-"));
+  const configDir = join(root, "config");
+  const [port, nextPort] = [await freePort(), await freePort()];
+  const env = { ...getDefaultEnvironment(), APUPOD_DATA_DIR: join(root, "data"), APUPOD_CONFIG_DIR: configDir, PORT: String(port) };
+  const pids = new Set();
+  const client = new Client({ name: "restart-test", version: "1" });
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await stopDaemons(pids);
+    await rm(root, { recursive: true, force: true });
+  });
+  const daemonFile = () => readFile(join(configDir, "daemon.json"), "utf8").then(JSON.parse).catch(() => null);
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [BIN, "mcp"], env, stderr: "pipe" }));
+  const first = await daemonFile();
+  pids.add(first.pid);
+  assert.ok((await client.listTools()).tools.length > 0);
+  const system = await (await fetch(`${first.url}/api/system`)).json();
+  assert.equal(system.mcpClients[0].name, "restart-test", "the daemon records the harness initialize sent through the bridge");
+
+  const oldToken = await readFile(join(configDir, "mcp-token"), "utf8");
+  assert.equal((await fetch(`${first.url}/api/system/mcp-token`, { method: "POST" })).status, 200);
+  assert.notEqual(await readFile(join(configDir, "mcp-token"), "utf8"), oldToken);
+  assert.ok((await client.listTools()).tools.length > 0, "the bridge re-reads the token after a 401");
+
+  const changed = await fetch(`${first.url}/api/system/port`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ port: nextPort }) });
+  assert.equal(changed.status, 202);
+  // Sent while the old daemon stops: the bridge waits for the replacement and sends again.
+  const tools = await client.listTools();
+  assert.ok(tools.tools.some((tool) => tool.name === "get_workspace"));
+  const second = await waitFor(async () => { const daemon = await daemonFile(); return daemon?.port === nextPort && daemon; }, 20_000);
+  pids.add(second.pid);
+  assert.notEqual(second.pid, first.pid);
+  assert.equal(second.url, `http://127.0.0.1:${nextPort}`);
+  await waitFor(() => !alive(first.pid), 10_000);
+  assert.equal((await client.callTool({ name: "get_workspace", arguments: {} })).structuredContent.uiUrl, `${second.url}/`);
+  assert.match(await readFile(join(configDir, ".env"), "utf8"), new RegExp(`^PORT=${nextPort}$`, "m"));
+  await assert.rejects(readFile(join(configDir, "daemon.lock")), { code: "ENOENT" }, "the replacement releases the start lock");
+  // One start by the bridge and one replacement: no second daemon raced for the port.
+  const started = (await readFile(join(configDir, "daemon.log"), "utf8")).split("\n").filter((line) => line.startsWith("apupod: "));
+  assert.deepEqual(started, [`apupod: ${first.url}`, `apupod: ${second.url}`]);
+});
+
+test("the bridge starts the newest apupod: a newer one in the data-dir runtime wins over its own bin", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "apupod-newest-"));
+  const dataDir = join(root, "data");
+  const configDir = join(root, "config");
+  const runtime = join(dataDir, "runtime", "node_modules", "apupod");
+  await mkdir(join(runtime, "bin"), { recursive: true });
+  await writeFile(join(runtime, "package.json"), JSON.stringify({ name: "apupod", version: "99.0.0" }));
+  // A stand-in for the installed package: it marks that it ran, then serves with this checkout's code.
+  await writeFile(join(runtime, "bin", "apupod.mjs"), `import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./started", import.meta.url), String(process.pid));\nconst { serve } = await import(${JSON.stringify(new URL("../bin/apupod.mjs", import.meta.url).href)});\nawait serve();\n`);
+  const env = { ...getDefaultEnvironment(), APUPOD_DATA_DIR: dataDir, APUPOD_CONFIG_DIR: configDir, PORT: String(await freePort()) };
+  const pids = new Set();
+  const client = new Client({ name: "newest-test", version: "1" });
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await stopDaemons(pids);
+    await rm(root, { recursive: true, force: true });
+  });
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [BIN, "mcp"], env, stderr: "pipe" }));
+  const daemon = JSON.parse(await readFile(join(configDir, "daemon.json"), "utf8"));
+  pids.add(daemon.pid);
+  assert.equal(Number(await readFile(join(runtime, "bin", "started"), "utf8")), daemon.pid);
+  assert.ok((await client.listTools()).tools.length > 0);
 });

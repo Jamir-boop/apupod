@@ -6,6 +6,7 @@
 - Every new user-facing feature needs an MCP tool in `src/mcp.mjs` (or a change to an existing tool) and an update to the skills in `skills/` that describe the workflow. Use the same core functions as the REST handlers; do not duplicate rules.
 - Skills reference tools by their exact names. `test/packaging.test.mjs` fails when a skill names a tool that does not exist.
 - MCP tools never accept, return, or log key values. Report only `hasApiKey` flags.
+- Exception to the tool rule: system changes (port, MCP token, update in Settings > System, `src/system.mjs`) stay UI-only and have no MCP tools. `get_workspace` may only report the version, the update status, and the last MCP connections.
 
 ## TTS providers
 
@@ -21,6 +22,15 @@ version in `package.json`. `package-lock.json` must match: a test asserts the
 two agree, so bump both with `npm version --no-git-tag-version <x.y.z>`.
 Then set the same `version` in `.claude-plugin/plugin.json` and the root
 `plugin.json` by hand; `test/packaging.test.mjs` asserts that they match.
+
+A release sets the same version in all of these places:
+
+- `package.json` (and `package-lock.json`, through `npm version`).
+- `.claude-plugin/plugin.json` and the root `plugin.json`.
+- The npx pin `apupod@<version>` in `.mcp.json`, `mcp.json`, `examples/opencode.json`,
+  and the OpenCode snippet in the Settings view (`public/index.html`).
+
+`test/packaging.test.mjs` fails when one of them differs.
 
 Rules:
 

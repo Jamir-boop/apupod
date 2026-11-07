@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -11,15 +10,16 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { DEFAULT_DATA } from "./defaults.mjs";
-import { badRequest, conflict, assertSafeId, readJsonBody, assertLocalRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
+import { envFileNames, badRequest, conflict, assertSafeId, readJsonBody, assertLocalRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
 import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog } from "./providers/catalog.mjs";
 import { fetchElevenLabsVoices, fetchChatterboxVoices } from "./providers/generate.mjs";
-import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpisodes, readJson, writeJsonAtomic, writeTextAtomic, exists, nextUpdatedAt } from "./store.mjs";
+import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpisodes, readJson, writeJsonAtomic, exists, nextUpdatedAt } from "./store.mjs";
 import { defaultConfig, readConfig, activateReferencedModels, redactConfig, saveConfigRequest } from "./config.mjs";
 import { deleteEpisodeRequest, deleteSpeakerProfileRequest, saveEpisodeRequest, getEpisodeResponse, renameEpisodeRequest, applyLatestProfilesRequest, resolveTranscriptPromptRequest, saveTranscriptRequest, writeProfiles } from "./episodes.mjs";
 import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanResponse, updatePlanRequest, deletePlannedEpisodeRequest, deletePlanRequest, createPlanEpisodesRequest } from "./plans.mjs";
-import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTtsJob, ensureFfmpeg, previewVoice } from "./jobs.mjs";
+import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTtsJob, ensureFfmpeg, previewVoice, runProcess } from "./jobs.mjs";
 import { handleMcpRequest, readWorkspaceState } from "./mcp.mjs";
+import { handleSystemRequest, restartDaemon, writeMcpToken } from "./system.mjs";
 export { validateProfileData, transcriptSpeakerRule, parseTranscript } from "./episodes.mjs";
 export { clipCacheKey, writeAudioAsWav, runProcess } from "./jobs.mjs";
 
@@ -43,7 +43,11 @@ export async function loadEnvFile(path) {
     if (error.code === "ENOENT") return;
     throw error;
   }
-  for (const [name, value] of Object.entries(parseEnv(text))) if (!Object.hasOwn(process.env, name)) process.env[name] = value;
+  for (const [name, value] of Object.entries(parseEnv(text))) {
+    if (Object.hasOwn(process.env, name)) continue;
+    process.env[name] = value;
+    envFileNames.add(name);
+  }
 }
 
 async function createAppContext(options = {}) {
@@ -68,7 +72,15 @@ async function createAppContext(options = {}) {
     mutationTail: Promise.resolve(),
     revision: 0,
     mcpToken: await ensureMcpToken(paths.mcpToken),
+    mcpClients: new Map(),
     ffmpegCheck: null,
+    mediaTools: null,
+    updateCheck: null,
+    updateJob: null,
+    // Tests inject these: the npm runner and the daemon restart (which exits the process).
+    runCommand: options.runCommand || runProcess,
+    restart: options.restart || ((port) => restartDaemon(context, port)),
+    server: null,
   };
   await cleanupInterruptedEpisodeDeletes(paths);
   await interruptStaleJobs(paths);
@@ -81,7 +93,7 @@ async function createAppContext(options = {}) {
 
 export async function createPodcastServer(options = {}) {
   const context = await createAppContext(options);
-  const server = createServer((req, res) => {
+  const server = context.server = createServer((req, res) => {
     routeRequest(req, res, context).catch((error) => {
       if (res.headersSent) {
         res.end();
@@ -100,9 +112,7 @@ async function ensureMcpToken(path) {
     const token = (await readFile(path, "utf8")).trim();
     if (token.length >= 32) return token;
   }
-  const token = randomBytes(32).toString("base64url");
-  await writeTextAtomic(path, `${token}\n`, 0o600);
-  return token;
+  return writeMcpToken(path);
 }
 
 // Tests pass dataDir and configDir, or a rootDir that holds data/, config.json, .env and public/.
@@ -184,6 +194,8 @@ async function routeRequest(req, res, context) {
   }
 
   if (path === "/mcp") return handleMcpRequest(req, res, context);
+
+  if (path === "/api/system" || path.startsWith("/api/system/")) return handleSystemRequest(req, res, context, method, path, url);
 
   if (method === "GET" && path === "/api/state") {
     return sendJson(res, 200, await readWorkspaceState(context));

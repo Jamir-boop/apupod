@@ -5,14 +5,14 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createPodcastServer, loadEnvFile, resolveDirs } from "../src/app.mjs";
+import { newestBin } from "../src/system.mjs";
 
 const HOST = "127.0.0.1";
-const BIN = fileURLToPath(import.meta.url);
 const START_TIMEOUT_MS = 30_000;
+const REPLACE_TIMEOUT_MS = 15_000;
 const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -51,8 +51,23 @@ async function liveDaemon(configDir) {
   return Number.isInteger(daemon?.pid) && alive(daemon.pid) && typeof daemon.url === "string" && await isApupod(daemon.url) ? daemon : null;
 }
 
+async function listen(server, port) {
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, HOST, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
 export async function serve() {
   const { configDir } = resolveDirs();
+  // A restart (port change or update) starts this process with the PID of the daemon it replaces.
+  const replaces = Number(process.env.APUPOD_REPLACES_PID) || 0;
+  delete process.env.APUPOD_REPLACES_PID;
+  const replaceDeadline = Date.now() + REPLACE_TIMEOUT_MS;
+  while (replaces && alive(replaces) && Date.now() < replaceDeadline) await sleep(100);
   // The config-dir .env may set PORT; createPodcastServer loads it too.
   await loadEnvFile(join(configDir, ".env"));
   const port = configuredPort();
@@ -64,20 +79,25 @@ export async function serve() {
     return;
   }
   const server = await createPodcastServer();
-  try {
-    await new Promise((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(port, HOST, () => {
-        server.off("error", reject);
-        resolve();
-      });
-    });
-  } catch (error) {
-    if (error.code !== "EADDRINUSE") throw error;
-    throw new Error(`Port ${port} is in use by another program. Set PORT in the environment or in ${join(configDir, ".env")} to a free port.`);
+  for (;;) {
+    try {
+      await listen(server, port);
+      break;
+    } catch (error) {
+      if (error.code !== "EADDRINUSE") throw error;
+      // The replaced daemon can hold the port for a moment after it exits.
+      if (replaces && Date.now() < replaceDeadline) {
+        await sleep(100);
+        continue;
+      }
+      throw new Error(`Port ${port} is in use by another program. Set PORT in the environment or in ${join(configDir, ".env")} to a free port.`);
+    }
   }
   const file = join(configDir, "daemon.json");
   await writeFile(file, `${JSON.stringify({ pid: process.pid, port, url, version })}\n`, { mode: 0o600 });
+  // The replaced daemon wrote this PID into the start lock; release it now that daemon.json names this process.
+  const lock = join(configDir, "daemon.lock");
+  if (replaces && Number(await readFile(lock, "utf8").catch(() => "")) === process.pid) await rm(lock, { force: true });
   process.on("exit", () => {
     try {
       if (JSON.parse(readFileSync(file, "utf8")).pid === process.pid) rmSync(file, { force: true });
@@ -87,10 +107,11 @@ export async function serve() {
   console.log(`apupod: ${url}`);
 }
 
-async function startDaemon(configDir, deadline) {
+// Start the newest apupod: this code or a newer one that an update installed into the data-dir runtime.
+async function startDaemon({ dataDir, configDir }, deadline) {
   const logPath = join(configDir, "daemon.log");
   const log = openSync(logPath, "a", 0o600);
-  const child = spawn(process.execPath, [BIN, "serve"], { detached: true, stdio: ["ignore", log, log], env: process.env, windowsHide: true });
+  const child = spawn(process.execPath, [newestBin(dataDir).bin, "serve"], { detached: true, stdio: ["ignore", log, log], env: process.env, windowsHide: true });
   closeSync(log);
   let exitCode = null;
   child.once("exit", (code) => { exitCode = code ?? 1; });
@@ -105,7 +126,8 @@ async function startDaemon(configDir, deadline) {
 }
 
 // The start lock makes concurrent bridges start one daemon; a lock left by a dead process is taken over.
-async function ensureDaemon(configDir) {
+async function ensureDaemon(dirs) {
+  const { configDir } = dirs;
   const running = await liveDaemon(configDir);
   if (running) return running;
   await mkdir(configDir, { recursive: true, mode: 0o700 });
@@ -122,7 +144,7 @@ async function ensureDaemon(configDir) {
       try {
         await handle.writeFile(String(process.pid));
         await handle.close();
-        return await liveDaemon(configDir) || await startDaemon(configDir, deadline);
+        return await liveDaemon(configDir) || await startDaemon(dirs, deadline);
       } finally {
         await rm(lock, { force: true });
       }
@@ -137,25 +159,55 @@ async function ensureDaemon(configDir) {
 }
 
 // Pass JSON-RPC messages unchanged between the harness (stdio) and the daemon's /mcp endpoint.
+// A 401 (the token was rotated) or a connection error (the daemon restarted on a new port or new code) reconnects once:
+// re-read daemon.json and mcp-token, start a daemon if none answers, and send the message again.
 async function bridge() {
-  const { configDir } = resolveDirs();
-  const daemon = await ensureDaemon(configDir);
-  const token = (await readFile(join(configDir, "mcp-token"), "utf8")).trim();
-  const upstream = new StreamableHTTPClientTransport(new URL(`${daemon.url}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } });
+  const dirs = resolveDirs();
+  const { configDir } = dirs;
   const local = new StdioServerTransport();
+  let upstream = null;
+  let protocolVersion = null;
+  let reconnecting = null;
+  const connect = async () => {
+    const daemon = await ensureDaemon(dirs);
+    const token = (await readFile(join(configDir, "mcp-token"), "utf8")).trim();
+    const next = new StreamableHTTPClientTransport(new URL(`${daemon.url}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } });
+    next.onmessage = (message) => {
+      if (message.result?.serverInfo && message.result.protocolVersion) {
+        protocolVersion = message.result.protocolVersion;
+        next.setProtocolVersion(protocolVersion);
+      }
+      void local.send(message);
+    };
+    next.onerror = (error) => console.error(`apupod bridge: ${error.message || error}`);
+    await next.start();
+    if (protocolVersion) next.setProtocolVersion(protocolVersion);
+    const previous = upstream;
+    upstream = next;
+    void previous?.close().catch(() => {});
+  };
+  const forward = async (message) => {
+    const current = upstream;
+    try {
+      return await current.send(message);
+    } catch (error) {
+      // StreamableHTTPError carries the HTTP status; a fetch that never reached a server has no numeric code.
+      if (error.code !== 401 && Number.isInteger(error.code)) throw error;
+      if (upstream === current) {
+        reconnecting ||= connect().finally(() => { reconnecting = null; });
+        await reconnecting;
+      }
+      return upstream.send(message);
+    }
+  };
   local.onmessage = (message) => {
-    upstream.send(message).catch((error) => {
+    forward(message).catch((error) => {
       console.error(`apupod bridge: ${error.message || error}`);
       if (message.method && message.id !== undefined) void local.send({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: `apupod daemon request failed: ${error.message || error}` } });
     });
   };
-  upstream.onmessage = (message) => {
-    if (message.result?.serverInfo && message.result.protocolVersion) upstream.setProtocolVersion(message.result.protocolVersion);
-    void local.send(message);
-  };
-  upstream.onerror = (error) => console.error(`apupod bridge: ${error.message || error}`);
   local.onclose = () => void upstream.close().finally(() => process.exit(0));
-  await upstream.start();
+  await connect();
   await local.start();
 }
 

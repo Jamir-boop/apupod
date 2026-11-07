@@ -16,6 +16,7 @@ import { addKnowledgeBase, readKnowledgeBase, removeKnowledgeBase, saveAgentPlan
 import { listJobs, enqueueTts, ensureFfmpeg, previewVoiceAudio } from "./jobs.mjs";
 import { jevDecide, voiceCatalog } from "./decide.mjs";
 import { JEV_MODEL } from "./jev.mjs";
+import { VERSION, mcpClientList, recordMcpClients } from "./system.mjs";
 import { WIDGET_MIME_TYPE, WORKSPACE_WIDGET_URI, EPISODE_WIDGET_URI, WORKSPACE_WIDGET_HTML, EPISODE_WIDGET_HTML } from "./widgets.mjs";
 
 const PREVIEW_MAX_AGE_MS = 60 * 60 * 1000;
@@ -50,6 +51,7 @@ export async function handleMcpRequest(req, res, context) {
     return sendJson(res, 405, { error: "Method not allowed." });
   }
   const body = await readJsonBody(req);
+  recordMcpClients(context, body);
   const server = createMcpServer(context, origin);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on("close", () => {
@@ -166,6 +168,8 @@ async function workspaceOverview(context, origin) {
     episodes: state.episodes.map((episode) => ({ id: episode.id, name: episode.name, status: episode.status, audioReady: episode.audioReady === true, transcriptWords: episode.transcriptWords ?? null, episodeProfileId: episode.episodeProfileId ?? null, knowledgeBaseId: episode.knowledgeBaseId ?? null, job: jobView(episode.job), updatedAt: episode.updatedAt })),
     tts: ttsReadiness(context, state.config),
     jev: { available: state.config.assistantDecision.hasApiKey, model: JEV_MODEL },
+    // The last update check the Settings view ran (no network call here), and the most recent MCP initialize per client.
+    apupod: { version: VERSION, update: context.updateCheck?.value ?? null, mcpClients: mcpClientList(context) },
   };
 }
 
@@ -238,7 +242,7 @@ function upsert(list, input, kind, prefix) {
 }
 
 export function createMcpServer(context, origin) {
-  const server = new McpServer({ name: "apupod", version: "1.0.0" }, { instructions: "apupod is a local podcast studio. Start with get_workspace. You write hosts, plans, and scripts; apupod validates, saves, and renders audio with TTS." });
+  const server = new McpServer({ name: "apupod", version: VERSION }, { instructions: "apupod is a local podcast studio. Start with get_workspace. You write hosts, plans, and scripts; apupod validates, saves, and renders audio with TTS." });
   const { paths } = context;
   const csp = { connectDomains: [origin], resourceDomains: [origin] };
   const widget = (uri) => ({ ui: { resourceUri: uri } });
@@ -254,7 +258,7 @@ export function createMcpServer(context, origin) {
 
   tool("get_workspace", {
     title: "Get workspace",
-    description: "Overview of the apupod workspace: host profiles, Episode Formats, knowledge bases, plans, episodes (IDs, names, status), TTS readiness, Jev availability, and the UI URL. Call this first.",
+    description: "Overview of the apupod workspace: host profiles, Episode Formats, knowledge bases, plans, episodes (IDs, names, status), TTS readiness, Jev availability, the apupod version and update status, recent MCP client connections, and the UI URL. Call this first.",
     inputSchema: {},
     annotations: READ,
     _meta: widget(WORKSPACE_WIDGET_URI),

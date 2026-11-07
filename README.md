@@ -18,47 +18,37 @@ In the Andes, an *apu* is a "lord": the spirit of a mountain that watches over t
 
 ## Install
 
-apupod is not on npm yet. Install it from a clone:
+Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y apupod@1.1.0 mcp`, so npm downloads the pinned apupod package for you. The bridge connects to the apupod daemon, or starts it in the background if it is not running. You do not need a clone or a server that you start yourself. The plugin install from GitHub works after apupod is published on npm.
 
-```bash
-git clone https://github.com/Jamir-boop/apupod.git
-cd apupod
-npm ci
-```
-
-Each harness starts the stdio bridge (`apupod mcp`). The bridge connects to the apupod daemon, or starts it in the background if it is not running. You do not need to start a server yourself.
-
-The clone must contain `node_modules` (from `npm ci`), because the plugins run `bin/apupod.mjs` from it.
+The UI **Settings** view shows these commands with copy buttons, and shows when each harness last connected.
 
 ### Claude Code CLI and Claude desktop (Code tab)
 
 This repository is a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) with one plugin, `apupod` (`.claude-plugin/plugin.json`, `.mcp.json`, `skills/`).
 
 ```bash
-claude plugin marketplace add /path/to/apupod
+claude plugin marketplace add Jamir-boop/apupod
 claude plugin install apupod@apupod
 ```
 
-In a session, `/plugin marketplace add /path/to/apupod` and `/plugin install apupod@apupod` do the same. The Claude desktop Code tab uses the same plugins. A marketplace added from a local path loads the plugin in place, so `git pull` and `npm ci` update it.
+In a session, `/plugin marketplace add Jamir-boop/apupod` and `/plugin install apupod@apupod` do the same. The Claude desktop Code tab uses the same plugins.
 
-To open the UI in the Claude desktop browser pane, copy `.claude/launch.json` from this repository into your project's `.claude/` folder. Its `apupod` entry opens `http://127.0.0.1:4173` when the daemon runs. Its `apupod-serve` entry starts the daemon from this repository.
+To open the UI in the Claude desktop browser pane, copy `.claude/launch.json` from this repository into your project's `.claude/` folder. Its `apupod` entry opens `http://127.0.0.1:4173` when the daemon runs. Its `apupod-serve` entry starts the daemon from a clone.
 
 ### ChatGPT desktop app and Codex CLI
 
 This repository is also a portable Agent Plugins package (root `plugin.json`, `mcp.json`, `skills/`) with a repo marketplace at `.agents/plugins/marketplace.json`. The Codex CLI and Codex in the ChatGPT desktop app share `~/.codex/config.toml`, so one setup serves both.
 
 ```bash
-codex plugin marketplace add /path/to/apupod
+codex plugin marketplace add Jamir-boop/apupod
 codex plugin add apupod@apupod
 ```
 
 You can also restart the ChatGPT desktop app and install `apupod` from the `apupod` source in the Plugins Directory. The plugin has a local (stdio) MCP server, so it runs only in the desktop app and the CLI, in local threads.
 
-The install copies the whole plugin folder into `~/.codex/plugins/cache/`. Use a clean clone (with `node_modules`, but no `.env` or `data/`) so that no secrets or old data are copied. After you update the clone, install the plugin again: `codex plugin remove apupod@apupod`, then `codex plugin add apupod@apupod`.
-
 ### OpenCode CLI and app
 
-Add the MCP server and the skills to `opencode.json` (project) or `~/.config/opencode/opencode.json` (global). Replace `/path/to/apupod` with the absolute path of your clone (also in `examples/opencode.json`):
+Add the MCP server to `opencode.json` (project) or `~/.config/opencode/opencode.json` (global), as in `examples/opencode.json`:
 
 ```json
 {
@@ -67,7 +57,7 @@ Add the MCP server and the skills to `opencode.json` (project) or `~/.config/ope
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["node", "/path/to/apupod/bin/apupod.mjs", "mcp"]
+        "command": ["npx", "-y", "apupod@1.1.0", "mcp"]
       }
     }
   },
@@ -75,9 +65,13 @@ Add the MCP server and the skills to `opencode.json` (project) or `~/.config/ope
 }
 ```
 
-The `skills` entry makes OpenCode find the four apupod skills. Use an absolute path: OpenCode resolves a relative path from its working directory, not from the config file. Instead of the `skills` entry, you can copy the `skills/apupod*` folders into `~/.config/opencode/skills/` or `~/.agents/skills/`.
+The `skills` entry makes OpenCode find the four apupod skills. It needs an absolute path to a folder with the `skills/apupod*` folders (from a clone, or from the npm package). OpenCode resolves a relative path from its working directory, not from the config file. Instead of the `skills` entry, you can copy the `skills/apupod*` folders into `~/.config/opencode/skills/` or `~/.agents/skills/`.
 
 OpenCode releases before the `mcp.servers` format put the server directly under `mcp` (`"mcp": {"apupod": {"type": "local", "command": [...], "enabled": true}}`).
+
+### Local development from a clone
+
+To run the plugins from a clone instead of the npm package, add the marketplace from the clone path (`claude plugin marketplace add /path/to/apupod`, `codex plugin marketplace add /path/to/apupod`) and change the plugin MCP command to `node /path/to/apupod/bin/apupod.mjs mcp`. The clone must contain `node_modules` (from `npm ci`). The Codex install copies the whole plugin folder into `~/.codex/plugins/cache/`, so use a clean clone (no `.env` or `data/`) so that no secrets or old data are copied.
 
 ## Keys
 
@@ -85,15 +79,26 @@ Set keys in the UI **Settings** view, or in the `.env` file in the config dir (w
 
 - TTS: `ELEVENLABS_API_KEY`, `MIMO_API_KEY` (and optional `MIMO_BASE_URL`), `OPENAI_API_KEY`, `CHATTERBOX_API_KEY` (optional for a local server), and one generated key per OpenAI-compatible TTS connection.
 - `TYPESAFE_API_KEY` (optional): turns on the `jev_decide` check with the pinned model `jev-1.14.0`. apupod works without it.
-- `PORT` (optional): the daemon port on `127.0.0.1`, default `4173`.
+- `PORT` (optional): the daemon port on `127.0.0.1`, default `4173`. Settings > System > Change port writes it for you.
 
 MCP tools never accept, return, or log key values. They report only `hasApiKey` flags.
+
+## Settings
+
+Use the UI **Settings** view to set up and update everything. Its **System** area has four parts:
+
+- **Setup checklist**: the apupod version and the latest version on npm, the Node.js version, FFmpeg and FFprobe (with an install hint for your OS when they are missing), the data and config dirs, the daemon PID, port, and URL, which keys are saved (never their values), the number of active TTS models, and the MCP token. Each item shows OK, Missing, or Check with a one-line fix. A key item opens its Settings card.
+- **Connect harnesses**: the install commands for Claude Code, the ChatGPT desktop app and Codex CLI, and OpenCode, with copy buttons. **MCP connections** shows each client that sent an MCP `initialize` since the daemon started ("Last connected: <client> <version>, <time ago>"). `get_workspace` reports the same list.
+- **Port and MCP token**: **Change port** checks that the port (1024 to 65535) is free, writes `PORT` to the config-dir `.env`, and restarts the daemon on it; the page then opens the new address. **New MCP token** writes a new token; the old one stops working. Running bridges re-read `daemon.json` and `mcp-token` and send the request again, so harness sessions keep working.
+- **Update**: **Check for updates** asks the npm registry (the answer is kept for one hour) and links to the changes. **Update apupod** installs the latest version with `npm install --prefix <data dir>/runtime --no-audit --no-fund --omit=dev apupod@<latest>`, shows the npm output, and restarts the daemon on the new code. Bridges also start the newest apupod (their own or the one in `<data dir>/runtime`).
+
+apupod refuses a port change or an update while a TTS job is queued or running. A restart starts a new daemon in the background, then the old one exits. If you started `apupod serve` in a terminal, the new daemon keeps running after that terminal command ends. A `PORT` variable in the environment of the process that starts the daemon wins over the `.env` value.
 
 ## Data and config
 
 apupod never depends on the current directory.
 
-- Data dir: `$APUPOD_DATA_DIR`, else `$XDG_DATA_HOME/apupod`, else `~/.local/share/apupod`. It holds `profiles.json` (host profiles and Episode Formats), `plans/`, `knowledge/` (Markdown knowledge bases), `episodes/` (scripts, audio, clip cache), and `previews/` (voice previews, removed after one hour).
+- Data dir: `$APUPOD_DATA_DIR`, else `$XDG_DATA_HOME/apupod`, else `~/.local/share/apupod`. It holds `profiles.json` (host profiles and Episode Formats), `plans/`, `knowledge/` (Markdown knowledge bases), `episodes/` (scripts, audio, clip cache), `previews/` (voice previews, removed after one hour), and `runtime/` (apupod versions that Settings > Update installed).
 - Config dir: `$APUPOD_CONFIG_DIR`, else `$XDG_CONFIG_HOME/apupod`, else `~/.config/apupod`. It holds `config.json` (TTS connections, no secrets), `.env` (keys), `mcp-token` (the bridge bearer token), `daemon.json` (PID and URL of the running daemon), and `daemon.log`.
 
 The `data/` folder in this repository is an archive of the old app. apupod does not read it.
@@ -117,7 +122,7 @@ Example prompts: "Use apupod to make a 3-episode podcast about the history of co
 
 | Tool | Does |
 |---|---|
-| `get_workspace` | Overview: host profiles, formats, knowledge bases, plans, episodes, TTS readiness, Jev availability, UI URL. Call it first. |
+| `get_workspace` | Overview: host profiles, formats, knowledge bases, plans, episodes, TTS readiness, Jev availability, apupod version and update status, recent MCP connections, UI URL. Call it first. |
 | `open_ui` | Returns the UI URL, optionally deep-linked to a view or an episode. |
 | `list_tts_options` | Active TTS models, languages, cue capabilities, tuning ranges and defaults, and which providers have keys. |
 | `list_voices` | Voices for a TTS provider or one active TTS model. |
@@ -149,7 +154,7 @@ Hosts that support MCP Apps show two in-chat widgets: `ui://apupod/workspace` (o
 
 ## The UI
 
-Open `http://127.0.0.1:4173` (or run `apupod open` to print the URL). The UI shows the production list, hosts, format, script editor, TTS preview and render, player, activity, and Settings (TTS connections, the TypeSafe key, knowledge bases). You can make light edits there. The UI refreshes by itself when the agent changes data.
+Open `http://127.0.0.1:4173` (or run `apupod open` to print the URL). The UI shows the production list, hosts, format, script editor, TTS preview and render, player, activity, and Settings (System, TTS connections, the TypeSafe key, knowledge bases). You can make light edits there. The UI refreshes by itself when the agent changes data.
 
 ## Security
 
@@ -157,6 +162,7 @@ Open `http://127.0.0.1:4173` (or run `apupod open` to print the URL). The UI sho
 - `/mcp` needs `Authorization: Bearer <token>`, with the token from `mcp-token` in the config dir (mode `0600`). The stdio bridge sends it for you. `/mcp` rejects any foreign `Origin`.
 - The REST API rejects cross-origin writes.
 - Keys stay in the daemon. API and tool results return `hasApiKey` flags, never key values.
+- The `/api/system` endpoints (port, MCP token, update) accept only local same-origin requests, and they never accept or return key values or the MCP token. They have no MCP tools.
 
 OpenAI and compatible TTS voices are AI-generated. Disclose this in published episodes.
 
@@ -180,3 +186,7 @@ node bin/apupod.mjs serve   # or: npm start
 ```
 
 Use `APUPOD_DATA_DIR`, `APUPOD_CONFIG_DIR`, and `PORT` to run a second daemon with separate data. See `AGENTS.md` for the contribution rules.
+
+## License
+
+MIT. See `LICENSE`.

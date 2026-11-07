@@ -5,6 +5,14 @@ import {
 } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 
+// Names whose process.env value came from the config-dir .env (loaded or saved through Settings).
+// A replacement daemon must re-read the file instead of inheriting these values.
+export const envFileNames = new Set();
+
+export function environmentWithoutEnvFile(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !envFileNames.has(name)));
+}
+
 export function oneLine(value) {
   return String(value).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
 }

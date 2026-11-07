@@ -17,23 +17,28 @@ test("src/mcp.mjs registers the 25 tools", () => {
   assert.equal(TOOLS.size, 25);
 });
 
-test("plugin manifests are valid, versioned with package.json, and run the stdio bridge", () => {
+test("plugin manifests are valid, versioned and licensed with package.json, and run the pinned npm bridge", () => {
   const claude = json(".claude-plugin/plugin.json");
   const portable = json("plugin.json");
   for (const manifest of [claude, portable]) {
     assert.equal(manifest.name, pkg.name);
     assert.equal(manifest.version, pkg.version);
+    assert.equal(manifest.license, pkg.license);
   }
+  assert.equal(pkg.license, "MIT");
+  assert.match(read("LICENSE"), /^MIT License\n\nCopyright \(c\) 2026 Jamir-boop\n/);
   assert.equal(portable.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
 
-  assert.deepEqual(json(".mcp.json").mcpServers.apupod, { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/bin/apupod.mjs", "mcp"] });
+  // Release: the npx pin in every harness config equals the package.json version.
+  const npx = ["-y", `apupod@${pkg.version}`, "mcp"];
+  assert.deepEqual(json(".mcp.json").mcpServers.apupod, { command: "npx", args: npx });
   const mcp = json("mcp.json");
   assert.equal(mcp.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
-  assert.deepEqual(mcp.mcpServers.apupod, { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/bin/apupod.mjs", "mcp"], cwd: "${PLUGIN_ROOT}" });
-
+  assert.deepEqual(mcp.mcpServers.apupod, { type: "stdio", command: "npx", args: npx });
   const opencode = json("examples/opencode.json").mcp.servers.apupod;
-  assert.equal(opencode.type, "local");
-  assert.deepEqual(opencode.command.slice(-2).map((part) => part.split("/").slice(-2).join("/")), ["bin/apupod.mjs", "mcp"]);
+  assert.deepEqual(opencode, { type: "local", command: ["npx", ...npx] });
+  // The UI shows the same OpenCode snippet.
+  assert.ok(read("public/index.html").includes(`&quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;apupod@${pkg.version}&quot;, &quot;mcp&quot;]`), "the UI OpenCode snippet pins the package.json version");
   assert.ok(existsSync(join(ROOT, "bin/apupod.mjs")));
 });
 
@@ -58,7 +63,7 @@ test("package.json publishes the bin and only whitelisted files", () => {
   assert.deepEqual(pkg.bin, { apupod: "bin/apupod.mjs" });
   assert.match(read("bin/apupod.mjs"), /^#!\/usr\/bin\/env node\n/);
   for (const entry of pkg.files) assert.ok(existsSync(join(ROOT, entry)), `${entry} is missing`);
-  for (const path of [".claude-plugin/", ".mcp.json", "plugin.json", "mcp.json", "skills/"]) assert.ok(pkg.files.includes(path), `${path} is not in files`);
+  for (const path of [".claude-plugin/", ".mcp.json", "plugin.json", "mcp.json", "skills/", "LICENSE"]) assert.ok(pkg.files.includes(path), `${path} is not in files`);
 });
 
 test("skills have portable frontmatter that matches the folder name", () => {

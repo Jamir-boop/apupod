@@ -14,8 +14,8 @@ test("the page calls no removed embedded-AI endpoint and keeps no chat or genera
     assert.doesNotMatch(html, new RegExp(`id="${id}"`), id);
   }
   assert.doesNotMatch(html, /data-start-episode|data-view="chat"|drawer-close/);
-  // The Ask your agent panel names the harnesses (Claude Code, ChatGPT, OpenCode); nothing else may name a removed provider.
-  assert.doesNotMatch(html.replace(/<section id="agentHint"[^]*?<\/section>/, ""), /chatgpt|anthropic|opencode go|plannerChat|effort/i);
+  // The Ask your agent panel and the Settings harness list name the harnesses (Claude Code, ChatGPT, OpenCode); nothing else may name a removed provider.
+  assert.doesNotMatch(html.replace(/<section id="agentHint"[^]*?<\/section>/, "").replace(/<div class="harness-list">[^]*?<\/div>/, ""), /chatgpt|anthropic|opencode go|plannerChat|effort/i);
 });
 
 test("brand, nav, and the Ask your agent panel", () => {
@@ -45,7 +45,7 @@ test("Production is the default view and every view alias resolves", () => {
     location: { hash: "" }, history: { replaceState: (_, __, url) => { context.location.hash = url; } },
     document: { querySelectorAll: (selector) => selector === ".view" ? views : [], querySelector: () => views.find((view) => !view.hidden) || null },
     configDirty: false, profilesDirty: false, syncConfigForm: noop, syncFormatForm: noop, syncSpeakerForm: noop,
-    renderTranscriptSections: noop, renderTtsView: noop, renderPlayer: noop, renderConfigView: noop, renderFormatView: noop, renderEpisodeList: noop, renderWorkspace: noop,
+    renderTranscriptSections: noop, renderTtsView: noop, renderPlayer: noop, renderConfigView: noop, loadSystem: noop, renderFormatView: noop, renderEpisodeList: noop, renderWorkspace: noop,
   };
   install(["activeViewName", "setView"], context);
   for (const [hash, expected] of [["", "episodes"], ["chat", "episodes"], ["planner", "episodes"], ["profiles", "speakers"], ["formats", "format"], ["config", "config"], ["player", "player"]]) {

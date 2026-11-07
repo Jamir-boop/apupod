@@ -4,7 +4,7 @@
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["node", "/path/to/apupod/bin/apupod.mjs", "mcp"]
+        "command": ["npx", "-y", "apupod@1.1.0", "mcp"]
       }
     }
   },
