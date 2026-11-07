@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
-const TOOLS = ["get_workspace", "open_ui", "list_tts_options", "set_tts_models", "list_voices", "save_host_profile", "delete_host_profile", "save_episode_format", "delete_episode_format", "add_knowledge", "get_knowledge", "delete_knowledge", "save_plan", "get_plan", "delete_plan", "create_episodes", "get_episode", "get_script_rules", "save_script", "render_audio", "get_job", "list_jobs", "preview_voice", "rename_episode", "delete_episode", "jev_decide"];
+const TOOLS = ["get_workspace", "open_ui", "list_tts_options", "set_tts_models", "list_voices", "save_host_profile", "delete_host_profile", "save_episode_format", "delete_episode_format", "add_knowledge", "get_knowledge", "delete_knowledge", "save_plan", "get_plan", "delete_plan", "create_episodes", "get_episode", "get_script_rules", "save_script", "render_audio", "get_job", "list_jobs", "preview_voice", "rename_episode", "apply_latest_profiles", "delete_episode", "jev_decide"];
 const INITIALIZE = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } };
 
 // A test server plus an MCP client that sends the daemon's bearer token.
@@ -45,7 +45,7 @@ test("tools/list has every tool with annotations, and the widgets are self-conta
   }
   const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
   for (const name of ["get_workspace", "open_ui"]) assert.equal(byName[name]._meta.ui.resourceUri, "ui://apupod/workspace");
-  for (const name of ["get_episode", "save_script", "render_audio"]) assert.equal(byName[name]._meta.ui.resourceUri, "ui://apupod/episode");
+  for (const name of ["get_episode", "save_script", "render_audio", "apply_latest_profiles"]) assert.equal(byName[name]._meta.ui.resourceUri, "ui://apupod/episode");
   assert.equal(byName.get_workspace.annotations.readOnlyHint, true);
   assert.equal(byName.delete_episode.annotations.destructiveHint, true);
   assert.doesNotMatch(JSON.stringify(tools), /apiKey"|API_KEY"/, "no tool accepts key values");
@@ -154,6 +154,31 @@ test("host profile and Episode Format tools validate, check revisions, and keep 
   await fails("delete_host_profile", { id: "../x" }, /invalid/);
   const opened = await ok("open_ui", { view: "tts" });
   assert.match(opened.url, /\/\?view=tts$/);
+});
+
+test("apply_latest_profiles refreshes an episode's host snapshot and keeps the script", async (t) => {
+  const { ok, fails, rootDir } = await connect(t);
+  const host = (await ok("save_host_profile", { name: "Duo", voiceModel: "mimo-v2.5-tts", speakers: [speaker("Ana"), speaker("Ben")] })).profile;
+  const format = (await ok("save_episode_format", { name: "Short", speakerProfileId: host.id, language: "en-US", targetMinutes: 10 })).format;
+  const { episodes: [episode] } = await ok("create_episodes", { name: "Snapshot", episodeProfileId: format.id });
+  const { transcript } = (await ok("save_script", { episodeId: episode.id, script: "## One\nAna: Hi.\nBen: Hello." })).episode;
+  await ok("save_host_profile", { id: host.id, speakers: [{ name: "Ana", voiceId: "Mia" }, { name: "Ben" }] });
+  assert.equal((await ok("get_episode", { id: episode.id })).episode.speakerProfile.speakers[0].voiceId, "Chloe", "the snapshot stays until applied");
+
+  const episodePath = join(rootDir, "data", "episodes", episode.id, "episode.json");
+  const stored = JSON.parse(await readFile(episodePath, "utf8"));
+  await writeFile(episodePath, JSON.stringify({ ...stored, job: { id: "active", type: "tts", status: "running" } }));
+  await fails("apply_latest_profiles", { episodeId: episode.id }, /active episode job/);
+  await writeFile(episodePath, JSON.stringify(stored));
+
+  const applied = await ok("apply_latest_profiles", { episodeId: episode.id });
+  assert.equal(applied.changed, true);
+  assert.equal(applied.episode.speakerProfile.speakers[0].voiceId, "Mia");
+  assert.equal(applied.episode.speakerProfile.voiceModel, "mimo-v2.5-tts");
+  assert.equal(applied.episode.transcript, transcript);
+  assert.equal(applied.episode.status, "transcript_ready");
+  assert.equal((await ok("get_episode", { id: episode.id })).episode.speakerProfile.speakers[0].voiceId, "Mia");
+  assert.equal((await ok("apply_latest_profiles", { episodeId: episode.id })).changed, false);
 });
 
 test("knowledge, plan, episode, and script tools share the REST rules", async (t) => {

@@ -13,8 +13,8 @@ const SKILLS = readdirSync(join(ROOT, "skills"), { withFileTypes: true }).filter
 // Backticked snake_case words, such as `save_script`, are tool references.
 const toolRefs = (text) => new Set([...text.matchAll(/`([a-z]+(?:_[a-z]+)+)`/g)].map((match) => match[1]));
 
-test("src/mcp.mjs registers the 26 tools", () => {
-  assert.equal(TOOLS.size, 26);
+test("src/mcp.mjs registers the 27 tools", () => {
+  assert.equal(TOOLS.size, 27);
 });
 
 test("plugin manifests are valid, versioned and licensed with package.json, and run the bridge pinned to the release tag", () => {

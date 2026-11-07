@@ -174,6 +174,10 @@ export async function renameEpisode(paths, id, value) {
 }
 
 export async function applyLatestProfilesRequest(res, paths, id) {
+  return sendJson(res, 200, await applyLatestProfiles(paths, id));
+}
+
+export async function applyLatestProfiles(paths, id) {
   const episode = await loadEpisode(paths, id, true);
   if (isActiveJob(episode.job)) throw conflict("Wait for the active episode job to finish.");
 
@@ -185,7 +189,7 @@ export async function applyLatestProfilesRequest(res, paths, id) {
 
   const changed = JSON.stringify(episode.episodeProfile) !== JSON.stringify(episodeProfile)
     || JSON.stringify(episode.speakerProfile) !== JSON.stringify(speakerProfile);
-  if (!changed) return sendJson(res, 200, { changed: false, episode, warning: "" });
+  if (!changed) return { changed: false, episode, warning: "" };
 
   const { warning, ...derived } = await reconcileEpisodeContent(paths, episode, episodeProfile, speakerProfile, { strictTranscript: true });
   await updateEpisode(paths, episode, {
@@ -194,7 +198,7 @@ export async function applyLatestProfilesRequest(res, paths, id) {
     ...derived,
     lastError: null,
   });
-  return sendJson(res, 200, { changed: true, episode: await loadEpisode(paths, id, true), warning });
+  return { changed: true, episode: await loadEpisode(paths, id, true), warning };
 }
 
 async function reconcileEpisodeContent(paths, episode, episodeProfile, speakerProfile, { strictTranscript = false } = {}) {

@@ -22,7 +22,7 @@ apupod is a local podcast studio. You do all the writing (hosts, plans, scripts)
 The order is fixed. Skip a step only when its result already exists or the user says the defaults are good.
 
 1. **Source (optional).** If the user gives source material, save it with `add_knowledge` (Markdown, name ends in `.md`). Read it with `get_knowledge` (page with `offset` until `nextOffset` is null).
-2. **Hosts.** Create or update a host profile with `save_host_profile`. Follow the `apupod-hosts` skill.
+2. **Hosts.** Create or update a host profile with `save_host_profile`. Follow the `apupod-hosts` skill. After you change a host profile or Episode Format that existing episodes use, call `apply_latest_profiles` for each of these episodes before `get_script_rules`, `save_script`, or `render_audio`. Episodes keep their snapshot of the old profiles until then.
 3. **Episode Format.** Save the show format with `save_episode_format`: name, description, `speakerProfileId`, `language`, `targetMinutes` (5 to 60). apupod derives the segment count; never set it.
 4. **Plan.** Write the series plan and its planned episodes, then save them with `save_plan`. Follow the `apupod-plan` skill. A single episode is a valid plan. For one ad-hoc episode you can skip the plan and call `create_episodes` with `name` and `episodeProfileId`.
 5. **Episodes.** Create episode drafts with `create_episodes` (`planId` and `plannedEpisodeIds`).

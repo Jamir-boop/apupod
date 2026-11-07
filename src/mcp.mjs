@@ -11,7 +11,7 @@ import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpis
 import { redactConfig, setTtsModels } from "./config.mjs";
 import { availableModelIds, awaitLatestModelCatalog, discoveredModelLanguages, inactiveTtsModels, modelLanguageError, resolveLanguage, MIMO_VOICES, OPENAI_VOICES } from "./providers/catalog.mjs";
 import { ttsCueCapability, fetchElevenLabsVoices, fetchChatterboxVoices, CHATTERBOX_TAGS, CHATTERBOX_DEFAULTS, ELEVENLABS_DEFAULTS, MIMO_INSTRUCTION_PRESETS, TTS_DOCS } from "./providers/generate.mjs";
-import { TRANSCRIPT_TARGET_WORDS_PER_MINUTE, TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE, deleteEpisode, deleteSpeakerProfile, saveEpisodeFromBody, renameEpisode, resolveTranscriptPrompt, saveTranscript, transcriptLengthWarning, transcriptSpeakerRule, parseTranscript, writeProfiles } from "./episodes.mjs";
+import { TRANSCRIPT_TARGET_WORDS_PER_MINUTE, TRANSCRIPT_MINIMUM_WORDS_PER_MINUTE, deleteEpisode, deleteSpeakerProfile, saveEpisodeFromBody, renameEpisode, applyLatestProfiles, resolveTranscriptPrompt, saveTranscript, transcriptLengthWarning, transcriptSpeakerRule, parseTranscript, writeProfiles } from "./episodes.mjs";
 import { addKnowledgeBase, readKnowledgeBase, removeKnowledgeBase, saveAgentPlan, deletePlan, createPlanEpisodes } from "./plans.mjs";
 import { listJobs, enqueueTts, ensureFfmpeg, previewVoiceAudio } from "./jobs.mjs";
 import { jevDecide, voiceCatalog } from "./decide.mjs";
@@ -352,7 +352,7 @@ export function createMcpServer(context, origin) {
 
   tool("save_host_profile", {
     title: "Save host profile",
-    description: "Create (no id) or update (id) a host profile with 1 to 4 speakers. On update, given fields replace saved ones and each speaker keeps its saved settings for fields you omit (matched by name). expectedRevision rejects the save if the profile changed since you read it.",
+    description: "Create (no id) or update (id) a host profile with 1 to 4 speakers. On update, given fields replace saved ones and each speaker keeps its saved settings for fields you omit (matched by name). expectedRevision rejects the save if the profile changed since you read it. Existing episodes keep their snapshot of the old profile until apply_latest_profiles.",
     inputSchema: {
       id: id("Host profile").optional(),
       expectedRevision: z.number().int().optional(),
@@ -659,6 +659,19 @@ export function createMcpServer(context, origin) {
   }, async ({ id: episodeId, name }) => {
     const { transcript, ...episode } = await serializeMutation(context, () => renameEpisode(paths, episodeId, name));
     return result(`Renamed episode ${episodeId} to "${episode.name}".`, { episode });
+  });
+
+  tool("apply_latest_profiles", {
+    title: "Apply latest profiles",
+    description: "Refresh an episode's snapshot of its Episode Format and host profile from the current saved profiles; script rules and renders use that snapshot. The script stays as it is and must still parse for the new hosts, else the call is refused. Existing audio stays ready only if the TTS settings (language, model, voices, speaker tuning) did not change; else the episode needs a new render. Refused while the episode has an active job.",
+    inputSchema: { episodeId: id("Episode") },
+    annotations: write({ idempotent: true }),
+    _meta: widget(EPISODE_WIDGET_URI),
+  }, async ({ episodeId }) => {
+    const { changed, warning } = await serializeMutation(context, () => applyLatestProfiles(paths, episodeId));
+    const data = await episodeView(context, origin, episodeId, { changed, warnings: warning ? [warning] : [] });
+    const { name, speakerProfile } = data.episode;
+    return result(`${changed ? "Applied latest profiles to" : "Profiles already current for"} "${name}" (${episodeId}): host profile "${speakerProfile.name}", TTS model ${speakerProfile.voiceModel}, status ${data.episode.status}.${warning ? ` Warning: ${warning}` : ""}`, data);
   });
 
   tool("delete_episode", {

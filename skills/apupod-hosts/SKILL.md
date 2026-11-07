@@ -13,7 +13,7 @@ A host profile holds 1 to 4 speakers, a default TTS model (`voiceModel`), and sh
 2. Call `list_tts_options` with the show's language (for example `es-419`). Pick `voiceModel` from its `models`. Check that the model supports the language (`languages`) and note its cue capability.
 3. If `models` has no model that fits but `available` has one (a provider is ready, but its models are not active), activate it with `set_tts_models` (`models: [id]`, `active: true`), then use the returned active list. If both are empty, follow `tts.hint` (the user must add a key or fix the provider in Settings). Deactivate models (`active: false`) only when the user asks; apupod refuses to deactivate a model that a profile or episode uses.
 4. Call `list_voices` with `model` (or `provider`). Use only voice IDs from that list.
-5. Write the profile and save it with `save_host_profile`.
+5. Write the profile and save it with `save_host_profile`. After you change a host profile or Episode Format that existing episodes use, call `apply_latest_profiles` for each of these episodes before `get_script_rules`, `save_script`, or `render_audio`. Episodes keep their snapshot of the old profiles until then.
 6. Offer `preview_voice` for important voices (`speakerProfileId` + `speakerIndex`, with an `episodeProfileId` for the language). Give the user the returned URL.
 7. Then propose the Episode Format (`save_episode_format`) that uses this profile.
 

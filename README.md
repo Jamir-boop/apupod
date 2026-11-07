@@ -18,7 +18,7 @@ In the Andes, an *apu* is a "lord": the spirit of a mountain that watches over t
 
 ## Install
 
-Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.2.3 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. If the running daemon is older than the bridge (for example after a plugin update) and no TTS job is queued or running, the bridge replaces it with the new version; a busy daemon is kept until a later connect. You do not need a clone or a server that you start yourself.
+Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.3.0 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. If the running daemon is older than the bridge (for example after a plugin update) and no TTS job is queued or running, the bridge replaces it with the new version; a busy daemon is kept until a later connect. You do not need a clone or a server that you start yourself.
 
 The UI **Settings** view shows these commands with copy buttons, and shows when each harness last connected.
 
@@ -57,7 +57,7 @@ Add the MCP server to `opencode.json` (project) or `~/.config/opencode/opencode.
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.2.3", "mcp"]
+        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.3.0", "mcp"]
       }
     }
   },
@@ -146,6 +146,7 @@ Example prompts: "Use apupod to make a 3-episode podcast about the history of co
 | `list_jobs` | Recent render jobs and the active job. |
 | `preview_voice` | Synthesizes up to 600 characters for one speaker and returns a WAV URL. |
 | `rename_episode` | Renames an episode. |
+| `apply_latest_profiles` | Refreshes an episode's snapshot of its Episode Format and host profile from the saved profiles. |
 | `delete_episode` | Deletes an episode with its script and audio. |
 | `jev_decide` | Optional TypeSafe Jev check that picks configuration values only from the live workspace options. Saves nothing. |
 
