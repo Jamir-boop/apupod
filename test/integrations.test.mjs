@@ -112,10 +112,10 @@ function jevMock() {
         const request = JSON.parse(options.body);
         requests.push(request);
         assert.equal(options.headers.Authorization, "Bearer test-typesafe-key");
-        assert.equal(request.model, "jev-1.13.0");
+        assert.equal(request.model, "jev-1.14.0");
         assert.doesNotMatch(JSON.stringify(request.state), /test-typesafe-key|FULL_KNOWLEDGE/);
         if (unavailable) return Response.json({ secret: "do not expose" }, { status: 503 });
-        return Response.json({ model: "jev-1.13.0", answers: Object.fromEntries(Object.entries(request.questions).map(([id, question]) => {
+        return Response.json({ model: "jev-1.14.0", answers: Object.fromEntries(Object.entries(request.questions).map(([id, question]) => {
           if (question.type === "noul") return [id, { type: "noul", noul: 1 }];
           const selected = hashId(choices[id] || "keep_current");
           return [id, { type: "choice", choice: selected, confidence: lowConfidence ? 0.2 : 1, probabilities: Object.fromEntries(Object.keys(question.criteria).map((key) => [key, key === selected ? 1 : 0])) }];
@@ -138,7 +138,7 @@ async function jevSetup(t, mock) {
   state.config.assistantDecision = { enabled: true, model: "malicious-other-model" };
   const saved = await result.api("/api/config", state.config, "PUT");
   assert.equal(saved.status, 200, JSON.stringify(saved.value));
-  assert.equal(saved.value.config.assistantDecision.model, "jev-1.13.0");
+  assert.equal(saved.value.config.assistantDecision.model, "jev-1.14.0");
   assert.doesNotMatch(JSON.stringify(saved.value.config), /test-typesafe-key/);
   const plan = (await result.api("/api/plans", { name: "Spanish podcast", theme: "Topic", language: "es-419", speakerProfileId: state.profiles.speakerProfiles[0].id, episodeFormatId: state.profiles.episodeProfiles[0].id, planningModel: "mimo-v2.5-pro" })).value.plan;
   return { ...result, state, plan, chat: (text, extra = {}) => result.api("/api/plans/chat", { planId: plan.id, model: "mimo-v2.5-pro", text, ...extra }) };
@@ -367,7 +367,7 @@ test("decision provider settings retain separate blank keys and reject unsupport
   assert.equal(process.env.TYPESAFE_API_KEY, "test-typesafe-key");
   config.assistantDecision.provider = "typesafe";
   saved = await api("/api/config", config, "PUT");
-  assert.equal(saved.value.config.assistantDecision.model, "jev-1.13.0");
+  assert.equal(saved.value.config.assistantDecision.model, "jev-1.14.0");
   config.assistantDecision.provider = "unknown";
   assert.equal((await api("/api/config", config, "PUT")).status, 400);
   config.assistantDecision.provider = "openai";

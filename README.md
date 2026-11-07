@@ -88,7 +88,7 @@ The `Podcast Assistant` is a pane beside every view, not a view itself: describe
   - A `max_tokens` stop gives an error that names the output limit. Lower the effort or shorten the request.
   - [Messages API](https://platform.claude.com/docs/en/api/messages) · [Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)
 - `Jev configuration decisions`
-  - Optional assistant decision layer using `TYPESAFE_API_KEY` and the pinned model `jev-1.13.0`. It is disabled by default and is not a script or TTS model.
+  - Optional assistant decision layer using `TYPESAFE_API_KEY` and the pinned model `jev-1.14.0`. It is disabled by default and is not a script or TTS model.
   - Jev selects typed settings from valid model, language, profile, voice, and delivery-preset choices. The text model writes prose.
   - Host count is resolved before per-host decisions. Voice choices are specific to the selected provider and model. Unrelated saved tuning remains unchanged.
   - Low confidence or an unavailable service returns a visible question or warning, without letting the text model choose the configuration instead.

@@ -43,7 +43,7 @@ test("Jev uses the documented schema, server credential, and pinned model", asyn
   assert.equal(options.redirect, "error");
   assert.ok(options.signal instanceof AbortSignal);
   assert.deepEqual(Object.keys(request).sort(), ["model", "questions", "state"]);
-  assert.equal(request.model, "jev-1.13.0");
+  assert.equal(request.model, "jev-1.14.0");
   assert.equal(request.questions.route.type, "choice");
   assert.equal(Object.hasOwn(request.questions.route, "criteria"), true);
   assert.equal(Object.hasOwn(result.receipt, "state"), false);

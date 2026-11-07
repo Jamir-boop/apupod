@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { compileDeliveryTraits, DECISIONS_MODEL, deliveryTraitDefinitions, evaluateOpenAiDecisions } from "./decisions.mjs";
 
-export const JEV_MODEL = "jev-1.13.0";
+export const JEV_MODEL = "jev-1.14.0";
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const MAX_BYTES = 256 * 1024;
 const MAX_OPTIONS = 255;
