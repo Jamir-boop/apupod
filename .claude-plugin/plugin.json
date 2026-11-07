@@ -1,0 +1,13 @@
+{
+  "name": "apupod",
+  "displayName": "apupod",
+  "version": "1.0.0",
+  "description": "Agent-driven local podcast studio: your agent writes hosts, plans, and scripts through MCP tools; apupod saves them, renders audio with TTS, and shows a browser UI.",
+  "author": {
+    "name": "Jamir-boop",
+    "url": "https://github.com/Jamir-boop"
+  },
+  "homepage": "https://github.com/Jamir-boop/apupod",
+  "repository": "https://github.com/Jamir-boop/apupod",
+  "keywords": ["podcast", "tts", "mcp", "audio", "skills"]
+}

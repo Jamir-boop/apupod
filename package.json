@@ -1,8 +1,37 @@
 {
   "name": "apupod",
   "version": "1.0.0",
-  "private": true,
+  "description": "Agent-driven local podcast studio: MCP tools and skills for hosts, plans, scripts, and TTS audio, with a browser UI.",
+  "keywords": [
+    "podcast",
+    "tts",
+    "text-to-speech",
+    "mcp",
+    "model-context-protocol",
+    "agent-skills",
+    "claude-code",
+    "codex",
+    "opencode"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jamir-boop/apupod.git"
+  },
   "type": "module",
+  "bin": {
+    "apupod": "bin/apupod.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "public/",
+    "skills/",
+    ".claude-plugin/",
+    ".mcp.json",
+    "plugin.json",
+    "mcp.json",
+    "README.md"
+  ],
   "engines": {
     "node": ">=24"
   },

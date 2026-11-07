@@ -7,7 +7,7 @@ const install = (names, context) => runInNewContext(names.map(source).join("\n")
 const handler = (id, event) => script.match(new RegExp(`\\$\\("${id}"\\)\\.addEventListener\\("${event}", guard\\((async \\((?:event)?\\) => \\{[^]*?\\n    })\\)\\);`))[1];
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const noop = () => {};
-const renders = Object.fromEntries(["renderModelStatus", "renderProfileOptions", "renderChatControls", "renderFormatView", "renderConfigView", "renderTtsView", "renderJobIndicators", "renderPlayer", "renderEpisodeList", "updateWordCount", "renderPodcastAssistant", "updateSaveButtons", "rememberViewSelection", "renderTranscriptPrompt"].map((name) => [name, noop]));
+const renders = Object.fromEntries(["renderModelStatus", "renderProfileOptions", "renderPlanControls", "renderFormatView", "renderConfigView", "renderTtsView", "renderJobIndicators", "renderPlayer", "renderEpisodeList", "updateWordCount", "renderWorkspace", "updateSaveButtons", "rememberViewSelection", "renderTranscriptPrompt"].map((name) => [name, noop]));
 
 class Control {
   value = "";
@@ -19,19 +19,20 @@ class Control {
     this.value = (options.find((item) => item[2].includes("selected")) || options[0])?.[1] || "";
   }
   get innerHTML() { return this._html; }
+  querySelectorAll(selector) { return selector === "details.speaker-advanced[open]" ? this.openDetails || [] : []; }
 }
 
 function episodeContext() {
   const controls = new Map();
   const context = {
-    ...renders, uiRequests: { state: 0, episode: 0, prompt: 0, planLoad: 0, chat: 0, chatSelection: 0 }, structuredClone,
+    ...renders, uiRequests: { state: 0, episode: 0, prompt: 0, planLoad: 0 }, structuredClone,
     activePlan: null,
     currentEpisode: { id: "a", name: "Episode A", episodeProfileId: "f", speakerProfileId: "s", knowledgeBaseId: "kb", transcript: "Host: saved" },
     state: { profiles: { speakerProfiles: [{ id: "s", name: "Hosts" }], episodeProfiles: [{ id: "f", name: "Format" }] }, knowledgeBases: [{ id: "kb", name: "Source", characters: 10 }], episodes: [], plans: [] },
     configState: {}, configDirty: false, profilesDirty: false, episodeDraftDirty: false, transcriptDirty: false, transcriptPromptDirty: false,
-    chatGptPollTimer: null, TRANSCRIPT_DRAFT_PREFIX: "draft.", activeViewName: () => "transcript", validateControls: () => true,
+    TRANSCRIPT_DRAFT_PREFIX: "draft.", activeViewName: () => "transcript", validateControls: () => true,
     syncSpeakerForm: noop, syncFormatForm: noop, syncConfigForm: noop, notify: noop,
-    effortOptions: () => "", effortLevelsForModel: () => [], resolveTranscriptPrompt: async () => {}, confirm: () => true,
+    resolveTranscriptPrompt: async () => {}, confirm: () => true,
     $: (id) => { if (!controls.has(id)) controls.set(id, new Control()); return controls.get(id); },
     controls,
   };
@@ -289,29 +290,6 @@ test("old voice success and error do not alter new provider requests or catalogs
   }
 });
 
-test("plan save sends the loaded version, retains later edits, and preserves a conflict draft", async () => {
-  const context = episodeContext();
-  context.activePlan = { id: "p", name: "Plan", updatedAt: "v1" };
-  context.refreshPlanIndex = async () => {};
-  context.loadPlanForm = (plan) => { context.activePlan = plan; };
-  const request = Promise.withResolvers();
-  let submitted;
-  context.api = async (_, options) => { submitted = JSON.parse(options.body); return request.promise; };
-  install(["capturePlanDraft", "saveActivePlan"], context);
-  const saving = context.saveActivePlan();
-  await tick();
-  assert.equal(submitted.expectedUpdatedAt, "v1");
-  context.activePlan.name = "Later name";
-  request.resolve({ plan: { ...submitted, updatedAt: "v2" } });
-  await saving;
-  assert.equal(context.activePlan.name, "Later name");
-  assert.equal(context.activePlan.updatedAt, "v2");
-  context.api = async (_, options) => { assert.equal(JSON.parse(options.body).expectedUpdatedAt, "v2"); throw new Error("Content plan changed in another tab. Reload the plan before saving your changes."); };
-  await assert.rejects(context.saveActivePlan(), /changed in another tab/);
-  assert.equal(context.activePlan.name, "Later name");
-  assert.equal(context.activePlan.updatedAt, "v2");
-});
-
 test("playlist mutations from two stale tabs preserve additions and do not restore deletions", async () => {
   let stored = "[]";
   const storage = { getItem: () => stored, setItem: (_, value) => { stored = value; } };
@@ -424,39 +402,26 @@ test("a state snapshot from before a successful Hosts save cannot restore the ol
   assert.equal(context.profilesDirty, false);
 });
 
-test("KB deletion refreshes only its plan version and retains later local plan edits", async () => {
+test("KB deletion reloads the repointed active plan and clears local references", async () => {
   const context = episodeContext();
   context.activePlanId = "p";
   context.activePlan = { id: "p", name: "Plan", knowledgeBaseId: "kb", updatedAt: "v1" };
-  context.plannerChatThread = null;
   const savedPlan = { ...context.activePlan, knowledgeBaseId: "", updatedAt: "v2" };
-  const getPlan = Promise.withResolvers();
-  let submitted;
+  const paths = [];
   context.api = async (path, options) => {
-    if (path === "/api/knowledge/kb") return { cleared: { plans: 1, episodes: 0 } };
-    if (!options) return getPlan.promise;
-    submitted = JSON.parse(options.body);
-    if (submitted.expectedUpdatedAt !== "v2") throw new Error("Content plan changed");
-    return { plan: { ...submitted, updatedAt: "v3" } };
+    paths.push(`${options?.method || "GET"} ${path}`);
+    return path === "/api/knowledge/kb" ? { cleared: { plans: 1, episodes: 1 } } : { plan: savedPlan };
   };
   context.refreshState = async () => {};
-  context.refreshPlanIndex = async () => {};
   context.loadPlanForm = (plan) => { context.activePlan = plan; };
-  install(["deleteKnowledgeBase", "refreshPlanVersionAfterRepoint", "capturePlanDraft", "saveActivePlan"], context);
-  const deleting = context.deleteKnowledgeBase("kb");
-  await tick();
-  context.activePlan.name = "Later local name";
-  getPlan.resolve({ plan: savedPlan });
-  await deleting;
+  const notices = [];
+  context.notify = (message) => notices.push(message);
+  install(["deleteKnowledgeBase", "refreshPlanVersionAfterRepoint", "loadPlan"], context);
+  await context.deleteKnowledgeBase("kb");
+  assert.deepEqual(paths, ["DELETE /api/knowledge/kb", "GET /api/plans/p"]);
   assert.equal(context.activePlan.updatedAt, "v2");
-  assert.equal(context.activePlan.name, "Later local name");
-  await context.saveActivePlan();
-  assert.equal(submitted.expectedUpdatedAt, "v2");
-  assert.equal(submitted.name, "Later local name");
-  context.activePlan = { ...savedPlan, updatedAt: "v1" };
-  context.api = async () => ({ plan: { ...savedPlan, name: "Other-tab change" } });
-  await context.refreshPlanVersionAfterRepoint({ ...savedPlan, updatedAt: "v1" }, { knowledgeBaseId: "" });
-  assert.equal(context.activePlan.updatedAt, "v1", "a different remote plan change must still produce a save conflict");
+  assert.equal(context.currentEpisode.knowledgeBaseId, "");
+  assert.match(notices.at(-1), /Cleared 1 plan\(s\) and 1 episode\(s\)\.$/);
 });
 
 test("a late transcript import cannot replace another episode or a later local edit", async () => {
@@ -645,30 +610,6 @@ test("a transcript edit keeps its draft base, so a restore after a regeneration 
   assert.deepEqual(JSON.parse(stored.get("draft.a")), { base: "Host: edit 3", text: "Host: edit 4" });
 });
 
-test("Start stays disabled while its POST runs, across list re-renders, and re-enables after", async () => {
-  for (const outcome of ["resolve", "reject"]) {
-    const request = Promise.withResolvers();
-    const rendered = [];
-    let calls = 0;
-    const episode = { id: "e1", transcriptWords: 0, episodeProfileId: "f" };
-    const context = { state: { profiles: { episodeProfiles: [], speakerProfiles: [] } }, jobsState: { jobs: [] }, startingEpisodeIds: new Set(),
-      api: () => { calls++; return request.promise; }, trackJob: noop, notify: noop };
-    context.renderEpisodeList = () => rendered.push(context.episodeRowHtml(episode, "One"));
-    install(["option", "escapeHtml", "icon", "episodeRowHtml", "startEpisode"], context);
-    const starting = context.startEpisode("e1");
-    // Not awaited: without the re-entry guard this second call would wait on the same pending request.
-    const second = context.startEpisode("e1");
-    assert.equal(calls, 1);
-    context.renderEpisodeList();
-    assert.match(rendered.at(-1), /data-start-episode="e1" disabled>/);
-    if (outcome === "resolve") request.resolve({ job: {} }); else request.reject(new Error("Server error"));
-    await (outcome === "resolve" ? starting : assert.rejects(starting, /Server error/));
-    await second;
-    assert.equal(context.startingEpisodeIds.size, 0);
-    assert.match(rendered.at(-1), /data-start-episode="e1">/);
-  }
-});
-
 test("status regions are written only when their text changes", () => {
   const writes = {};
   class Counted extends Control {
@@ -684,7 +625,7 @@ test("status regions are written only when their text changes", () => {
   runInNewContext([statusHelper, ...["currentJob", "episodeIsBusy", "updateSaveButtons", "renderJobIndicators"].map(source)].join("\n"), context);
   context.renderJobIndicators();
   context.renderJobIndicators();
-  assert.deepEqual([writes.renderStatus, writes.workspaceStatusValue, writes.transcriptSaveStatus, writes.transcriptJobStatus], [1, 1, 1, undefined]);
+  assert.deepEqual([writes.renderStatus, writes.workspaceStatusValue, writes.transcriptSaveStatus], [1, 1, 1]);
   assert.equal(context.$("workspaceStatusValue").textContent, "1 active");
   assert.equal(context.$("workspaceStatusValue").parentElement.dataset.state, "active");
   job.status = "completed";
@@ -825,6 +766,9 @@ test("episode chips, removal confirms, and the shared accent list", () => {
   assert.equal(cards.$("speakerCards").innerHTML.split('<datalist id="accent-list">').length - 1, 1);
   assert.equal(cards.$("speakerCards").innerHTML.split('list="accent-list"').length - 1, 3);
   assert.match(cards.$("speakerSidebar").innerHTML, /data-speaker-nav="0" class="active" aria-current="true"/);
+  cards.$("speakerCards").openDetails = [{ closest: () => ({ dataset: { speakerIndex: "1" } }) }];
+  cards.renderSpeakerCards({ voiceModel: "m", speakers: [{ name: "A" }, { name: "B" }] });
+  assert.deepEqual(cards.$("speakerCards").innerHTML.match(/<details class="speaker-advanced"[^>]*>/g), ['<details class="speaker-advanced">', '<details class="speaker-advanced" open>'], "a rebuild keeps an open disclosure open");
 });
 
 test("page markup and CSS keep the accessibility and layout fixes", () => {
@@ -835,10 +779,7 @@ test("page markup and CSS keep the accessibility and layout fixes", () => {
   assert.doesNotMatch(script, /label\.title = label\.dataset\.help/);
   assert.match(html, /<div id="speakerSidebar"[^>]*role="group"/);
   assert.doesNotMatch(html, /role="navigation"/);
-  assert.doesNotMatch(html, /id="chatHistoryPanel"[^>]*aria-modal/);
-  assert.match(source("setChatHistoryOpen"), /parentElement\.children\) if \(node\.id !== "chatHistoryPanel"\) node\.inert = open/);
-  assert.match(source("visibleFocusable"), /!node\.closest\("\[inert\]"\)/, "the mobile chat Tab trap must skip controls that chat history made inert");
-  assert.doesNotMatch(source("activeModal"), /chatHistoryPanel/, "chat history uses inert, not the modal Tab trap");
+  assert.match(source("visibleFocusable"), /!node\.closest\("\[inert\]"\)/, "the Activity Tab trap must skip inert controls");
   assert.match(source("removeSpeaker"), /updateSaveButtons\(\);\n\s+\$\("addSpeaker"\)\.focus\(\);/);
   assert.match(script, /configState\.compatibleConnections = configState\.compatibleConnections\.filter[^\n]*\n\s+configDirty = true;\n\s+renderConfigView\(\);\n\s+return \$\("addCompatibleConnection"\)\.focus\(\);/);
   assert.match(source("deleteEpisode"), /localStorage\.removeItem\(TRANSCRIPT_DRAFT_PREFIX \+ id\)/);
@@ -847,14 +788,11 @@ test("page markup and CSS keep the accessibility and layout fixes", () => {
   assert.match(leave, /if \(navigator\.userActivation && !navigator\.userActivation\.hasBeenActive\) return;\n\s+event\.preventDefault\(\);/);
   assert.match(script, /changeEpisodeHosts\(select\.dataset\.episodeHost, select\.value\)\.catch\(\(error\) => \{[^]*?lastEpisodeListHtml = "";\s+renderEpisodeList\(\);\s+throw error;/);
   assert.match(html, /<div class="workspace-status" role="status">/);
-  assert.doesNotMatch(source("renderPodcastAssistant").match(/\$\("workspaceProgress"\)\.innerHTML = [^\n]*/)[0], /aria-pressed/);
-  assert.match(source("renderPodcastAssistant"), /' class="active" aria-current="page"'/);
+  assert.doesNotMatch(source("renderWorkspace").match(/\$\("workspaceProgress"\)\.innerHTML = [^\n]*/)[0], /aria-pressed/);
+  assert.match(source("renderWorkspace"), /' class="active" aria-current="page"'/);
   assert.doesNotMatch(source("renderSpeakerCards"), /aria-pressed/);
   assert.equal(script.split('notify(error.message || String(error), "error")').length - 1, 1);
-  assert.equal(script.split("if (open) setChatControlsOpen(false); else { setChatControlsOpen(true);").length - 1, 1);
   const css = html.match(/<style[^>]*>([\s\S]*?)<\/style>/)[1];
-  const mobileChat = Number(script.match(/const mobileChatQuery = matchMedia\("\(max-width: (\d+)px\)"\)/)[1]);
-  assert.equal(mobileChat, 1024, "the chat becomes a mobile overlay at 1024 px, so 1025-1200 px keeps the sidebar chat");
   // Brace-depth scan, so blocks with nested @keyframes are checked too.
   const mediaBlocks = [];
   for (const match of css.matchAll(/@media ([^{]+)\{/g)) {
@@ -864,7 +802,6 @@ test("page markup and CSS keep the accessibility and layout fixes", () => {
   }
   assert.ok(mediaBlocks.filter(([query]) => /max-width: 820px/.test(query)).some(([, body]) => /\.workspace-counter \{/.test(body)), "the 820 px block with the counter rule is scanned");
   for (const [query, body] of mediaBlocks) {
-    if (/\.assistant-chat \{ display: none; \}/.test(body)) assert.ok(Number(query.match(/max-width: (\d+)px/)?.[1]) <= mobileChat && !/min-width/.test(query), query);
     if (/max-width: (?:1024|820)px/.test(query)) {
       assert.doesNotMatch(body, /\.workspace-(?:status|counter) \{[^}]*display: none/, query);
       assert.doesNotMatch(body, /\.workspace-(?:status|counter) \{[^}]*visibility: hidden/, query);

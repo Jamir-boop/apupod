@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "apupod",
+      "url": "http://127.0.0.1:4173"
+    },
+    {
+      "name": "apupod-serve",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["bin/apupod.mjs", "serve"],
+      "port": 4173
+    }
+  ]
+}

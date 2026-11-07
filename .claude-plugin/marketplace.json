@@ -1,0 +1,15 @@
+{
+  "name": "apupod",
+  "description": "apupod, the agent-driven local podcast studio",
+  "owner": {
+    "name": "Jamir-boop",
+    "url": "https://github.com/Jamir-boop"
+  },
+  "plugins": [
+    {
+      "name": "apupod",
+      "source": "./",
+      "description": "MCP tools and skills to plan, script, and render podcasts with a local apupod daemon"
+    }
+  ]
+}

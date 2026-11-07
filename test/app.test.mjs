@@ -1713,8 +1713,7 @@ test("v4 controls preserve hidden legacy settings and select only active v4 for 
 });
 
 test("index.html guards every long job behind the shared button lock", async () => {
-  assert.match(html, /step\.action === "generateTranscript"\) return lockWhile\(\$\("generateTranscript"\), generateTranscript\)/);
-  assert.match(html, /step\.action === "generateTts"\) return lockWhile\(\$\("renderAudio"\), renderAudio\)/);
+  assert.match(html, /\$\("renderAudio"\)\.addEventListener\("click", guard\(\(\) => lockWhile\(\$\("renderAudio"\), renderAudio\)\)\)/);
   // The button is re-enabled before the render, so a throwing render cannot leave it disabled forever.
   assert.match(html, /finally \{ delete button\.dataset\.busy; button\.disabled = false; renderJobIndicators\(\); \}/);
 });

@@ -1,5 +1,14 @@
 # Agent Notes
 
+## Product rules
+
+- apupod makes no LLM calls. Do not add text-model providers, prompt generation, or chat flows to the app. The user's agent harness does all text work through MCP tools and skills.
+- Every new user-facing feature needs an MCP tool in `src/mcp.mjs` (or a change to an existing tool) and an update to the skills in `skills/` that describe the workflow. Use the same core functions as the REST handlers; do not duplicate rules.
+- Skills reference tools by their exact names. `test/packaging.test.mjs` fails when a skill names a tool that does not exist.
+- MCP tools never accept, return, or log key values. Report only `hasApiKey` flags.
+
+## TTS providers
+
 - When adding a TTS provider, review the provider's official API docs first.
 - Add matching UI controls, saved speaker fields, validation, default values, request payload mapping, examples/tooltips, docs links where known, and tests.
 - ElevenLabs TTS docs: https://elevenlabs.io/docs/api-reference/text-to-speech/convert
@@ -10,6 +19,8 @@
 After completing a modification or implementing a new feature, update the app
 version in `package.json`. `package-lock.json` must match: a test asserts the
 two agree, so bump both with `npm version --no-git-tag-version <x.y.z>`.
+Then set the same `version` in `.claude-plugin/plugin.json` and the root
+`plugin.json` by hand; `test/packaging.test.mjs` asserts that they match.
 
 Rules:
 

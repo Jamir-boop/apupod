@@ -1,191 +1,182 @@
-# pod-god
+# apupod
 
-Small local web app for building reviewed podcast transcripts and rendered audio. No Docker or DB.
+apupod is a local podcast studio that your AI agent drives. Your agent (Claude Code, the ChatGPT desktop app, or OpenCode) writes the hosts, the series plan, and the scripts, and it calls apupod MCP tools to save them. apupod validates and stores the work, renders the audio with your TTS provider keys, and shows everything in a browser UI.
+
+apupod makes no LLM calls. All text work runs on your agent subscription. apupod keeps the data, the UI, the TTS render pipeline (FFmpeg, clip cache, player), and an optional TypeSafe Jev check.
+
+## The name
+
+**apupod** (say "AH-poo-pod") joins the Quechua word *apu* and *pod*.
+
+In the Andes, an *apu* is a "lord": the spirit of a mountain that watches over the place and the people below it. The name fits the design: your agent is the lord of the show and makes the decisions, and apupod keeps the show (its hosts, plans, scripts, and audio) safe in one place.
 
 ## Requirements
 
-- Node.js 24+
-- FFmpeg and FFprobe on `PATH`
-- Browser on same machine
+- Node.js 24 or later
+- FFmpeg and FFprobe on `PATH` (for audio rendering)
+- A key for at least one TTS provider (ElevenLabs, MiMo, OpenAI, Chatterbox, or an OpenAI-compatible TTS server)
 
-## Start
+## Install
+
+apupod is not on npm yet. Install it from a clone:
 
 ```bash
-cp .env.example .env
+git clone https://github.com/Jamir-boop/apupod.git
+cd apupod
 npm ci
-npm start
 ```
 
-Open `http://127.0.0.1:4173`.
+Each harness starts the stdio bridge (`apupod mcp`). The bridge connects to the apupod daemon, or starts it in the background if it is not running. You do not need to start a server yourself.
 
-The app depends on the official `openai` and `@anthropic-ai/sdk` packages, pinned in `package-lock.json`.
-The SDKs add their own `User-Agent` and `X-Stainless-*` headers to each request. The app stops the SDKs from using the environment base URL, key, organization, project, `OPENAI_CUSTOM_HEADERS` or `ANTHROPIC_CUSTOM_HEADERS`; each connection uses only its configured URL and key.
+The clone must contain `node_modules` (from `npm ci`), because the plugins run `bin/apupod.mjs` from it.
+
+### Claude Code CLI and Claude desktop (Code tab)
+
+This repository is a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) with one plugin, `apupod` (`.claude-plugin/plugin.json`, `.mcp.json`, `skills/`).
+
+```bash
+claude plugin marketplace add /path/to/apupod
+claude plugin install apupod@apupod
+```
+
+In a session, `/plugin marketplace add /path/to/apupod` and `/plugin install apupod@apupod` do the same. The Claude desktop Code tab uses the same plugins. A marketplace added from a local path loads the plugin in place, so `git pull` and `npm ci` update it.
+
+To open the UI in the Claude desktop browser pane, copy `.claude/launch.json` from this repository into your project's `.claude/` folder. Its `apupod` entry opens `http://127.0.0.1:4173` when the daemon runs. Its `apupod-serve` entry starts the daemon from this repository.
+
+### ChatGPT desktop app and Codex CLI
+
+This repository is also a portable Agent Plugins package (root `plugin.json`, `mcp.json`, `skills/`) with a repo marketplace at `.agents/plugins/marketplace.json`. The Codex CLI and Codex in the ChatGPT desktop app share `~/.codex/config.toml`, so one setup serves both.
+
+```bash
+codex plugin marketplace add /path/to/apupod
+codex plugin add apupod@apupod
+```
+
+You can also restart the ChatGPT desktop app and install `apupod` from the `apupod` source in the Plugins Directory. The plugin has a local (stdio) MCP server, so it runs only in the desktop app and the CLI, in local threads.
+
+The install copies the whole plugin folder into `~/.codex/plugins/cache/`. Use a clean clone (with `node_modules`, but no `.env` or `data/`) so that no secrets or old data are copied. After you update the clone, install the plugin again: `codex plugin remove apupod@apupod`, then `codex plugin add apupod@apupod`.
+
+### OpenCode CLI and app
+
+Add the MCP server and the skills to `opencode.json` (project) or `~/.config/opencode/opencode.json` (global). Replace `/path/to/apupod` with the absolute path of your clone (also in `examples/opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "apupod": {
+        "type": "local",
+        "command": ["node", "/path/to/apupod/bin/apupod.mjs", "mcp"]
+      }
+    }
+  },
+  "skills": ["/path/to/apupod/skills"]
+}
+```
+
+The `skills` entry makes OpenCode find the four apupod skills. Use an absolute path: OpenCode resolves a relative path from its working directory, not from the config file. Instead of the `skills` entry, you can copy the `skills/apupod*` folders into `~/.config/opencode/skills/` or `~/.agents/skills/`.
+
+OpenCode releases before the `mcp.servers` format put the server directly under `mcp` (`"mcp": {"apupod": {"type": "local", "command": [...], "enabled": true}}`).
+
+## Keys
+
+Set keys in the UI **Settings** view, or in the `.env` file in the config dir (written with mode `0600`). A variable in the process environment wins over the file. See `.env.example` for the names:
+
+- TTS: `ELEVENLABS_API_KEY`, `MIMO_API_KEY` (and optional `MIMO_BASE_URL`), `OPENAI_API_KEY`, `CHATTERBOX_API_KEY` (optional for a local server), and one generated key per OpenAI-compatible TTS connection.
+- `TYPESAFE_API_KEY` (optional): turns on the `jev_decide` check with the pinned model `jev-1.14.0`. apupod works without it.
+- `PORT` (optional): the daemon port on `127.0.0.1`, default `4173`.
+
+MCP tools never accept, return, or log key values. They report only `hasApiKey` flags.
+
+## Data and config
+
+apupod never depends on the current directory.
+
+- Data dir: `$APUPOD_DATA_DIR`, else `$XDG_DATA_HOME/apupod`, else `~/.local/share/apupod`. It holds `profiles.json` (host profiles and Episode Formats), `plans/`, `knowledge/` (Markdown knowledge bases), `episodes/` (scripts, audio, clip cache), and `previews/` (voice previews, removed after one hour).
+- Config dir: `$APUPOD_CONFIG_DIR`, else `$XDG_CONFIG_HOME/apupod`, else `~/.config/apupod`. It holds `config.json` (TTS connections, no secrets), `.env` (keys), `mcp-token` (the bridge bearer token), `daemon.json` (PID and URL of the running daemon), and `daemon.log`.
+
+The `data/` folder in this repository is an archive of the old app. apupod does not read it.
+
+## Workflow
+
+Ask your agent for a podcast. The `apupod` skill guides it through these steps:
+
+1. Save source material (optional): `add_knowledge`.
+2. Design the hosts and voices: `save_host_profile` (skill `apupod-hosts`).
+3. Save the show format (language, length): `save_episode_format`.
+4. Plan the series and its episodes: `save_plan` (skill `apupod-plan`).
+5. Create the episode drafts: `create_episodes`.
+6. Write each script: `get_script_rules`, then `save_script` (skill `apupod-script`).
+7. Render the audio: `render_audio`, then follow it with `get_job`.
+8. Listen in the chat (where the host shows widgets) or in the UI Player.
+
+Example prompts: "Use apupod to make a 3-episode podcast about the history of coffee, with two hosts." "Write and render the next apupod episode."
+
+## Tools
+
+| Tool | Does |
+|---|---|
+| `get_workspace` | Overview: host profiles, formats, knowledge bases, plans, episodes, TTS readiness, Jev availability, UI URL. Call it first. |
+| `open_ui` | Returns the UI URL, optionally deep-linked to a view or an episode. |
+| `list_tts_options` | Active TTS models, languages, cue capabilities, tuning ranges and defaults, and which providers have keys. |
+| `list_voices` | Voices for a TTS provider or one active TTS model. |
+| `save_host_profile` | Creates or updates a host profile with 1 to 4 speakers. |
+| `delete_host_profile` | Deletes a host profile; formats and plans move to the first remaining profile. |
+| `save_episode_format` | Creates or updates an Episode Format (name, description, hosts, language, target minutes). |
+| `delete_episode_format` | Deletes an Episode Format that no episode or plan uses. |
+| `add_knowledge` | Saves a Markdown knowledge base (at most 3 MiB). |
+| `get_knowledge` | Reads a knowledge base in pages. |
+| `delete_knowledge` | Deletes a knowledge base. |
+| `save_plan` | Creates or updates a content plan with the planned episode list the agent wrote. |
+| `get_plan` | Reads a content plan. |
+| `delete_plan` | Deletes a content plan; its episodes stay. |
+| `create_episodes` | Creates episode drafts from planned episodes, or one ad-hoc episode. |
+| `get_episode` | Reads an episode with its script, status, render job, and audio URL. |
+| `get_script_rules` | Everything the agent needs to write a valid script: speakers, segments, word targets, language, TTS cue rules, source. |
+| `save_script` | Validates and saves the Markdown script; can also queue the render. |
+| `render_audio` | Queues the TTS render of the saved script into an MP3. |
+| `get_job` | Status and progress of a render job. |
+| `list_jobs` | Recent render jobs and the active job. |
+| `preview_voice` | Synthesizes up to 600 characters for one speaker and returns a WAV URL. |
+| `rename_episode` | Renames an episode. |
+| `delete_episode` | Deletes an episode with its script and audio. |
+| `jev_decide` | Optional TypeSafe Jev check that picks configuration values only from the live workspace options. Saves nothing. |
+
+## Widgets
+
+Hosts that support MCP Apps show two in-chat widgets: `ui://apupod/workspace` (overview cards, from `get_workspace` and `open_ui`) and `ui://apupod/episode` (status, script stats, and an audio player, from `get_episode`, `save_script`, and `render_audio`). The widgets render only from the tool's structured result and load audio from the daemon URL. Every tool also returns a complete text result, so hosts without widgets lose nothing.
+
+## The UI
+
+Open `http://127.0.0.1:4173` (or run `apupod open` to print the URL). The UI shows the production list, hosts, format, script editor, TTS preview and render, player, activity, and Settings (TTS connections, the TypeSafe key, knowledge bases). You can make light edits there. The UI refreshes by itself when the agent changes data.
+
+## Security
+
+- The daemon binds to `127.0.0.1` only and accepts only local requests with a local `Host` header.
+- `/mcp` needs `Authorization: Bearer <token>`, with the token from `mcp-token` in the config dir (mode `0600`). The stdio bridge sends it for you. `/mcp` rejects any foreign `Origin`.
+- The REST API rejects cross-origin writes.
+- Keys stay in the daemon. API and tool results return `hasApiKey` flags, never key values.
+
+OpenAI and compatible TTS voices are AI-generated. Disclose this in published episodes.
+
+## CLI
+
+```text
+apupod serve       Run the daemon (UI + REST + /mcp) in the foreground
+apupod mcp         Run the stdio bridge (harnesses start this)
+apupod open        Print the UI URL
+apupod --version   Print the version
+```
+
+From a clone, run `node bin/apupod.mjs <command>`.
 
 ## Development
 
-Run with automatic environment loading:
-
 ```bash
-npm run dev
+npm ci
+npm test               # all tests (node --test)
+node bin/apupod.mjs serve   # or: npm start
 ```
 
-`server.mjs` is the runtime entrypoint. The implementation lives in `src/app.mjs` (server, routing, startup), `src/util.mjs`, `src/store.mjs`, `src/config.mjs`, `src/episodes.mjs`, `src/plans.mjs`, `src/jobs.mjs`, `src/chat.mjs`, `src/providers/`, `src/chatgpt.mjs`, `src/decisions.mjs`, `src/jev.mjs`, and `src/defaults.mjs`; the root `app.mjs` and `defaults.mjs` are one-line re-export shims kept for existing imports.
-
-## Views
-
-The `Podcast Assistant` is a pane beside every view, not a view itself: describe a podcast in chat, upload optional Markdown, and review proposed hosts and formats before applying them.
-
-- `Episodes` (`view-episodes`): create and run episode drafts, track job progress, open or delete saved episodes.
-- `Hosts` (`view-speakers`): 1 to 4 speakers, default TTS model, and per-speaker voice, style, accent and tuning overrides.
-- `Format` (`view-format`): name, description, language, target minutes, and the outline and transcript models with their reasoning effort.
-- `Script` (`view-transcript`): open saved episodes, review provider/model cue rules, generate transcripts, and edit canonical text.
-- `TTS Generator` (`view-tts`): preview speakers in the saved Episode Format language and render final MP3.
-- `Player` (`view-player`): play rendered episodes, change playback speed, manage an in-memory queue, and save browser-local playlists while navigating other views.
-- `Model Connections` (`view-config`): manage provider rows, endpoints, keys, and explicitly active LLM/TTS models. Save refreshes the matching model catalog without restart or blocking unrelated storage writes.
-
-## Providers
-
-- `MiMo`
-  - Text generation via `chat/completions`
-  - TTS via `mimo-v2.5-tts`
-- `ElevenLabs`
-  - TTS models from `/v1/models`
-  - Voice browser from `/v2/voices`
-  - Standard `eleven_v4` uses the existing per-turn speech endpoint. Activate it in Model Connections before use. Existing profiles keep their model choices.
-  - v4 sends Stability and Similarity, plus optional seed and text normalization. It does not send Style, Speed, or Speaker boost. Hidden legacy values remain saved.
-  - v4 preserves natural audio tags and rejects SSML. Requests stay within 10,000 characters, or a smaller advertised limit.
-  - All ElevenLabs models use advertised request limits, with model defaults when no limit is returned. Long turns split at safe text boundaries, or fail if a safe split is not possible. Chunk audio combines before the turn pause.
-  - Accent overrides cannot force a v4 accent. Cross-language speech uses a natural target-language accent. Preview important voices before rendering.
-  - Native multi-speaker dialogue and v4 Turbo are deferred. Realtime-only models stay unavailable in this HTTP workflow.
-  - [ElevenLabs v4 and prompting](https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices)
-- `OpenAI-compatible`
-  - Model discovery via `/models`
-  - Transcript generation via `/chat/completions`
-  - TTS via `/audio/speech`
-  - Multiple named connections supported
-- `OpenAI`
-  - Built-in provider using `OPENAI_API_KEY`
-  - Default API root: `https://api.openai.com/v1`
-  - Separate LLM, TTS, and model URL overrides supported with one shared key
-  - Script models and TTS models load from `/models` after Config save
-  - TTS uses `/audio/speech`; `gpt-4o-mini-tts` supports expressive voice instructions
-- `ChatGPT plan`
-  - Separate from the OpenAI API-key connection. It is disabled by default.
-  - In Model Connections, use `Continue with ChatGPT`, allow plan usage, enable the provider, and activate models from that account's catalog.
-  - Uses the public Responses API for eligible text requests. It does not provide TTS or read ChatGPT conversations, memories, or Codex credentials.
-  - Each saved account has its own registration. Requests pin the selected account. Account changes or sign-out stop old requests instead of using a different account.
-  - Queued ChatGPT transcript jobs pin the account when queued. An account change before execution stops the job instead of using the newly selected account.
-  - Usage or access errors stop the request. There is no automatic API-key billing fallback. Use `Manage usage` or select another provider yourself.
-  - Prompts and selected context go to OpenAI. Local storage does not mean offline inference.
-  - This flow is for eligible local and open-source clients. Paid or remotely hosted distribution needs a separate access review. [Official local-app guide](https://developers.openai.com/siwc/token-sharing-open-source)
-- `Anthropic`
-  - Built-in text provider for Claude models using `ANTHROPIC_API_KEY`. It does not provide TTS.
-  - The API root is fixed at `https://api.anthropic.com`. `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` in the environment are not used.
-  - Discovers models from `/v1/models` after Config save. Effort levels come from each model's capabilities. Models stay inactive until you activate them as LLM models.
-  - Requests stream from `/v1/messages` with an output ceiling of 64,000 tokens (or the model's lower limit) and the 240 s request deadline.
-  - Uses server-side refusal fallback with `fallbacks: "default"`: if a model declines, another Claude model can continue the request, billed at the fallback model's rate. A mid-stream refusal, or a refusal in a billed category, is billed too.
-  - A refusal gives a clear error. Change the request or select another model.
-  - A `max_tokens` stop gives an error that names the output limit. Lower the effort or shorten the request.
-  - [Messages API](https://platform.claude.com/docs/en/api/messages) · [Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)
-- `Jev configuration decisions`
-  - Optional assistant decision layer using `TYPESAFE_API_KEY` and the pinned model `jev-1.14.0`. It is disabled by default and is not a script or TTS model.
-  - Jev selects typed settings from valid model, language, profile, voice, and delivery-preset choices. The text model writes prose.
-  - Host count is resolved before per-host decisions. Voice choices are specific to the selected provider and model. Unrelated saved tuning remains unchanged.
-  - Low confidence or an unavailable service returns a visible question or warning, without letting the text model choose the configuration instead.
-  - Review the decision receipt and use manual `Apply`. Apply rejects stale settings, changed accounts, inactive selected models, and invalid voice ownership. Older messages without receipts remain compatible.
-  - Only a small current request, selected context, and recent chat history go to TypeSafe. The full knowledge base and credentials are not sent as decision state. [TypeSafe API](https://docs.typesafe.ai/api)
-- `OpenAI Decisions`
-  - Select OpenAI Decisions in Assistant configuration decisions. Uses the existing `OPENAI_API_KEY` with the pinned `gpt-6-luna` model and native `/v1/decisions` endpoint. No new secret is needed. URL overrides and ChatGPT OAuth tokens are not used.
-  - This is billed API use, separate from a ChatGPT subscription. Changing the selected decision provider does not clear either provider's key. Blank key fields keep saved keys. The OpenAI connection owns the OpenAI key control; the TypeSafe field always owns the TypeSafe key.
-  - Uses typed choices and predicates for intent, profile targets, field scope, and action suggestions. Named refusals, invalid answers, timeouts, or uncertainty stop the proposal. There is no automatic provider fallback or Decisions retry.
-  - In Hosts, use `Suggest delivery setup` for the current unsaved draft. It sends full backstory, personality, voice direction, profile rules, episode language, and the request. It needs no text model. A role choice and five ordinal rubrics (energy, warmth, theatricality, pacing, restraint) map to supported delivery presets and a direction in the existing `style` field. The direction feeds the transcript prompt after Apply.
-  - Delivery-only requests preserve host count, personas, voice, model, accent, language, and unrelated tuning. Numeric settings in a chat request require clarification instead of being replaced by inferred traits. Changed tuning in the current Hosts draft is kept.
-  - Review trait evidence and the proposed direction, then press manual `Apply`. Apply saves the reviewed draft and direction. A changed saved source or a later draft edit requires a new suggestion. Other unsaved profile edits are kept. Script and audio generation still need explicit approval.
-  - The `0.7` safety gate is **UNCALIBRATED**, not a proven accuracy estimate. Decision receipts include provider and model, but not credentials or input context. [Official Decisions API](https://developers.openai.com/api/reference/resources/decisions/methods/create)
-- `OpenCode Go`
-  - Built-in LLM provider using the [OpenCode Go API](https://opencode.ai/docs/go/)
-  - Reuses the `opencode-go` API credential from the current user's OpenCode login
-  - `OPENCODE_GO_API_KEY` overrides the login credential when set
-  - Discovers models from `https://opencode.ai/zen/go/v1/models`; MiniMax and Qwen use `/messages`, while the remaining Go models use `/chat/completions`
-  - Models remain inactive until selected in Config and cannot be enabled as TTS models; newly discovered IDs stay disabled until their API protocol is mapped
-- `Chatterbox`
-  - User-supplied OpenAI-compatible base URL
-  - Model discovery via `/models`, voice discovery via `/voices`, and TTS via `/audio/speech`
-  - The service must be running before refresh, preview, or rendering; discovery lists metadata without loading model weights
-  - API key is optional for local servers
-  - Per-speaker exaggeration, CFG weight, and temperature controls are sent with TTS requests
-
-Config discovers models but exposes only models explicitly activated as LLM, TTS, or both. Saved profile models are activated during legacy migration so existing profiles keep working. Custom compatible connections may omit API keys for local unauthenticated servers.
-
-New custom connections cannot use the reserved IDs `chatgpt`, `anthropic`, `openai`, `opencode-go`, or `chatterbox`. Legacy connections with these IDs keep their saved references and custom routing. The matching built-in provider reports an ID conflict.
-
-Saved API keys can be staged for removal with `Clear saved key`, then deleted by `Save config`. Blank key fields continue to mean “keep existing.”
-
-## Language Rules
-
-- Episode Format language is source of truth for transcript generation.
-- Editable prompts no longer need language wording.
-- Server injects hidden language rule during outline and transcript generation.
-- TTS previews and renders always use the saved Episode Format language.
-- MiMo preset TTS remains limited to English and Chinese.
-
-## Duration Rules
-
-- Generated transcripts require at least 125 spoken words per target minute.
-- Short imported or edited transcripts remain renderable after a warning and confirmation.
-- Transcripts with fewer segments than configured remain renderable after a warning; excess segments are rejected.
-- Rendering inserts cue-aware pauses and publishes short MP3s with a warning when they are below 90% of target duration.
-- Rendering uses the saved transcript directly and preserves only cue syntax supported by each selected TTS model.
-- Failed rerenders preserve the last successful MP3 when it was still valid before the job.
-- Normalized WAV audio and cached WAV clips must contain at least one complete audio frame. Valid silence is allowed; empty or incomplete frame data is rejected.
-
-## Storage
-
-- `data/profiles.json`: speaker profiles and episode profiles
-- `data/plans/index.json`: content plan summaries
-- `data/plans/*.json`: editable content plans and creation links
-- `data/config.json`: non-secret provider and compatible connection metadata
-- `data/knowledge/index.json` and `data/knowledge/*.md`: uploaded Markdown knowledge bases
-- `data/chat/*.json`: Podcast Assistant chat threads, capped at 200 messages each
-- `.env`: API keys and base URL values, written `0600`
-- `$XDG_CONFIG_HOME/pod-god/chatgpt` (default `~/.config/pod-god/chatgpt`): protected ChatGPT OAuth credentials and account registrations, outside this repository and podcast data backups
-- `data/episodes/*`: saved episodes, transcripts, audio, clip cache
-
-Episodes store Speaker Profile and Episode Format snapshots. Later profile edits do not alter existing transcripts or renders; use **Apply latest profiles** (or save the episode draft) to intentionally refresh its snapshots.
-
-`PUT /api/plans/:id` accepts optional `expectedUpdatedAt`. A value that differs from the saved plan returns `409`. Existing clients can omit this field.
-
-Reviewed transcript text remains authoritative when generation instructions change. Refreshing snapshots invalidates audio when effective TTS settings change. Ignored v4 controls, voice direction, and accent overrides do not invalidate v4 audio. Stale MP3 files stay hidden until a successful render replaces them.
-
-On startup, obsolete outline/transcript JSON, concat manifests, temporary files, unused clip-cache entries, and any episode deletion already committed under a `.deleting` directory are removed. Corrupt episode metadata is listed as unavailable instead of silently disappearing; repair its `episode.json` before destructive profile or provider changes.
-
-Keys stay server-side. The OpenCode Go login key is read at runtime and is never copied into this project. API responses return `hasApiKey` and a safe credential-source label, never raw secret values.
-
-The server binds to loopback, rejects cross-origin writes, prevents framing, and supports HTTP byte ranges for MP3 playback.
-
-ChatGPT account controls use `/api/chatgpt/status` and explicit POST actions for `signin`, `select`, `signout`, and `cancel`. Sign-in opens the official authorization page and a local callback. Status returns safe account and permission fields, not tokens. Closing the app closes the callback listener and releases credential-storage locks.
-
-An interrupted ChatGPT sign-in can leave protected `sign-in-recovery.json` in the ChatGPT storage directory. Startup validates it and restores the last committed account state before removing the recovery file. Invalid or unsafe recovery data stops startup.
-
-Unsaved Config, Host, Format, episode, and transcript edits are protected across view and episode changes. Keyboard focus stays within open overlays; transcript tabs support arrow, Home, and End keys; reduced-motion preferences disable nonessential animation.
-
-Saves and background refreshes keep later editor drafts. Model option updates keep selected Format, knowledge-base, and Hosts values, including saved unavailable choices. Late episode, chat, and provider voice responses do not replace newer selections or voice catalogs. Host deletion keeps unrelated profile drafts; conflicting changes from another tab can still require a reload.
-
-Player queues last for the current page session. Named playlists are stored in the current browser profile's `localStorage`; they are not included in server data backups. Playlist writes use Web Locks and read the latest list inside the lock. Without Web Locks, playlist writes are rejected; reading saved playlists and using the playback queue remain available.
-
-OpenAI and compatible TTS voices are AI-generated. Disclose that fact in published episodes. This app generates podcast scripts; it does not transcribe uploaded audio.
-
-## Background Jobs
-
-Transcript generation and TTS rendering run through one local FIFO queue.
-
-- `GET /api/jobs` exposes active and recent jobs, including transcripts followed by automatic TTS
-- Activity shows recent jobs and in-app notifications
-- Browser-local Transcript and TTS switches can send desktop success/failure alerts while the open app is unfocused
-- Active jobs are marked interrupted after restart
-
-## Verify
-
-```bash
-npm test
-```
+Use `APUPOD_DATA_DIR`, `APUPOD_CONFIG_DIR`, and `PORT` to run a second daemon with separate data. See `AGENTS.md` for the contribution rules.

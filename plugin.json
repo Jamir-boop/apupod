@@ -1,0 +1,30 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "apupod",
+  "version": "1.0.0",
+  "description": "Agent-driven local podcast studio: your agent writes hosts, plans, and scripts through MCP tools; apupod saves them, renders audio with TTS, and shows a browser UI.",
+  "author": {
+    "name": "Jamir-boop",
+    "url": "https://github.com/Jamir-boop"
+  },
+  "homepage": "https://github.com/Jamir-boop/apupod",
+  "repository": "https://github.com/Jamir-boop/apupod",
+  "keywords": ["podcast", "tts", "mcp", "audio", "skills"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "apupod",
+        "shortDescription": "Plan, script, and render podcasts with a local studio",
+        "longDescription": "apupod is a local podcast studio that your agent drives through MCP tools. The agent writes hosts, plans, and scripts; apupod validates and saves them, renders audio with your TTS keys, and shows everything in a browser UI at http://127.0.0.1:4173.",
+        "developerName": "Jamir-boop",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://github.com/Jamir-boop/apupod",
+        "defaultPrompt": [
+          "Use apupod to plan a 3-episode podcast about the history of coffee.",
+          "Use apupod to write and render the script for my next episode."
+        ]
+      }
+    }
+  }
+}
