@@ -17,21 +17,18 @@
 
 ## Version Bumping
 
-After completing a modification or implementing a new feature, update the app
-version in `package.json`. `package-lock.json` must match: a test asserts the
-two agree, so bump both with `npm version --no-git-tag-version <x.y.z>`.
-Then set the same `version` in `.claude-plugin/plugin.json` and the root
-`plugin.json` by hand; `test/packaging.test.mjs` asserts that they match.
+After completing a modification or implementing a new feature, bump the app
+version with `npm version --no-git-tag-version <x.y.z>`. npm writes
+`package.json` and `package-lock.json`, then its `version` script
+(`scripts/sync-version.mjs`) writes the same version to every other place:
 
-A release sets the same version in all of these places:
-
-- `package.json` (and `package-lock.json`, through `npm version`).
 - `.claude-plugin/plugin.json` and the root `plugin.json`.
 - The npx pin `github:Jamir-boop/apupod#v<version>` in `.mcp.json`, `mcp.json`, `examples/opencode.json`,
-  and the OpenCode snippet in the Settings view (`public/index.html`).
-- Then push the commit and the tag `v<version>`: the plugins run that tag from GitHub.
+  the OpenCode snippet in the Settings view (`public/index.html`), and `README.md`.
 
-`test/packaging.test.mjs` fails when one of them differs.
+Then push the commit and the tag `v<version>`: the plugins run that tag from GitHub,
+and Settings > Update reads the tags. `test/packaging.test.mjs` fails when one place differs.
+A push runs the tests on GitHub Actions (`.github/workflows/test.yml`).
 
 Rules:
 

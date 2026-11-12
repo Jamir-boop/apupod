@@ -40,7 +40,8 @@
   "scripts": {
     "dev": "node bin/apupod.mjs serve",
     "start": "node bin/apupod.mjs serve",
-    "test": "node --test --test-force-exit test/*.test.mjs"
+    "test": "node --test --test-force-exit test/*.test.mjs",
+    "version": "node scripts/sync-version.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
