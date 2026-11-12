@@ -98,7 +98,7 @@ apupod refuses a port change or an update while a TTS job is queued or running. 
 
 apupod never depends on the current directory.
 
-- Data dir: `$APUPOD_DATA_DIR`, else `$XDG_DATA_HOME/apupod`, else `~/.local/share/apupod`. It holds `profiles.json` (host profiles and Episode Formats), `albums.json` and `albums/` (albums and covers), `plans/`, `knowledge/` (Markdown knowledge bases), `episodes/` (scripts, audio, clip cache), `previews/` (voice previews, removed after one hour), and `runtime/` (apupod versions that Settings > Update installed).
+- Data dir: `$APUPOD_DATA_DIR`, else `$XDG_DATA_HOME/apupod`, else `~/.local/share/apupod`. It holds `profiles.json` (host profiles and Episode Formats), `albums.json` and `albums/` (albums and covers), `plans/`, `knowledge/` (Markdown knowledge bases), `episodes/` (scripts, audio, clip cache removed at startup for audio-ready episodes unchanged for over 30 days), `previews/` (voice previews, removed after one hour), and `runtime/` (apupod versions that Settings > Update installed).
 - Config dir: `$APUPOD_CONFIG_DIR`, else `$XDG_CONFIG_HOME/apupod`, else `~/.config/apupod`. It holds `config.json` (TTS connections, no secrets), `.env` (keys), `mcp-token` (the bridge bearer token), `daemon.json` (PID and URL of the running daemon), and `daemon.log`.
 
 The `data/` folder in this repository is an archive of the old app. apupod does not read it.

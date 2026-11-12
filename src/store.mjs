@@ -72,9 +72,6 @@ export async function loadPlan(paths, id) {
   const path = planPath(paths, id);
   if (!(await exists(path))) throw notFound("Content plan not found.");
   const plan = await readJson(path);
-  delete plan.formatDrafts;
-  delete plan.episodeSeeds;
-  for (const episode of plan.episodes || []) delete episode.formatDraftId;
   return plan;
 }
 

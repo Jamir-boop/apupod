@@ -16,8 +16,8 @@ import {
   transcriptSpeakerRule,
   validateProfileData,
   writeAudioAsWav,
-} from "../app.mjs";
-import { DEFAULT_DATA } from "../defaults.mjs";
+} from "../src/app.mjs";
+import { DEFAULT_DATA } from "../src/defaults.mjs";
 import { normalizeGeneratedPlan, normalizePlannedEpisode } from "../src/plans.mjs";
 import { html, script, seedEpisode, sendJson, silentWav, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
@@ -49,7 +49,6 @@ test("default profiles are valid", () => {
   const profiles = structuredClone(DEFAULT_DATA);
   assert.equal(validateProfileData(profiles), true);
   assert.equal(profiles.episodeProfiles[0].numSegments, 3);
-  assert.equal(Object.hasOwn(profiles.episodeProfiles[0], "defaultBriefing"), false);
 });
 
 test("speaker profiles accept 1 to 4 speakers", () => {
@@ -102,27 +101,17 @@ test("speaker profiles accept 1 to 4 speakers", () => {
 });
 
 test("saving Episode Formats derives segment count from target duration", async (t) => {
-  const { baseUrl, rootDir } = await startTestServer(t);
+  const { baseUrl } = await startTestServer(t);
   let profiles = (await (await fetch(`${baseUrl}/api/state`)).json()).profiles;
   for (const [targetMinutes, numSegments] of [[18, 5], [60, 17], [5, 3]]) {
     profiles.episodeProfiles[0].targetMinutes = targetMinutes;
     profiles.episodeProfiles[0].numSegments = 99;
-    profiles.episodeProfiles[0].defaultBriefing = "Legacy";
     const response = await sendJson(`${baseUrl}/api/profiles`, profiles, "PUT");
     const saved = await response.json();
     assert.equal(response.status, 200, saved.error);
     profiles = saved.profiles;
     assert.equal(profiles.episodeProfiles[0].numSegments, numSegments);
-    assert.equal(Object.hasOwn(profiles.episodeProfiles[0], "defaultBriefing"), false);
   }
-  // Formats and Hosts save without text-model fields, and stale ones are dropped.
-  Object.assign(profiles.episodeProfiles[0], { outlineModel: "mimo-v2.5-pro", transcriptModel: "mimo-v2.5-pro", outlineEffort: "max", transcriptEffort: "nope" });
-  const response = await sendJson(`${baseUrl}/api/profiles`, profiles, "PUT");
-  const saved = await response.json();
-  assert.equal(response.status, 200, saved.error);
-  for (const key of ["outlineModel", "transcriptModel", "outlineEffort", "transcriptEffort"]) assert.equal(Object.hasOwn(saved.profiles.episodeProfiles[0], key), false, key);
-  const stored = JSON.parse(await readFile(join(rootDir, "data", "profiles.json"), "utf8"));
-  assert.equal(Object.hasOwn(stored.episodeProfiles[0], "outlineModel"), false);
 });
 
 test("transcript leadership follows configured speaker count", () => {
@@ -296,7 +285,7 @@ test("Eleven v4 discovers capabilities, preserves tags, splits turns, and reuses
     if (String(url).includes("/text-to-speech/")) {
       requests.push(JSON.parse(options.body));
       assert.equal(options.headers["xi-api-key"], "test-v4-key");
-      if (failRequest === requests.length) return Response.json({ detail: "mock chunk failure" }, { status: 500 });
+      if (failRequest && requests.length >= failRequest) return Response.json({ detail: "mock chunk failure" }, { status: 500 });
       return new Response(silentWav(44_100, 2), { headers: { "Content-Type": "audio/wav" } });
     }
     throw new Error(`Unexpected URL ${url}`);
@@ -712,15 +701,6 @@ test("MiMo TTS accepts base64 audio responses larger than the ordinary JSON limi
     speakerProfileId: state.profiles.speakerProfiles[0].id,
     episodeProfileId: state.profiles.episodeProfiles[0].id,
     speakerIndex: 0,
-    languageOverride: "es-419",
-    text: "Large response test.",
-  });
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /TTS language is defined by the Episode Format/);
-  response = await sendJson(`${baseUrl}/api/preview`, {
-    speakerProfileId: state.profiles.speakerProfiles[0].id,
-    episodeProfileId: state.profiles.episodeProfiles[0].id,
-    speakerIndex: 0,
     text: "Large response test.",
   });
   assert.equal(response.status, 200, response.status === 200 ? "" : await response.text());
@@ -871,10 +851,6 @@ test("TTS jobs report progress and publish MP3", async (t) => {
   profiles.speakerProfiles[0].speakers[0].mimoInstructionText = "Keep the read intimate.";
   response = await sendJson(`${baseUrl}/api/profiles`, profiles, "PUT");
   assert.equal(response.status, 200);
-
-  response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/render`, { languageOverride: "es-419" });
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /TTS language is defined by the Episode Format/);
 
   response = await sendJson(`${baseUrl}/api/episodes`, { id: episode.id, name: "TTS", episodeProfileId: "episode-example-format", knowledgeBaseId: knowledge.id });
   assert.equal(response.status, 200);
@@ -1177,20 +1153,14 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   const healthyDir = join(rootDir, "data", "episodes", episode.id);
   const clipsDir = join(healthyDir, "clips");
   await mkdir(clipsDir, { recursive: true });
-  for (const name of ["outline.json", "transcript.json", "concat.txt"]) await writeFile(join(healthyDir, name), "obsolete");
-  for (const name of ["tts-script.md", "tts-script.draft.md"]) await writeFile(join(healthyDir, name), "obsolete TTS script");
-  const episodePath = join(healthyDir, "episode.json");
-  const storedEpisode = JSON.parse(await readFile(episodePath, "utf8"));
-  storedEpisode.ttsPreparation = { prompt: "obsolete" };
-  storedEpisode.job = { id: "obsolete-preparation", type: "tts_prepare", status: "completed" };
-  await writeFile(episodePath, JSON.stringify(storedEpisode, null, 2));
+  await writeFile(join(healthyDir, "concat.txt"), "obsolete");
   await writeFile(join(clipsDir, `${"e".repeat(64)}.wav`), silentWav());
   const cachedSilence = join(clipsDir, "silence-1200ms.wav");
   await writeFile(cachedSilence, silentWav());
   const corruptDir = join(rootDir, "data", "episodes", "corrupt-episode");
   await mkdir(corruptDir, { recursive: true });
   await writeFile(join(corruptDir, "episode.json"), "{bad json");
-  await writeFile(join(corruptDir, "outline.json"), "preserve");
+  await writeFile(join(corruptDir, "concat.txt"), "preserve");
   const deletingDir = join(rootDir, "data", "episodes", "pending-delete.deleting");
   await mkdir(deletingDir, { recursive: true });
   await writeFile(join(deletingDir, "partial-audio.wav"), "partial");
@@ -1198,16 +1168,12 @@ test("startup cleanup prunes obsolete artifacts and surfaces corrupt episodes", 
   const { baseUrl } = await startTestServer(t, { rootDir });
   const state = await (await fetch(`${baseUrl}/api/state`)).json();
   const corrupt = state.episodes.find((item) => item.id === "corrupt-episode");
-  const cleanedEpisode = await (await fetch(`${baseUrl}/api/episodes/${episode.id}`)).json();
   assert.equal(corrupt.status, "corrupt");
   assert.equal(corrupt.corrupt, true);
-  assert.equal(cleanedEpisode.ttsPreparation, undefined);
-  assert.equal(cleanedEpisode.job, undefined);
-  for (const name of ["outline.json", "transcript.json", "concat.txt"]) await assert.rejects(readFile(join(healthyDir, name)), { code: "ENOENT" });
-  for (const name of ["tts-script.md", "tts-script.draft.md"]) await assert.rejects(readFile(join(healthyDir, name)), { code: "ENOENT" });
+  await assert.rejects(readFile(join(healthyDir, "concat.txt")), { code: "ENOENT" });
   await assert.rejects(readFile(join(clipsDir, `${"e".repeat(64)}.wav`)), { code: "ENOENT" });
   assert.ok((await readFile(cachedSilence)).length > 0);
-  assert.equal(await readFile(join(corruptDir, "outline.json"), "utf8"), "preserve");
+  assert.equal(await readFile(join(corruptDir, "concat.txt"), "utf8"), "preserve");
   await assert.rejects(readFile(join(deletingDir, "partial-audio.wav")), { code: "ENOENT" });
 
   state.config.providers.mimo.enabled = false;
@@ -1551,18 +1517,13 @@ test("content plans support CRUD and appear in state", async (t) => {
   assert.deepEqual(plan.episodes, []);
   assert.equal(plan.status, "draft");
   assert.equal(plan.episodeFormatId, "");
-  assert.equal(plan.language, "es-419");
-  assert.equal(plan.targetMinutes, 18);
-  assert.equal(Object.hasOwn(plan, "formatDrafts"), false);
+  assert.equal(plan.language, state.profiles.episodeProfiles[0].language);
+  assert.equal(plan.targetMinutes, state.profiles.episodeProfiles[0].targetMinutes);
   const storedPlanPath = join(rootDir, "data", "plans", `${plan.id}.json`);
-  const legacyPlan = JSON.parse(await readFile(storedPlanPath, "utf8"));
-  legacyPlan.formatDrafts = [{ id: "legacy-format" }];
-  legacyPlan.episodeSeeds = [{ title: "Legacy seed" }];
-  legacyPlan.episodes = [{ id: "planned-one", number: 1, title: "One" }, { id: "planned-two", number: 2, title: "Two", createdEpisodeId: "created-two" }];
-  await writeFile(storedPlanPath, JSON.stringify(legacyPlan, null, 2));
+  const storedPlan = JSON.parse(await readFile(storedPlanPath, "utf8"));
+  storedPlan.episodes = [{ id: "planned-one", number: 1, title: "One" }, { id: "planned-two", number: 2, title: "Two", createdEpisodeId: "created-two" }];
+  await writeFile(storedPlanPath, JSON.stringify(storedPlan, null, 2));
   plan = (await (await fetch(`${baseUrl}/api/plans/${plan.id}`)).json()).plan;
-  assert.equal(Object.hasOwn(plan, "formatDrafts"), false);
-  assert.equal(Object.hasOwn(plan, "episodeSeeds"), false);
   response = await fetch(`${baseUrl}/api/plans/${plan.id}/episodes/planned-one`, { method: "DELETE" });
   plan = (await response.json()).plan;
   assert.equal(response.status, 200);
@@ -1729,4 +1690,72 @@ test("package-lock version agrees with package.json", async () => {
   const lock = JSON.parse(await readFile(join(process.cwd(), "package-lock.json"), "utf8"));
   assert.equal(lock.version, manifest.version);
   assert.equal(lock.packages[""].version, manifest.version);
+});
+
+test("provider-only config saves keep compatible connections and keys", async (t) => {
+  const { baseUrl } = await startTestServer(t, { fetchImpl: async () => Response.json({ data: [] }) });
+  let response = await sendJson(`${baseUrl}/api/config`, { compatibleConnections: [{ id: "unused", name: "Unused", baseUrl: "https://unused.example/v1", apiKey: "test-connection-key" }] }, "PUT");
+  assert.equal(response.status, 200);
+  const connection = (await response.json()).config.compatibleConnections[0];
+  assert.equal(connection.hasApiKey, true);
+  for (const compatibleConnections of [undefined, null, {}]) {
+    response = await sendJson(`${baseUrl}/api/config`, { providers: {}, compatibleConnections }, "PUT");
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).config.compatibleConnections, [connection]);
+  }
+  response = await sendJson(`${baseUrl}/api/config`, { compatibleConnections: [] }, "PUT");
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).config.compatibleConnections, []);
+});
+
+test("startup removes only old audio-ready clip caches", async (t) => {
+  const first = await startTestServer(t);
+  const episodes = [];
+  for (const name of ["Old ready", "Recent ready", "Old not ready"]) episodes.push(await seedEpisode(first.baseUrl, name, { transcript: "## Segment 1\nAlex: First.\n\n## Segment 2\nAlex: Second.\n\n## Segment 3\nAlex: Third." }));
+  await first.close();
+  for (const [index, episode] of episodes.entries()) {
+    const directory = join(first.rootDir, "data", "episodes", episode.id);
+    const path = join(directory, "episode.json");
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    stored.audioReady = index !== 2;
+    stored.updatedAt = new Date(Date.now() - (index === 1 ? 1 : 31) * 24 * 60 * 60 * 1000).toISOString();
+    await writeFile(path, JSON.stringify(stored));
+    await mkdir(join(directory, "clips"));
+    await writeFile(join(directory, "clips", "silence-1200ms.wav"), silentWav());
+    await writeFile(join(directory, "episode.mp3"), "saved audio");
+  }
+  await startTestServer(t, { rootDir: first.rootDir });
+  for (const [index, episode] of episodes.entries()) {
+    const directory = join(first.rootDir, "data", "episodes", episode.id);
+    assert.equal(await readFile(join(directory, "episode.mp3"), "utf8"), "saved audio");
+    if (index === 0) await assert.rejects(stat(join(directory, "clips")), { code: "ENOENT" });
+    else assert.ok((await readFile(join(directory, "clips", "silence-1200ms.wav"))).length > 0);
+  }
+});
+
+for (const failure of ["network", "401", "429", "500", "timeout", "repeated network"]) test(`TTS turn retry handles ${failure}`, async (t) => {
+  withEnv(t, { MIMO_API_KEY: "test-mimo-key", ELEVENLABS_API_KEY: null });
+  let requests = 0;
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "mimo-v2.5-tts" }] });
+    requests += 1;
+    if (failure === "repeated network" || requests === 1 && failure === "network") throw new TypeError("fetch failed");
+    if (requests === 1 && failure === "timeout") throw new Error("MiMo request timed out after 120 seconds.");
+    if (requests === 1 && ["401", "429", "500"].includes(failure)) return Response.json({ error: { message: "test rejection" } }, { status: Number(failure) });
+    return Response.json({ choices: [{ message: { audio: { data: silentWav(24_000, 1, 70).toString("base64") } } }] });
+  };
+  const { baseUrl } = await startTestServer(t, { fetchImpl });
+  await waitFor(async () => (await (await fetch(`${baseUrl}/api/models`)).json()).status === "ready");
+  const episode = await seedEpisode(baseUrl, "Retry", { transcript: "## Segment 1\nAlex: Retry this turn." });
+  const response = await sendJson(`${baseUrl}/api/episodes/${episode.id}/render`, {});
+  assert.equal(response.status, 202);
+  const { job } = await response.json();
+  const terminal = await waitFor(async () => {
+    const current = (await (await fetch(`${baseUrl}/api/jobs`)).json()).jobs.find((item) => item.id === job.id);
+    return ["completed", "failed"].includes(current.status) && current;
+  }, 15_000);
+  const fails = ["401", "timeout", "repeated network"].includes(failure);
+  assert.equal(terminal.status, fails ? "failed" : "completed", terminal.error);
+  assert.equal(requests, ["401", "timeout"].includes(failure) ? 1 : 2);
+  if (failure === "401") assert.equal(terminal.error, "MiMo request failed: HTTP 401. The provider rejected MIMO_API_KEY. Check the key. test rejection");
 });

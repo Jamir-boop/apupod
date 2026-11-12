@@ -1,8 +1,0 @@
-{
-  "prompt": "Design a high-fidelity 1536×864 desktop application comp for pod-god, a solo podcast creator. This is a designed software surface, not a poster. Use a stacked studio deck: a slim top project/status strip; the upper two thirds are a wide chat-first workspace with “Make a podcast with me”, the real prompt “I need a podcast about Charlie explaining how to prompt models”, and a proposed episode card for “1. Why Fable 5 Is a Different Beast”; a compact current-episode status and next-action column sits on the upper right; the lower third is a horizontal production deck with stage tabs for Config, Idea, Hosts, Format, Episodes 5, Scripts 1/5, Audio 0/5, and Player, plus a five-episode list, active script excerpt, waveform, and oversized tactile transport controls. Mark generated example values “ILLUSTRATIVE CONTENT”. Use matte near-black and charcoal surfaces, fine gray seams, warm off-white text, amber only for current state and primary action, green only for success, red only for failure. Humanist sans for conversation, condensed mono for status. TP-7 is a material and control-quality reference: precise labels, compact status display, tactile transport controls, disciplined geometry. Hermes Agent is a polish and hierarchy reference: generous composition, authored moments, clear progressive sequence. No blue, gradients, glass, neon, rounded-card bento grid, fake analytics, or decorative imagery. Project name is “Charlie — Fable 5 Prompting”. Keep the deck dense but coherent and the conversation visually dominant.\n",
-  "createdAt": "2026-08-11T07:05:49.362Z",
-  "name": "Stacked Studio Deck",
-  "viewport": "1536x864",
-  "references": ["Teenage Engineering TP-7", "Hermes Agent website"],
-  "approved": false
-}

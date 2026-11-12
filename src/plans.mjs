@@ -130,7 +130,7 @@ export function normalizePlannedEpisode(value, current = null) {
 export function normalizePlanInput(value, current = null) {
   const raw = value && typeof value === "object" ? value : {};
   const now = new Date().toISOString();
-  const language = String(raw.language || "es-419").trim();
+  const language = String(raw.language || "en-US").trim();
   if (!LANGUAGE_OPTIONS.some((item) => item.id === language)) throw badRequest(`Unsupported language "${language}".`);
   const plan = {
     id: current?.id || randomUUID(),
@@ -183,7 +183,8 @@ export async function createPlanRequest(req, res, context) {
   const body = await readJsonBody(req);
   const profiles = await readJson(context.paths.profiles);
   const speakerProfileId = String(body.speakerProfileId || profiles.speakerProfiles[0]?.id || "");
-  const plan = normalizePlanInput({ ...body, id: undefined, episodes: [], name: body.name || "New Content Plan", speakerProfileId, episodeCount: body.episodeCount ?? null });
+  const format = profiles.episodeProfiles.find((item) => item.id === body.episodeFormatId) || profiles.episodeProfiles[0];
+  const plan = normalizePlanInput({ ...body, language: body.language || format?.language, targetMinutes: body.targetMinutes ?? format?.targetMinutes, id: undefined, episodes: [], name: body.name || "New Content Plan", speakerProfileId, episodeCount: body.episodeCount ?? null });
   await validatePlanReferences(context, plan);
   await savePlan(context.paths, plan);
   sendJson(res, 201, { plan });
@@ -277,9 +278,10 @@ export async function saveAgentPlan(context, input) {
   const current = id ? await loadPlan(paths, id) : null;
   if (current && expectedUpdatedAt !== undefined && expectedUpdatedAt !== current.updatedAt) throw conflict("Content plan changed in another tab. Reload the plan before saving your changes.");
   const profiles = await readJson(paths.profiles);
+  const format = profiles.episodeProfiles.find((item) => item.id === fields.episodeFormatId) || profiles.episodeProfiles[0];
   const plan = current
     ? normalizePlanInput({ ...current, ...fields, episodes: undefined }, current)
-    : normalizePlanInput({ ...fields, episodes: [], name: fields.name || "New Content Plan", speakerProfileId: fields.speakerProfileId || profiles.speakerProfiles[0]?.id || "", episodeCount: fields.episodeCount ?? null });
+    : normalizePlanInput({ ...fields, language: fields.language || format?.language, targetMinutes: fields.targetMinutes ?? format?.targetMinutes, episodes: [], name: fields.name || "New Content Plan", speakerProfileId: fields.speakerProfileId || profiles.speakerProfiles[0]?.id || "", episodeCount: fields.episodeCount ?? null });
   let nextProfiles = null;
   if (rawEpisodes != null) {
     const generated = normalizeGeneratedPlan({ episodes: rawEpisodes, episodeFormat: rawFormat }, { episodeFormatId: plan.episodeFormatId, episodeCount: fields.episodeCount ?? null });

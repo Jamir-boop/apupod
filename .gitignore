@@ -8,3 +8,5 @@ dist/
 .impeccable/build-*.png
 .impeccable/review-*.png
 .impeccable/questions/
+.impeccable/mocks/
+.impeccable/sketches/

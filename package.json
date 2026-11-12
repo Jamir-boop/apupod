@@ -38,8 +38,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "node server.mjs",
-    "start": "node server.mjs",
+    "dev": "node bin/apupod.mjs serve",
+    "start": "node bin/apupod.mjs serve",
     "test": "node --test --test-force-exit test/*.test.mjs"
   },
   "dependencies": {

@@ -448,3 +448,27 @@ test("provider errors never carry key-like text into the state, the catalog, or 
     ["/api/state", (await api("/api/state")).value], ["/api/models", (await api("/api/models")).value],
   ]) assert.doesNotMatch(JSON.stringify(value), leaks, label);
 });
+
+test("new plans inherit format language and duration while explicit values win", async (t) => {
+  const { ok, api } = await connect(t);
+  const initial = (await api("/api/state")).value.profiles.episodeProfiles[0];
+  const format = (await ok("save_episode_format", { name: "French", speakerProfileId: initial.speakerProfileId, language: "fr-FR", targetMinutes: 12 })).format;
+  const inherited = (await ok("save_plan", { name: "Inherited", episodeFormatId: format.id })).plan;
+  assert.equal(inherited.language, "fr-FR");
+  assert.equal(inherited.targetMinutes, 12);
+  const created = await ok("save_plan", { name: "New format", episodeFormat: { name: "New", description: "Inherited defaults" }, episodes: [{ number: 1, title: "One" }] });
+  const savedFormat = (await api("/api/state")).value.profiles.episodeProfiles.find((item) => item.id === created.createdEpisodeFormatId);
+  assert.equal(created.plan.language, initial.language);
+  assert.equal(savedFormat.language, initial.language);
+  assert.equal(savedFormat.targetMinutes, initial.targetMinutes);
+  const explicit = (await ok("save_plan", { name: "Explicit", episodeFormatId: format.id, language: "en-US", targetMinutes: 9 })).plan;
+  assert.equal(explicit.language, "en-US");
+  assert.equal(explicit.targetMinutes, 9);
+  const updated = (await ok("save_plan", { id: inherited.id, name: "Updated" })).plan;
+  assert.equal(updated.language, "fr-FR");
+  assert.equal(updated.targetMinutes, 12);
+  const rest = await api("/api/plans", { name: "REST inherited", episodeFormatId: format.id });
+  assert.equal(rest.status, 201);
+  assert.equal(rest.value.plan.language, "fr-FR");
+  assert.equal(rest.value.plan.targetMinutes, 12);
+});

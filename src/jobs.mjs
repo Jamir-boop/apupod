@@ -9,15 +9,18 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { httpError, badRequest, conflict, serviceUnavailable, ID_RE, readJsonBody, readOptionalJsonBody, sendJson, runProcess } from "./util.mjs";
 import { MAX_AUDIO_RESPONSE_BYTES } from "./providers/transport.mjs";
 import { LANGUAGE_OPTIONS, modelRuntimeSnapshot, resolveLanguage, modelLanguageError, assertTtsLanguageCompatibility } from "./providers/catalog.mjs";
 import { turnClipDescriptor, spokenTextForModel, synthesizeTurn, assertWav } from "./providers/generate.mjs";
-import { serializeMutation, isActiveJob, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, writeJsonAtomic, exists } from "./store.mjs";
+import { serializeMutation, isActiveJob, resolveEpisodeProfiles, listEpisodes, loadEpisode, updateEpisode, episodeDir, readJson, exists } from "./store.mjs";
 import { parseTranscript } from "./episodes.mjs";
 import { readAlbums, episodeAlbum, tagEpisodeMp3 } from "./albums.mjs";
+
+const CLIP_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 // app.mjs and system.mjs import runProcess from here.
 export { runProcess };
@@ -52,27 +55,14 @@ export async function cleanupStoredArtifacts(context) {
     if (!entry.isDirectory() || !ID_RE.test(entry.name)) continue;
     const directory = join(paths.episodes, entry.name);
     try {
-      let episode = await readJson(join(directory, "episode.json"));
-      const transcriptPath = join(directory, "transcript.md");
-      const transcript = await exists(transcriptPath) ? await readFile(transcriptPath, "utf8") : "";
-      for (const name of ["tts-script.md", "tts-script.draft.md"]) {
-        const path = join(directory, name);
-        if (await exists(path)) {
-          await rm(path, { force: true });
-          removed += 1;
-        }
-      }
-      if (episode.ttsPreparation || episode.job?.type === "tts_prepare") {
-        const { ttsPreparation: ignored, ...cleaned } = episode;
-        if (cleaned.job?.type === "tts_prepare") {
-          delete cleaned.job;
-          cleaned.lastError = null;
-          cleaned.status = transcript.trim() ? cleaned.audioReady ? "ready" : "transcript_ready" : "draft";
-        }
-        episode = cleaned;
-        await writeJsonAtomic(join(directory, "episode.json"), episode);
+      const episode = await readJson(join(directory, "episode.json"));
+      const clipsDir = join(directory, "clips");
+      if (episode.audioReady === true && Date.now() - Date.parse(episode.updatedAt) > CLIP_CACHE_MAX_AGE_MS && await exists(clipsDir)) {
+        await rm(clipsDir, { recursive: true, force: true });
         removed += 1;
       }
+      const transcriptPath = join(directory, "transcript.md");
+      const transcript = await exists(transcriptPath) ? await readFile(transcriptPath, "utf8") : "";
       const episodeProfile = episode.episodeProfile || profiles.episodeProfiles.find((profile) => profile.id === episode.episodeProfileId);
       const speakerProfile = episode.speakerProfile || profiles.speakerProfiles.find((profile) => profile.id === episodeProfile?.speakerProfileId);
       const usedKeys = new Set();
@@ -95,7 +85,7 @@ export async function cleanupStoredArtifacts(context) {
           if (gap > 0) usedKeys.add(`silence-${Math.round(gap * 1000)}ms`);
         }
       }
-      for (const name of ["outline.json", "transcript.json", "concat.txt"]) {
+      for (const name of ["concat.txt"]) {
         const path = join(directory, name);
         if (await exists(path)) {
           await rm(path, { force: true });
@@ -188,7 +178,6 @@ export async function enqueueTtsJob(req, res, context, id) {
 
 // The caller holds serializeWithLatestModelCatalog and has run ensureFfmpeg.
 export async function enqueueTts(context, id, body = {}) {
-  if (String(body.languageOverride || "").trim()) throw badRequest("TTS language is defined by the Episode Format.");
   const episode = await loadEpisode(context.paths, id, true);
   if (isActiveJob(episode.job)) throw conflict("Episode already has an active job.");
   const { episodeProfile, speakerProfile } = await resolveEpisodeProfiles(context.paths, episode);
@@ -303,7 +292,6 @@ export async function previewVoiceAudio(context, body, runtime) {
   }
   if (!profile) throw badRequest("Speaker profile does not exist.");
   if (!episodeProfile) throw badRequest("Episode Format does not exist.");
-  if (String(body.languageOverride || "").trim()) throw badRequest("TTS language is defined by the Episode Format.");
   const language = resolveLanguage(runtime, episodeProfile.language);
   const speaker = profile.speakers[Number(body.speakerIndex)];
   if (!speaker) throw badRequest("Speaker does not exist.");
@@ -344,7 +332,14 @@ async function runTtsJob(context, queued, runtime) {
     let cached = true;
     if (!(await isNormalizedWav(clipPath))) {
       cached = false;
-      const audio = await synthesizeTurn(runtime, speakerProfile, speaker, spokenText, turn.delivery, language);
+      let audio;
+      try {
+        audio = await synthesizeTurn(runtime, speakerProfile, speaker, spokenText, turn.delivery, language);
+      } catch (error) {
+        if (error.statusCode || /HTTP 4(?!29\b)\d{2}\b|timed out/i.test(error.message)) throw error;
+        await sleep(500);
+        audio = await synthesizeTurn(runtime, speakerProfile, speaker, spokenText, turn.delivery, language);
+      }
       await writeAudioAsWav(audio, clipPath);
     }
     clipPaths.push(clipPath);

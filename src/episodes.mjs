@@ -491,8 +491,6 @@ export function validateProfileData(value, models = {
     if ((!allowIncomplete || profile.speakerProfileId) && !ids.has(profile.speakerProfileId)) throw badRequest(`Speaker profile "${profile.speakerProfileId}" does not exist.`);
     if ((!allowIncomplete || profile.targetMinutes != null && profile.targetMinutes !== "") && (!Number.isInteger(profile.targetMinutes) || profile.targetMinutes < 5 || profile.targetMinutes > 60)) throw badRequest("Target duration must be an integer from 5 to 60 minutes.");
     if (profile.targetMinutes != null && profile.targetMinutes !== "") profile.numSegments = derivedNumSegments(profile.targetMinutes);
-    // apupod makes no text-model calls, so a format has no model or effort fields.
-    for (const key of ["defaultBriefing", "outlineModel", "transcriptModel", "outlineEffort", "transcriptEffort"]) delete profile[key];
     if ((!allowIncomplete || profile.language) && !models.languages.has(profile.language)) throw badRequest(`Unsupported language "${profile.language}".`);
   }
   return true;

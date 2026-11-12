@@ -253,7 +253,7 @@ function validateConfigPayload(value, current) {
     applyApiKeyPatch(envPatch, connection.apiKeyEnv, item, name);
     if (existing) removeKeyForNewOrigin(envPatch, warnings, connection.apiKeyEnv, item, existing, connection, name);
     return connection;
-  }) : [];
+  }) : current.compatibleConnections;
 
   removeKeyForNewOrigin(envPatch, warnings, "MIMO_API_KEY", mimoInput, current.providers.mimo, mimo, "MiMo");
   removeKeyForNewOrigin(envPatch, warnings, "OPENAI_API_KEY", openaiInput, currentOpenai, openai, "OpenAI");
