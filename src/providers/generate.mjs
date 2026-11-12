@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { badRequest, oneLine, normalizeDelivery } from "../util.mjs";
-import { MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, TTS_TIMEOUT_MS, fetchJsonWithBody, fetchBytes, audioResult, cappedFetch, openAiClient, callOptions, sdkJson, providerError } from "./transport.mjs";
+import { MAX_AUDIO_RESPONSE_BYTES, MAX_TTS_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, TTS_TIMEOUT_MS, fetchJsonWithBody, fetchBytes, providerUrl } from "./transport.mjs";
 import { awaitLatestModelCatalog, parseCompatibleModelId, compatibleConnection, builtInChatterboxConnection, availableModelIds, isElevenLabsModel, modelLanguageError, elevenLabsCapabilities } from "./catalog.mjs";
 
 const ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
 const ELEVENLABS_VOICES_URL = "https://api.elevenlabs.io/v2/voices?page_size=100&include_total_count=false";
 
-// Only part of the clip cache key now; the SDK builds the request URL.
+// Keep this endpoint in the clip cache key so saved clips stay valid.
 const OPENAI_COMPATIBLE_TTS_URL = "/audio/speech";
 
 export const OPENAI_TTS_NO_INSTRUCTIONS = new Set(["tts-1", "tts-1-hd"]);
@@ -212,15 +212,9 @@ async function synthesizeCompatible(context, compositeModelId, voiceId, text, de
   }
   if (!OPENAI_TTS_NO_INSTRUCTIONS.has(parsed.modelId)) body.instructions = instructions;
   const label = `${connection.name} TTS`;
-  let response;
-  let bytes;
-  try {
-    response = await openAiClient({ baseURL: connection.ttsBaseUrl || connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_AUDIO_RESPONSE_BYTES, label) }).audio.speech.create(body, callOptions(TTS_TIMEOUT_MS));
-    bytes = Buffer.from(await response.arrayBuffer());
-  } catch (error) {
-    throw providerError(error, label, connection.apiKeyEnv, TTS_TIMEOUT_MS, apiKey);
-  }
-  return audioResult(bytes, response.headers.get("content-type"), label, [apiKey]);
+  return fetchBytes(context.fetchImpl, providerUrl(connection.ttsBaseUrl || connection.baseUrl, OPENAI_COMPATIBLE_TTS_URL), {
+    method: "POST", headers: { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) }, body: JSON.stringify(body),
+  }, label, TTS_TIMEOUT_MS, connection.apiKeyEnv);
 }
 
 async function synthesizeElevenLabs(context, model, voiceId, text, delivery, language, settings) {
@@ -345,18 +339,9 @@ function runtimeCredential(context, name) {
 async function callMimo(context, payload, timeoutMs) {
   const apiKey = runtimeCredential(context, "MIMO_API_KEY");
   if (!apiKey) throw badRequest("MIMO_API_KEY is required in .env.");
-  let data;
-  try {
-    data = await sdkJson(openAiClient({
-      baseURL: context.config.providers.mimo.baseUrl,
-      apiKey,
-      headers: { Authorization: null, "api-key": apiKey },
-      fetch: cappedFetch(context.fetchImpl, MAX_TTS_JSON_RESPONSE_BYTES, "MiMo"),
-    }).chat.completions.create(payload, callOptions(timeoutMs)), "MiMo");
-  } catch (error) {
-    throw providerError(error, "MiMo", "MIMO_API_KEY", timeoutMs, apiKey);
-  }
-  return data;
+  return fetchJsonWithBody(context.fetchImpl, providerUrl(context.config.providers.mimo.baseUrl, "/chat/completions"), {
+    method: "POST", headers: { "Content-Type": "application/json", "api-key": apiKey }, body: JSON.stringify(payload),
+  }, "MiMo", timeoutMs, MAX_TTS_JSON_RESPONSE_BYTES, "MIMO_API_KEY");
 }
 
 export function assertWav(buffer, label = "TTS") {

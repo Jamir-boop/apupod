@@ -1,5 +1,5 @@
 import { badRequest, normalizeUrl } from "../util.mjs";
-import { MAX_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, fetchJson, cappedFetch, openAiClient, callOptions, sdkJson, providerError, redactSecrets } from "./transport.mjs";
+import { MAX_JSON_RESPONSE_BYTES, MODEL_TIMEOUT_MS, fetchJson, fetchJsonWithBody, providerUrl, redactSecrets } from "./transport.mjs";
 
 export const DEFAULT_MIMO_BASE_URL = "https://api.xiaomimimo.com/v1";
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -192,12 +192,7 @@ const missingKeyMessage = (name, keyName) => `${name} API key is not configured.
 async function loadMimoModels(context) {
   const provider = context.modelCatalog.providers.mimo;
   const apiKey = context.credentials.MIMO_API_KEY;
-  let data;
-  try {
-    data = await sdkJson(openAiClient({ baseURL: context.config.providers.mimo.baseUrl, apiKey, headers: { Authorization: null, "api-key": apiKey }, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, "MiMo models") }).get("/models", callOptions(MODEL_TIMEOUT_MS)), "MiMo models");
-  } catch (error) {
-    throw providerError(error, "MiMo models", "MIMO_API_KEY", MODEL_TIMEOUT_MS, apiKey);
-  }
+  const data = await fetchJsonWithBody(context.fetchImpl, providerUrl(context.config.providers.mimo.baseUrl, "/models"), { headers: { "api-key": apiKey } }, "MiMo models", MODEL_TIMEOUT_MS, MAX_JSON_RESPONSE_BYTES, "MIMO_API_KEY");
   const models = Array.isArray(data?.data) ? data.data : [];
   provider.discoveredModels = models.filter((model) => typeof model?.id === "string" && model.id.includes("-tts")).map((model) => ({
     id: model.id,
@@ -244,9 +239,8 @@ async function loadCompatibleModels(context, connection, provider) {
   const apiKey = context.credentials[connection.apiKeyEnv];
   if (connection.requiresApiKey && !apiKey) throw new Error(missingKeyMessage(connection.name, connection.apiKeyEnv));
   const label = `${connection.name} models`;
-  const client = openAiClient({ baseURL: connection.baseUrl, apiKey, fetch: cappedFetch(context.fetchImpl, MAX_JSON_RESPONSE_BYTES, label) });
-  const requests = await Promise.allSettled(modelDiscoveryUrls(connection).map((url) => sdkJson(client.get(url, callOptions(MODEL_TIMEOUT_MS)), label)
-    .catch((error) => { throw providerError(error, label, connection.apiKeyEnv, MODEL_TIMEOUT_MS, apiKey); })));
+  const requests = await Promise.allSettled(modelDiscoveryUrls(connection).map((url) => fetchJsonWithBody(context.fetchImpl, providerUrl(connection.baseUrl, url),
+    { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} }, label, MODEL_TIMEOUT_MS, MAX_JSON_RESPONSE_BYTES, connection.apiKeyEnv)));
   const successful = requests.filter((result) => result.status === "fulfilled");
   if (successful.length === 0) throw new Error([...new Set(requests.map((result) => result.reason?.message || String(result.reason)))].join(" ") || `${connection.name} models request failed.`);
   const models = [...new Map(successful.flatMap((result) => Array.isArray(result.value?.data) ? result.value.data : [])

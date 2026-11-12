@@ -1,5 +1,3 @@
-import OpenAI from "openai";
-
 export const MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024;
 export const MAX_AUDIO_RESPONSE_BYTES = 128 * 1024 * 1024;
 export const MAX_TTS_JSON_RESPONSE_BYTES = Math.ceil(MAX_AUDIO_RESPONSE_BYTES * 4 / 3) + 1024 * 1024;
@@ -11,7 +9,6 @@ export async function fetchJson(fetchImpl, url, headers, label) {
   return fetchJsonWithBody(fetchImpl, url, { headers }, label, MODEL_TIMEOUT_MS);
 }
 
-// One byte cap for raw reads and SDK clients. It fails the body stream, not fetch(), so an SDK never retries it as a connection error.
 function capResponse(response, maximum, label) {
   const limit = response.ok ? maximum : MAX_ERROR_RESPONSE_BYTES;
   const tooLarge = () => Object.assign(new Error(`${label} response exceeds ${limit} byte limit.`), { code: "response_too_large" });
@@ -45,73 +42,21 @@ export function redactSecrets(text, keys = []) {
     .replace(/\bsk[-_][\w*…-]{6,}|\b[A-Fa-f0-9]{32,}\b|[\w-]*\*{3,}[\w*…-]*/g, "[redacted]");
 }
 
-// The SDK keeps only body.error of an error body. This keeps the old detail rule: error.message, then detail.message, then raw text.
-async function errorResponse(response, label, keys) {
-  let text;
-  try { text = (await readResponseBuffer(response, MAX_ERROR_RESPONSE_BYTES, label)).toString("utf8"); }
-  catch (error) { if (error.code !== "response_too_large") throw error; text = error.message; }
-  text = redactSecrets(text, keys);
-  let data = null;
-  try { data = JSON.parse(text); } catch {}
-  const error = data?.error && typeof data.error === "object" ? data.error : {};
-  const headers = new Headers(response.headers);
-  headers.delete("content-length");
-  // A retry-after over 60 s means default backoff, as in the OpenAI SDK.
-  let waitMs = parseFloat(headers.get("retry-after-ms"));
-  const retryAfter = headers.get("retry-after");
-  if (Number.isNaN(waitMs) && retryAfter) waitMs = Number.isNaN(parseFloat(retryAfter)) ? Date.parse(retryAfter) - Date.now() : parseFloat(retryAfter) * 1000;
-  if (waitMs > 60_000) { headers.delete("retry-after-ms"); headers.delete("retry-after"); }
-  return new Response(JSON.stringify({ error: { ...error, message: data?.error?.message || data?.detail?.message || text || response.statusText } }), { status: response.status, statusText: response.statusText, headers });
-}
-
-export function cappedFetch(fetchImpl, maximum, label) {
-  return async (url, init) => {
-    const response = await fetchImpl(url, init);
-    return response.ok ? capResponse(response, maximum, label) : errorResponse(response, label, sentKeys(init));
-  };
-}
-
-// The SDK reads OPENAI_CUSTOM_HEADERS in the constructor and sends it to every host, including an Authorization line.
-function withoutEnv(name, create) {
-  const saved = process.env[name];
-  delete process.env[name];
-  try { return create(); } finally { if (saved !== undefined) process.env[name] = saved; }
-}
-
-// An empty baseURL makes the SDK fall back to api.openai.com, which would send the key to the wrong host.
-function requireBaseURL(baseURL) {
+export function providerUrl(baseURL, path) {
   if (!baseURL) throw new Error("Provider base URL is not configured.");
+  if (/^https?:\/\//i.test(path)) return path;
+  const base = new URL(baseURL);
+  const query = base.search;
+  if (query) { base.search = ""; base.hash = ""; baseURL = String(base); }
+  const url = new URL(baseURL + (baseURL.endsWith("/") && path.startsWith("/") ? path.slice(1) : path));
+  if (query) url.search = query;
+  return String(url);
 }
 
 // fetch drops only Authorization on a cross-origin redirect, so a client that sends the key in another header must not follow one.
 const NO_REDIRECT = { redirect: "error" };
 const sendsKeyHeader = (headers) => KEY_HEADERS.some((name) => name !== "authorization" && headers.has(name));
 const rawOptions = (options, signal) => ({ ...(sendsKeyHeader(new Headers(options?.headers ?? undefined)) ? NO_REDIRECT : {}), ...options, signal });
-
-export function openAiClient({ baseURL, apiKey, headers, fetch, fetchOptions }) {
-  requireBaseURL(baseURL);
-  return withoutEnv("OPENAI_CUSTOM_HEADERS", () => new OpenAI({
-    baseURL, apiKey: apiKey || "none",
-    // Explicit nulls stop the SDK reading OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID and OPENAI_WEBHOOK_SECRET.
-    adminAPIKey: null, organization: null, project: null, webhookSecret: null,
-    // "none" only satisfies the constructor. The null header removes it, so a keyless server gets no Authorization.
-    defaultHeaders: { ...(apiKey ? {} : { Authorization: null }), ...headers },
-    fetch, fetchOptions: sendsKeyHeader(new Headers(headers ?? undefined)) ? { ...NO_REDIRECT, ...fetchOptions } : fetchOptions, maxRetries: 0, logLevel: "off",
-  }));
-}
-
-// The SDK timeout covers one attempt (for a stream, only until headers). The signal is the app's total deadline across retries and the body.
-export const callOptions = (timeoutMs, maxRetries = 0) => ({ timeout: timeoutMs, maxRetries, signal: AbortSignal.timeout(timeoutMs) });
-
-// The SDK parses only application/json. The app has always parsed any 2xx body as JSON.
-export async function sdkJson(request, label) {
-  const text = await (await request.asResponse()).text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = null; }
-  if (data == null) throw new Error(`${label} response was not valid JSON.`);
-  if (data.error && typeof data.error === "object") throw new Error(`${label} request failed: ${data.error.message || JSON.stringify(data.error)}`);
-  return data;
-}
 
 // Undici reports a refused redirect as "fetch failed" and keeps the reason ("unexpected redirect") on the deepest cause.
 function causeMessage(error) {
@@ -120,8 +65,6 @@ function causeMessage(error) {
   const message = error?.message || String(error);
   return deepest !== error && deepest.message !== message ? `${message} (${deepest.message})` : message;
 }
-
-const sdkError = (error, name) => error instanceof OpenAI[name];
 
 // apiKey is the key this call sent: it is redacted from every message, and no key means a 401 or 403 asks for one.
 export function providerError(error, label, keyName, timeoutMs, apiKey) {
@@ -133,10 +76,9 @@ export function providerError(error, label, keyName, timeoutMs, apiKey) {
 function providerMessage(error, label, keyName, timeoutMs, keySent) {
   const tooLarge = [error, error?.cause].find((item) => item?.code === "response_too_large");
   if (tooLarge) return new Error(`${label} request failed: ${tooLarge.message}`);
-  if (sdkError(error, "APIUserAbortError") || sdkError(error, "APIConnectionTimeoutError") || ["AbortError", "TimeoutError"].includes(error?.name)) return new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
-  if (sdkError(error, "APIConnectionError")) return new Error(`${label} request failed: ${causeMessage(error.cause?.message ? error.cause : error)}`);
+  if (["AbortError", "TimeoutError"].includes(error?.name)) return new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
   if (error instanceof SyntaxError) return new Error(`${label} response was not valid JSON.`);
-  if (!sdkError(error, "APIError")) return error;
+  if (!error?.status) return error;
   const detail = error.error?.error?.message ?? error.error?.message ?? error.message;
   if (!keySent && (error.status === 401 || error.status === 403)) return new Error(`${label} request failed: HTTP ${error.status}. The provider requires an API key and none is configured. Set ${keyName} in .env, then refresh models. ${detail}`);
   if (error.status === 401 || error.status === 403) return new Error(`${label} request failed: HTTP ${error.status}. The provider rejected ${keyName}${error.status === 403 ? " for this model or endpoint" : ""}. Check the key. ${detail}`);
@@ -145,39 +87,53 @@ function providerMessage(error, label, keyName, timeoutMs, keySent) {
   return new Error(`${label} request failed: ${error.status ? `HTTP ${error.status} ` : ""}${detail}`);
 }
 
-export async function fetchJsonWithBody(fetchImpl, url, options, label, timeoutMs) {
+function responseError(response, text, label, keyName, options) {
+  let data;
+  try { data = JSON.parse(text); } catch {}
+  if (!keyName) return new Error(redactSecrets(`${label} request failed: HTTP ${response.status} ${data?.error?.message || data?.detail?.message || text || response.statusText}`, sentKeys(options)));
+  return providerError({ status: response.status, type: data?.error?.type, message: data?.error?.message || data?.detail?.message || text || response.statusText }, label, keyName, 0, sentKeys(options)[0]);
+}
+
+export async function fetchJsonWithBody(fetchImpl, url, options, label, timeoutMs, maximum = MAX_JSON_RESPONSE_BYTES, keyName) {
   const signal = AbortSignal.timeout(timeoutMs);
   try {
     const response = await fetchImpl(url, rawOptions(options, signal));
-    const text = (await readResponseBuffer(response, MAX_JSON_RESPONSE_BYTES, label)).toString("utf8");
+    let text;
+    try { text = (await readResponseBuffer(response, maximum, label)).toString("utf8"); }
+    catch (error) { if (response.ok || !keyName || error.code !== "response_too_large") throw error; text = error.message; }
     let data;
     try {
       data = JSON.parse(text);
     } catch {
       data = null;
     }
-    if (!response.ok) throw new Error(redactSecrets(`${label} request failed: HTTP ${response.status} ${data?.error?.message || data?.detail?.message || text || response.statusText}`, sentKeys(options)));
+    if (!response.ok) throw responseError(response, text, label, keyName, options);
     if (data == null) throw new Error(`${label} response was not valid JSON.`);
+    if (keyName && data.error && typeof data.error === "object") throw new Error(redactSecrets(`${label} request failed: ${data.error.message || JSON.stringify(data.error)}`, sentKeys(options)));
     return data;
   } catch (error) {
-    if (signal.aborted) throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
-    if (String(error?.message || error).startsWith(`${label} request`)) throw error;
+    if (signal.aborted || keyName && ["AbortError", "TimeoutError"].includes(error?.name)) throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
+    if (String(error?.message || error).startsWith(`${label} request`) || keyName && (error.message === `${label} response was not valid JSON.` || error.message.startsWith(`${label} is `))) { error.message = redactSecrets(error.message, sentKeys(options)); throw error; }
     throw new Error(redactSecrets(`${label} request failed: ${causeMessage(error)}`, sentKeys(options)));
   }
 }
 
-export async function fetchBytes(fetchImpl, url, options, label, timeoutMs) {
+export async function fetchBytes(fetchImpl, url, options, label, timeoutMs, keyName) {
   const signal = AbortSignal.timeout(timeoutMs);
   let response;
   let bytes;
   try {
     response = await fetchImpl(url, rawOptions(options, signal));
-    bytes = await readResponseBuffer(response, MAX_AUDIO_RESPONSE_BYTES, label);
+    try { bytes = await readResponseBuffer(response, MAX_AUDIO_RESPONSE_BYTES, label); }
+    catch (error) { if (response.ok || !keyName || error.code !== "response_too_large") throw error; bytes = Buffer.from(error.message); }
   } catch (error) {
-    if (signal.aborted) throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
+    if (signal.aborted || keyName && ["AbortError", "TimeoutError"].includes(error?.name)) throw new Error(`${label} request timed out after ${timeoutMs / 1000} seconds.`);
     throw new Error(redactSecrets(`${label} request failed: ${causeMessage(error)}`, sentKeys(options)));
   }
-  if (!response.ok) throw new Error(redactSecrets(`${label} request failed: HTTP ${response.status} ${bytes.toString("utf8") || response.statusText}`, sentKeys(options)));
+  if (!response.ok) {
+    if (keyName) throw responseError(response, bytes.toString("utf8"), label, keyName, options);
+    throw new Error(redactSecrets(`${label} request failed: HTTP ${response.status} ${bytes.toString("utf8") || response.statusText}`, sentKeys(options)));
+  }
   return audioResult(bytes, response.headers.get("content-type"), label, sentKeys(options));
 }
 

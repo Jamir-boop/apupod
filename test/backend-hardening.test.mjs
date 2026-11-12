@@ -227,12 +227,12 @@ test("B4: the page adopts updatedAt after host delete only when it held the repl
   assert.deepEqual(sent.slice(1), ["v1++"]);
 });
 
-test("B7: a 2xx body with an object error fails with the provider message on the SDK JSON path", async () => {
+test("B7: a 2xx body with an object error fails with the provider message on the JSON path", async () => {
   const fetchImpl = async () => Response.json({ error: { message: "invalid api key" } });
   await assert.rejects(speakMimo(unitContext(fetchImpl)), /^Error: MiMo request failed: invalid api key$/);
 });
 
-test("B8: a 2xx JSON or text body is not accepted as audio on the SDK and raw paths", async () => {
+test("B8: a 2xx JSON or text body is not accepted as audio on the compatible and ElevenLabs paths", async () => {
   const jsonBody = async () => Response.json({ error: "quota exceeded" });
   await assert.rejects(speak(unitContext(jsonBody)), /Custom TTS returned application\/json instead of audio: .*quota exceeded/);
   await assert.rejects(fetchBytes(async () => new Response("quota exceeded", { headers: { "content-type": "text/plain" } }), "https://api.elevenlabs.io/v1/text-to-speech/v", {}, "ElevenLabs TTS", 1_000),

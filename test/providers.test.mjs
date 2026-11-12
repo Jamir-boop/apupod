@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { createModelCatalog } from "../src/providers/catalog.mjs";
 import { synthesizeTurn, turnClipDescriptor } from "../src/providers/generate.mjs";
-import { callOptions, cappedFetch, openAiClient, providerError, sdkJson } from "../src/providers/transport.mjs";
+import { fetchBytes, fetchJsonWithBody, providerUrl } from "../src/providers/transport.mjs";
 import { startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const header = (init, name) => new Headers(init.headers).get(name);
@@ -40,7 +40,7 @@ const speak = (ctx) => synthesizeTurn(ctx, { voiceModel: "compat:custom:tts-1" }
 const speakMimo = (ctx) => synthesizeTurn(ctx, { voiceModel: "mimo-v2.5-tts" }, { voiceId: "default" }, "Hello", "", LANGUAGE);
 const wav = () => { const bytes = Buffer.alloc(12); bytes.write("RIFF", 0); bytes.write("WAVE", 8); return bytes; };
 
-test("SDK clients ignore OPENAI_* environment variables", async (t) => {
+test("provider requests ignore OPENAI_* environment variables", async (t) => {
   withEnv(t, {
     OPENAI_BASE_URL: "http://env-proxy.invalid/v1", OPENAI_API_KEY: "env-openai-key", OPENAI_ORG_ID: "env-org", OPENAI_PROJECT_ID: "env-project", OPENAI_ADMIN_KEY: "env-admin",
     OPENAI_CUSTOM_HEADERS: "X-Leak: env-openai-custom\nAuthorization: Bearer env-custom-auth",
@@ -65,23 +65,29 @@ test("SDK clients ignore OPENAI_* environment variables", async (t) => {
     assert.equal(header(init, "x-leak"), null);
     assert.doesNotMatch([...new Headers(init.headers).values()].join(" "), /env-/);
   }
+  for (const init of [keyed, keyless, mimo]) {
+    assert.equal(init.method, "POST");
+    assert.equal(header(init, "content-type"), "application/json");
+  }
+  assert.deepEqual(JSON.parse(keyed.body), { model: "tts-1", voice: "alloy", input: "Hello", response_format: "mp3" });
   assert.equal(header(mimo, "api-key"), "mimo-key");
   assert.equal(header(mimo, "authorization"), null);
-  assert.match(process.env.OPENAI_CUSTOM_HEADERS, /X-Leak/, "the environment is restored after a client is built");
 });
 
-test("an empty base URL sends nothing instead of falling back to the SDK default host", async () => {
+test("an empty base URL sends nothing instead of falling back to a default host", async () => {
   const { calls, fetchImpl } = recorder(() => audio());
   const ctx = context(fetchImpl);
   ctx.config.compatibleConnections[0].baseUrl = "";
   await assert.rejects(speak(ctx), /Provider base URL is not configured\.$/);
-  assert.throws(() => openAiClient({ baseURL: "", apiKey: "k", fetch: fetchImpl }), /Provider base URL is not configured\./);
+  assert.throws(() => providerUrl("", "/models"), /Provider base URL is not configured\./);
+  ctx.config.providers.mimo.baseUrl = "";
+  await assert.rejects(speakMimo(ctx), { message: "Provider base URL is not configured." });
   assert.equal(calls.length, 0);
 });
 
-test("an OpenAI client that sends a key header of any case refuses redirects", async () => {
+test("a request that sends a key header of any case refuses redirects", async () => {
   const { calls, fetchImpl } = recorder(() => Response.json({ data: [] }));
-  await openAiClient({ baseURL: "https://mimo.test/v1", apiKey: "k", headers: { Authorization: null, "Api-Key": "k" }, fetch: fetchImpl }).get("/models");
+  await fetchJsonWithBody(fetchImpl, "https://mimo.test/v1/models", { headers: { "Api-Key": "k" } }, "MiMo models", 1_000);
   assert.equal(calls[0].init.redirect, "error");
 });
 
@@ -92,6 +98,10 @@ test("withEnv restores the original environment when the test ends", async (t) =
 });
 
 test("compatible TTS clips keep the /audio/speech endpoint in their cache descriptor", () => {
+  assert.equal(providerUrl("https://custom.test/v1/", "/audio/speech"), "https://custom.test/v1/audio/speech");
+  assert.equal(providerUrl("https://custom.test/v1?api-version=1", "/audio/speech"), "https://custom.test/v1/audio/speech?api-version=1");
+  assert.equal(providerUrl("https://custom.test/v1", "https://models.test/v2/models"), "https://models.test/v2/models");
+  assert.equal(providerUrl("https://user:password@custom.test/v1", "/audio/speech"), "https://user:password@custom.test/v1/audio/speech");
   const descriptor = turnClipDescriptor(context(async () => audio()), { voiceModel: "compat:custom:tts-1" }, { voiceId: "alloy" }, { text: "Hello", delivery: "" }, LANGUAGE);
   assert.equal(descriptor.provider.endpoint, "https://custom.test/v1/audio/speech");
 });
@@ -118,18 +128,16 @@ test("error bodies keep the detail rule, map statuses to readable messages, and 
 
 test("an oversized 2xx body fails with the cap message and is not retried", async () => {
   const { calls, fetchImpl } = recorder(() => new Response(Buffer.alloc(2048, 32), { headers: { "content-type": "application/json" } }));
-  const client = openAiClient({ baseURL: "https://custom.test/v1", apiKey: "k", fetch: cappedFetch(fetchImpl, 1024, "Custom models") });
-  const error = await sdkJson(client.get("/models", callOptions(1_000)), "Custom models").then(() => null, (failure) => failure);
-  assert.equal(providerError(error, "Custom models", "CUSTOM_API_KEY", 1_000).message, "Custom models request failed: Custom models response exceeds 1024 byte limit.");
+  await assert.rejects(fetchJsonWithBody(fetchImpl, "https://custom.test/v1/models", {}, "Custom models", 1_000, 1024, "CUSTOM_API_KEY"),
+    { message: "Custom models request failed: Custom models response exceeds 1024 byte limit." });
   assert.equal(calls.length, 1);
 });
 
-test("an SDK timeout maps to the timed-out message", async () => {
+test("a fetch timeout maps to the timed-out message", async () => {
   const hang = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
-  const client = openAiClient({ baseURL: "https://custom.test/v1", apiKey: "k", fetch: cappedFetch(hang, 1024, "Custom TTS") });
   const started = Date.now();
-  const error = await client.audio.speech.create({ model: "m", voice: "alloy", input: "Hi" }, callOptions(50, 2)).then(() => null, (failure) => failure);
-  assert.equal(providerError(error, "Custom TTS", "CUSTOM_API_KEY", 50).message, "Custom TTS request timed out after 0.05 seconds.");
+  await assert.rejects(fetchBytes(hang, "https://custom.test/v1/audio/speech", { method: "POST", body: JSON.stringify({ model: "m", voice: "alloy", input: "Hi" }) }, "Custom TTS", 50, "CUSTOM_API_KEY"),
+    { message: "Custom TTS request timed out after 0.05 seconds." });
   assert.ok(Date.now() - started < 2_000);
 });
 
@@ -144,4 +152,56 @@ test("model discovery does not retry", async (t) => {
   });
   assert.equal(custom.error, "Custom models request failed: HTTP 503 down");
   assert.equal(calls.filter((call) => call.url.startsWith("https://custom.test/")).length, 1);
+});
+
+test("JSON transport preserves exact status details, type checks, and key redaction", async () => {
+  const cases = [
+    [500, { error: { message: "first" }, detail: { message: "second" } }, "MiMo request failed: HTTP 500 first"],
+    [500, { detail: { message: "second" } }, "MiMo request failed: HTTP 500 second"],
+    [500, "raw error", "MiMo request failed: HTTP 500 raw error"],
+    [500, "", "MiMo request failed: HTTP 500 Server Error"],
+    [401, { error: { message: "bad key" } }, "MiMo request failed: HTTP 401. The provider rejected MIMO_API_KEY. Check the key. bad key"],
+    [403, { error: { message: "denied" } }, "MiMo request failed: HTTP 403. The provider rejected MIMO_API_KEY for this model or endpoint. Check the key. denied"],
+    [429, { error: { message: "slow" } }, "MiMo is rate-limited (HTTP 429). Wait, then try again. slow"],
+    [529, { error: { message: "busy" } }, "MiMo is overloaded (HTTP 529). Try again shortly. busy"],
+    [400, { error: { type: "rate_limit_error", message: "slow" } }, "MiMo is rate-limited (HTTP 429). Wait, then try again. slow"],
+    [400, { error: { type: "overloaded_error", message: "busy" } }, "MiMo is overloaded (HTTP 529). Try again shortly. busy"],
+    [200, { error: { message: "echo mimo-key" } }, "MiMo request failed: echo [redacted]"],
+    [200, { error: { code: "failed" } }, 'MiMo request failed: {"code":"failed"}'],
+    [200, "not json", "MiMo response was not valid JSON."],
+    [200, "null", "MiMo response was not valid JSON."],
+  ];
+  for (const [status, body, message] of cases) {
+    const { calls, fetchImpl } = recorder(() => new Response(typeof body === "string" ? body : JSON.stringify(body), { status, statusText: "Server Error" }));
+    await assert.rejects(fetchJsonWithBody(fetchImpl, "https://mimo.test/v1/chat/completions", { headers: { "api-key": "mimo-key" } }, "MiMo", 1_000, 1024, "MIMO_API_KEY"), { message });
+    assert.equal(calls.length, 1);
+  }
+  for (const status of [401, 403]) {
+    await assert.rejects(speak(context(async () => fail(status, "missing"), { apiKey: "" })),
+      { message: `Custom TTS request failed: HTTP ${status}. The provider requires an API key and none is configured. Set CUSTOM_API_KEY in .env, then refresh models. missing` });
+  }
+});
+
+test("fetch transport caps declared and streamed bodies and rejects empty audio", async () => {
+  for (const headers of [{}, { "content-length": "2048" }]) {
+    await assert.rejects(fetchJsonWithBody(async () => new Response("x".repeat(2048), { headers }), "https://models.test", {}, "Models", 1_000, 1024, "TEST_KEY"),
+      { message: "Models request failed: Models response exceeds 1024 byte limit." });
+  }
+  await assert.rejects(speak(context(async () => new Response())), { message: "Custom TTS returned empty audio." });
+  await assert.rejects(speak(context(async () => new Response("x", { headers: { "content-length": String(128 * 1024 * 1024 + 1) } }))),
+    { message: `Custom TTS request failed: Custom TTS response exceeds ${128 * 1024 * 1024} byte limit.` });
+  const network = async () => { throw new TypeError("fetch failed", { cause: new Error("outer", { cause: new Error("key mimo-key refused") }) }); };
+  await assert.rejects(speakMimo(context(network)), { message: "MiMo request failed: fetch failed (key [redacted] refused)" });
+});
+
+test("one fetch deadline includes response body reads without a retry", async () => {
+  for (const json of [true, false]) {
+    const { calls, fetchImpl } = recorder((url, init) => new Response(new ReadableStream({
+      start(controller) { init.signal.addEventListener("abort", () => controller.error(init.signal.reason), { once: true }); },
+    })));
+    const request = json ? fetchJsonWithBody(fetchImpl, "https://slow.test", {}, "Slow", 50, 1024, "TEST_KEY")
+      : fetchBytes(fetchImpl, "https://slow.test", {}, "Slow", 50, "TEST_KEY");
+    await assert.rejects(request, { message: "Slow request timed out after 0.05 seconds." });
+    assert.equal(calls.length, 1);
+  }
 });
