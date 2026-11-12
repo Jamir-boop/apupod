@@ -4,7 +4,7 @@
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.5.0", "mcp"]
+        "command": ["npx", "-y", "github:Jamir-boop/apupod#v2.0.0", "mcp"]
       }
     }
   },
