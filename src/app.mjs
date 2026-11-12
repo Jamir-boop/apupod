@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { DEFAULT_DATA } from "./defaults.mjs";
-import { envFileNames, badRequest, conflict, assertSafeId, readJsonBody, assertLocalRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
+import { envFileNames, badRequest, conflict, assertSafeId, readJsonBody, assertLocalRequest, authorizeRequest, sendJson, sendFile, htmlContentSecurityPolicy } from "./util.mjs";
 import { createModelCatalog, queueModelCatalogRefresh, awaitLatestModelCatalog } from "./providers/catalog.mjs";
 import { fetchElevenLabsVoices, fetchChatterboxVoices } from "./providers/generate.mjs";
 import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpisodes, readJson, writeJsonAtomic, exists, nextUpdatedAt } from "./store.mjs";
@@ -19,7 +19,7 @@ import { deleteEpisodeRequest, deleteSpeakerProfileRequest, saveEpisodeRequest, 
 import { createKnowledgeBase, deleteKnowledgeBase, createPlanRequest, getPlanResponse, updatePlanRequest, deletePlannedEpisodeRequest, deletePlanRequest, createPlanEpisodesRequest } from "./plans.mjs";
 import { interruptStaleJobs, cleanupInterruptedEpisodeDeletes, cleanupStoredArtifacts, listJobsResponse, rememberJob, enqueueTtsJob, ensureFfmpeg, previewVoice, runProcess } from "./jobs.mjs";
 import { handleMcpRequest, readWorkspaceState } from "./mcp.mjs";
-import { handleSystemRequest, restartDaemon, writeMcpToken } from "./system.mjs";
+import { handleSystemRequest, restartDaemon, writeMcpToken, signInLink, redeemSignInCode } from "./system.mjs";
 import { handleAlbumRequest } from "./albums.mjs";
 export { validateProfileData, transcriptSpeakerRule, parseTranscript } from "./episodes.mjs";
 export { clipCacheKey, writeAudioAsWav, runProcess } from "./jobs.mjs";
@@ -74,6 +74,7 @@ async function createAppContext(options = {}) {
     revision: 0,
     mcpToken: await ensureMcpToken(paths.mcpToken),
     mcpClients: new Map(),
+    signInCodes: new Map(),
     ffmpegCheck: null,
     mediaTools: null,
     updateCheck: null,
@@ -187,6 +188,15 @@ async function routeRequest(req, res, context) {
     throw badRequest("Request path is malformed.");
   }
   assertLocalRequest(req, method);
+  const openApi = (method === "GET" && path === "/api/revision") || (method === "POST" && path === "/api/login");
+  if (path.startsWith("/api/") && !openApi && !authorizeRequest(req, res, context)) return;
+
+  if (method === "POST" && path === "/api/login") {
+    const body = await readJsonBody(req);
+    return sendJson(res, 200, { token: redeemSignInCode(context, body?.code) });
+  }
+  if (method === "POST" && path === "/api/sign-in-link") return sendJson(res, 200, { url: signInLink(context, `http://${req.headers.host}`) });
+  if (method === "GET" && /^\/covers\/[a-zA-Z0-9_-]+$/.test(path)) return handleAlbumRequest(req, res, context, method, path);
 
   if (method === "GET" && path === "/") {
     const csp = await exists(context.paths.publicIndex) ? await htmlContentSecurityPolicy(context.paths.publicIndex) : "";

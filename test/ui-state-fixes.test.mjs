@@ -320,7 +320,7 @@ test("playlist mutations from two stale tabs preserve additions and do not resto
 });
 
 test("API errors retain the backend recovery message and safe parameter name", async () => {
-  const context = { fetch: async () => ({ ok: false, headers: { get: () => "application/json" }, json: async () => ({ error: "Provider rejected parameter voice_settings.speed. Select a supported speed before trying again.", param: "voice_settings.speed", bodyShape: { voice_settings: { speed: "number" } } }) }) };
+  const context = { signedOut: false, apiToken: "fake-token", fetch: async () => ({ ok: false, headers: { get: () => "application/json" }, json: async () => ({ error: "Provider rejected parameter voice_settings.speed. Select a supported speed before trying again.", param: "voice_settings.speed", bodyShape: { voice_settings: { speed: "number" } } }) }) };
   install(["api"], context);
   await assert.rejects(context.api("/api/preview"), /voice_settings\.speed.*Select a supported speed/);
 });
@@ -725,7 +725,7 @@ test("notifications and toasts add and remove single nodes in their live regions
   };
   const nodes = { notificationFeed: region(), toasts: region(), rightbarBadge: new Control() };
   let id = 0;
-  const context = { notifications: [], toastEntries: [], toastOverflow: 0, rightbarOpen: false, crypto: { randomUUID: () => `n${++id}` }, setTimeout: noop,
+  const context = { signedOut: false, notifications: [], toastEntries: [], toastOverflow: 0, rightbarOpen: false, crypto: { randomUUID: () => `n${++id}` }, setTimeout: noop,
     TOAST_ICONS: {}, TOAST_LABELS: {}, $: (name) => nodes[name] };
   install(["escapeHtml", "icon", "notify", "renderNotificationBadge", "showToast", "removeToastNode", "dismissToast", "renderToastOverflow"], context);
   context.notify("first", "ok");

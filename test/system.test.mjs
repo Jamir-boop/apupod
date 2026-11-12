@@ -7,7 +7,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TAGS_URL, OWN_BIN, compareVersions, newestBin } from "../src/system.mjs";
-import { silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
+import { fetch, silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const NO_KEYS = { MIMO_API_KEY: undefined, ELEVENLABS_API_KEY: undefined, OPENAI_API_KEY: undefined, CHATTERBOX_API_KEY: undefined, TYPESAFE_API_KEY: undefined, PORT: undefined };
@@ -175,7 +175,9 @@ test("a new MCP token invalidates the old one; initialize is tracked in /api/sys
   const newToken = (await readFile(tokenPath, "utf8")).trim();
   assert.notEqual(newToken, oldToken);
   assert.ok(newToken.length >= 32);
-  assert.doesNotMatch(await rotated.text(), new RegExp(newToken));
+  assert.deepEqual(await rotated.json(), { mcpToken: true, token: newToken });
+  assert.equal((await fetch(`${baseUrl}/api/state`, { headers: { Authorization: `Bearer ${oldToken}` } })).status, 401);
+  assert.equal((await fetch(`${baseUrl}/api/state`, { headers: { Authorization: `Bearer ${newToken}` } })).status, 200);
   if (process.platform !== "win32") assert.equal((await stat(tokenPath)).mode & 0o777, 0o600);
   assert.equal((await postMcp(baseUrl, oldToken)).status, 401);
   assert.equal((await postMcp(baseUrl, newToken)).status, 200);

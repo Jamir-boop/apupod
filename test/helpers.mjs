@@ -27,6 +27,15 @@ export function withEnv(t, values) {
   setEnv(values);
 }
 
+const testServers = new Map();
+export function fetch(input, options = {}) {
+  const url = new URL(input instanceof Request ? input.url : input);
+  const token = testServers.get(url.origin);
+  const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+  if (token && url.pathname.startsWith("/api/") && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return globalThis.fetch(input, { ...options, headers });
+}
+
 export const sendJson = (url, body, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 export function createApi(baseUrl) {
@@ -48,6 +57,8 @@ export async function startTestServer(t, { rootDir, ...options } = {}, prepare) 
   const close = () => new Promise((resolve) => server.close(resolve));
   t.after(close);
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  testServers.set(baseUrl, (await readFile(join(options.configDir || rootDir, "mcp-token"), "utf8")).trim());
+  t.after(() => testServers.delete(baseUrl));
   return { rootDir, baseUrl, api: createApi(baseUrl), close };
 }
 

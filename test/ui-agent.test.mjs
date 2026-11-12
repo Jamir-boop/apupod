@@ -77,7 +77,7 @@ function pollContext(revisions) {
   const timers = [];
   const calls = [];
   const context = {
-    lastRevision: null, revisionTimer: null, activePlanId: "p",
+    signedOut: false, lastRevision: null, revisionTimer: null, activePlanId: "p",
     document: { visibilityState: "visible", activeElement: null, body: {} },
     setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
     clearTimeout: noop,

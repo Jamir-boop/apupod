@@ -1,12 +1,12 @@
 // The /mcp endpoint: deterministic tools over the same core functions the REST handlers use.
 // Stateless streamable HTTP: one McpServer per request, so all state stays in the app context and its write lock.
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod";
-import { notFound, readJsonBody, sendJson } from "./util.mjs";
+import { notFound, authorizeRequest, readJsonBody, sendJson } from "./util.mjs";
 import { serializeMutation, serializeWithLatestModelCatalog, listPlans, listEpisodes, loadPlan, loadEpisode, resolveEpisodeProfiles, profileRevision, readJson } from "./store.mjs";
 import { redactConfig, setTtsModels } from "./config.mjs";
 import { availableModelIds, awaitLatestModelCatalog, discoveredModelLanguages, inactiveTtsModels, modelLanguageError, resolveLanguage, MIMO_VOICES, OPENAI_VOICES } from "./providers/catalog.mjs";
@@ -17,7 +17,7 @@ import { listJobs, enqueueTts, ensureFfmpeg, previewVoiceAudio } from "./jobs.mj
 import { readAlbums, albumView, episodeAlbumView, saveAlbum, deleteAlbum, setAlbumCover, MAX_COVER_BYTES } from "./albums.mjs";
 import { jevDecide, voiceCatalog } from "./decide.mjs";
 import { JEV_MODEL } from "./jev.mjs";
-import { VERSION, mcpClientList, recordMcpClients } from "./system.mjs";
+import { VERSION, signInLink, mcpClientList, recordMcpClients } from "./system.mjs";
 import { WIDGET_MIME_TYPE, WORKSPACE_WIDGET_URI, EPISODE_WIDGET_URI, WORKSPACE_WIDGET_HTML, EPISODE_WIDGET_HTML } from "./widgets.mjs";
 
 const PREVIEW_MAX_AGE_MS = 60 * 60 * 1000;
@@ -41,12 +41,7 @@ export async function handleMcpRequest(req, res, context) {
     try { value = new URL(req.headers.origin).origin.toLowerCase(); } catch {}
     if (value !== origin) return sendJson(res, 403, { error: "Cross-origin MCP requests are forbidden." });
   }
-  const expected = Buffer.from(`Bearer ${context.mcpToken}`);
-  const given = Buffer.from(String(req.headers.authorization || ""));
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-    res.setHeader("WWW-Authenticate", 'Bearer realm="apupod"');
-    return sendJson(res, 401, { error: "Missing or invalid MCP bearer token." });
-  }
+  if (!authorizeRequest(req, res, context)) return;
   // Stateless: no session, so no standalone SSE stream (GET) and nothing to delete (DELETE).
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -274,7 +269,7 @@ export function createMcpServer(context, origin) {
 
   tool("get_workspace", {
     title: "Get workspace",
-    description: "Overview of the apupod workspace: host profiles, Episode Formats, knowledge bases, plans, episodes (IDs, names, status), albums (editions per language with track counts), TTS readiness, Jev availability, the apupod version and update status, recent MCP client connections, and the UI URL. Call this first.",
+    description: "Overview of the apupod workspace: host profiles, Episode Formats, knowledge bases, plans, episodes (IDs, names, status), albums (editions per language with track counts), TTS readiness, Jev availability, the apupod version and update status, recent MCP client connections, and the plain UI URL. open_ui gives a one-time browser sign-in link. Call this first.",
     inputSchema: {},
     annotations: READ,
     _meta: widget(WORKSPACE_WIDGET_URI),
@@ -285,7 +280,7 @@ export function createMcpServer(context, origin) {
 
   tool("open_ui", {
     title: "Open apupod UI",
-    description: "Return the apupod browser UI URL, optionally deep-linked to a view or episode, with the workspace overview.",
+    description: "Return a one-time browser sign-in link that expires after 10 minutes, optionally deep-linked to a view or episode, with the workspace overview.",
     inputSchema: {
       view: z.enum(["production", "hosts", "format", "script", "tts", "player", "activity", "settings", "episode"]).optional(),
       episodeId: id("Episode").optional(),
@@ -294,8 +289,8 @@ export function createMcpServer(context, origin) {
     _meta: widget(WORKSPACE_WIDGET_URI),
   }, async ({ view, episodeId }) => {
     const query = new URLSearchParams({ ...(view ? { view } : episodeId ? { view: "episode" } : {}), ...(episodeId ? { episode: episodeId } : {}) }).toString();
-    const url = `${origin}/${query ? `?${query}` : ""}`;
-    return result(`Open apupod: ${url}`, { url, ...(await workspaceOverview(context, origin)) });
+    const url = signInLink(context, origin, query);
+    return result(`Open apupod: ${url} (signs a browser in once; expires after 10 minutes)`, { url, ...(await workspaceOverview(context, origin)) });
   });
 
   tool("list_tts_options", {

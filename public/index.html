@@ -501,9 +501,15 @@
     }
     button:disabled, button:is(.active, .primary, .danger, .nav-item):disabled, input:disabled, select:disabled, textarea:disabled, option:disabled { color: var(--disabled); background: var(--surface); border-color: var(--border); opacity: 1; transition: none; }
     input[type="range"]:disabled { background: var(--border); }
+    body.signed-out > :not(#signInPanel) { display: none !important; }
+    #signInPanel { margin: 2rem; max-width: 42rem; }
   </style>
 </head>
 <body>
+  <section id="signInPanel" class="panel" role="alert" hidden>
+    <h1>Sign in to apupod</h1>
+    <p>This browser is not signed in to apupod. Run apupod open in a terminal, or ask your agent to open the apupod UI, then open the link it gives you.</p>
+  </section>
   <!--
   THESIS: The agent is the studio; this page shows its work and allows light edits, refusing the dashboard-first maze.
   OWN-WORLD: User-pinned Honey Graphite: graphite canvas, neutral panels, inset fields, warm text, small honey actions and focus, status words and shapes, and tactile low-radius controls.
@@ -1033,6 +1039,7 @@ codex plugin add apupod@apupod</code></pre>
     }
 
     function notify(message, type = "") {
+      if (signedOut) return;
       const entry = { id: crypto.randomUUID(), message: String(message || ""), type: type || "info", at: Date.now(), read: rightbarOpen };
       notifications = [entry, ...notifications].slice(0, 30);
       // The feed is a live region: add only the new entry so older entries are not announced again.
@@ -1105,11 +1112,42 @@ codex plugin add apupod@apupod</code></pre>
       else if (more.lastElementChild.textContent !== text) more.lastElementChild.textContent = text;
     }
 
+    let apiToken = localStorage.getItem("apupod-token") || "";
+    let signedOut = false;
+
+    function requireSignIn() {
+      signedOut = true;
+      clearTimeout(modelPollTimer);
+      clearTimeout(jobPollTimer);
+      clearTimeout(revisionTimer);
+      $("signInPanel").hidden = false;
+      document.body.classList.add("signed-out");
+      return new Error("This browser is not signed in to apupod.");
+    }
+
+    async function initializeSignIn() {
+      const parts = location.hash.slice(1).split("&");
+      const credentials = new URLSearchParams(parts.filter((part) => /^(login|token)=/.test(part)).join("&"));
+      if (!credentials.size) return;
+      const route = parts.filter((part) => !/^(login|token)=/.test(part)).join("&");
+      history.replaceState(null, "", `${location.pathname}${location.search}${route ? `#${route}` : ""}`);
+      if (credentials.has("token")) apiToken = credentials.get("token");
+      else {
+        try {
+          const response = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: credentials.get("login") }) });
+          if (response.ok) apiToken = (await response.json()).token;
+        } catch {}
+      }
+      if (apiToken) localStorage.setItem("apupod-token", apiToken);
+    }
+
     async function api(path, options = {}) {
+      if (signedOut) throw requireSignIn();
       const response = await fetch(path, {
         ...options,
-        headers: options.body ? { "Content-Type": "application/json", ...(options.headers || {}) } : options.headers,
+        headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}), Authorization: `Bearer ${apiToken}` },
       });
+      if (response.status === 401) throw requireSignIn();
       const type = response.headers.get("content-type") || "";
       const value = type.includes("application/json") ? await response.json() : await response.text();
       if (!response.ok) throw new Error(value?.error || value || `${response.status} ${response.statusText}`);
@@ -1765,12 +1803,14 @@ codex plugin add apupod@apupod</code></pre>
         try { await api("/api/revision"); } catch { break; }
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      setTimeout(() => { location.href = `${url}#config`; }, 1500);
+      setTimeout(() => { location.href = `${url}#config&token=${encodeURIComponent(apiToken)}`; }, 1500);
     }
 
     async function rotateMcpToken() {
-      if (!confirm("Create a new MCP token? The old token stops working. Running apupod bridges read the new token by themselves.")) return;
-      await api("/api/system/mcp-token", { method: "POST" });
+      if (!confirm("Create a new MCP token? The old token stops working and other browsers are signed out. Running apupod bridges read the new token by themselves.")) return;
+      const { token } = await api("/api/system/mcp-token", { method: "POST" });
+      apiToken = token;
+      localStorage.setItem("apupod-token", token);
       notify("New MCP token saved.", "ok");
       await loadSystem();
     }
@@ -2663,9 +2703,10 @@ codex plugin add apupod@apupod</code></pre>
       notify(`Generating ${speaker.name} preview…`);
       const response = await fetch("/api/preview", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
         body: JSON.stringify({ episodeId: currentEpisode?.id, episodeProfileId: episodeProfile.id, speakerProfileId: speakerProfile.id, speakerIndex: index, text: previewText(speaker.name), cue: "warm and conversational" }),
       });
+      if (response.status === 401) throw requireSignIn();
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: response.statusText }));
         throw new Error(error.error);
@@ -2945,7 +2986,7 @@ codex plugin add apupod@apupod</code></pre>
         const editions = album.editions.map((edition) => ({ edition, tracks: edition.episodeIds.map((id, index) => ({ episode: ready.get(id), track: index + 1 })).filter((item) => item.episode) })).filter((item) => item.tracks.length);
         if (!editions.length) continue;
         const albumId = escapeHtml(album.id);
-        const cover = album.cover ? `<img class="album-cover" src="/api/albums/${encodeURIComponent(album.id)}/cover?v=${encodeURIComponent(album.revision)}" alt="Cover of ${escapeHtml(album.title)}">` : "";
+        const cover = album.cover ? `<img class="album-cover" src="/covers/${encodeURIComponent(album.id)}?v=${encodeURIComponent(album.revision)}" alt="Cover of ${escapeHtml(album.title)}">` : "";
         const actions = `<details class="player-more"><summary>Album actions</summary><div class="player-row-actions"><button type="button" class="icon-btn" data-rename-album="${albumId}" title="Rename album" aria-label="Rename album ${escapeHtml(album.title)}">${icon("pencil")}</button><button type="button" class="icon-btn" data-upload-cover="${albumId}" title="Upload cover" aria-label="Upload cover for ${escapeHtml(album.title)}">${icon("upload")}</button>${album.cover ? `<button type="button" class="danger icon-btn" data-remove-cover="${albumId}" title="Remove cover" aria-label="Remove cover of ${escapeHtml(album.title)}">${icon("x")}</button>` : ""}</div></details>`;
         parts.push(`<section class="album-group" aria-label="Album ${escapeHtml(album.title)}"><div class="album-head">${cover}<h4>${escapeHtml(album.title)}</h4>${actions}</div>${editions.map(({ edition, tracks }) => `<div class="album-edition"><div class="episode-group-title">${escapeHtml(editionLabel(album, edition))}</div><button type="button" data-play-edition="${albumId}" data-language="${escapeHtml(edition.language)}">${icon("play")}Play edition</button></div>${tracks.map(({ episode, track }) => playerRowHtml(episode, `${track}. ${episode.name}`, `<button type="button" class="danger icon-btn" data-remove-from-edition="${escapeHtml(episode.id)}" title="Remove from album" aria-label="Remove ${escapeHtml(episode.name)} from ${escapeHtml(editionLabel(album, edition))}">${icon("list-x")}</button>`)).join("")}`).join("")}</section>`);
       }
@@ -3276,7 +3317,8 @@ codex plugin add apupod@apupod</code></pre>
     }
 
     document.querySelectorAll("nav button[data-view]").forEach((button) => button.addEventListener("click", () => { location.hash = button.dataset.view; }));
-    window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
+    // A sign-in link opened in a tab that already shows apupod changes only the fragment; reload so startUi reads it.
+    window.addEventListener("hashchange", () => /(^#|&)(login|token)=/.test(location.hash) ? location.reload() : setView(location.hash.slice(1)));
     $("speakerProfileSelect").addEventListener("change", (event) => { syncSpeakerForm(); loadSpeakerForm(event.target.value); });
     $("spVoiceModel").addEventListener("change", () => { syncSpeakerForm(); renderSpeakerCards(state.profiles.speakerProfiles.find((item) => item.id === activeSpeakerProfileId)); });
     $("newSpeakerProfile").addEventListener("click", () => addSpeakerProfile(false));
@@ -3663,7 +3705,7 @@ codex plugin add apupod@apupod</code></pre>
     // The agent changes data through MCP; the daemon bumps a revision counter, and a change reloads the page state.
     async function pollRevision() {
       clearTimeout(revisionTimer);
-      if (document.visibilityState !== "visible") return;
+      if (signedOut || document.visibilityState !== "visible") return;
       try {
         const { revision } = await api("/api/revision");
         if (lastRevision !== null && revision !== lastRevision) {
@@ -3682,7 +3724,7 @@ codex plugin add apupod@apupod</code></pre>
         // Offline or a failed refresh: keep the old revision so the next poll tries again; Retry buttons show the error.
       } finally {
         clearTimeout(revisionTimer);
-        if (document.visibilityState === "visible") revisionTimer = setTimeout(pollRevision, 2000);
+        if (!signedOut && document.visibilityState === "visible") revisionTimer = setTimeout(pollRevision, 2000);
       }
     }
 
@@ -3699,15 +3741,19 @@ codex plugin add apupod@apupod</code></pre>
       openAssistantTarget(button.dataset.assistantTarget);
     });
 
-    const link = deepLink(location.search);
-    if (link.view) history.replaceState(null, "", `${location.pathname}#${link.view}`);
-    if (link.activity) setRightbarOpen(true, false);
-    syncWorkspaceTapeMode();
-    setView(location.hash.slice(1));
-    Promise.all([loadModelCatalog(), refreshState(link.episodeId || rememberedEpisodeId), refreshJobs()])
-      .then(() => rememberedPlanId && activePlanId === rememberedPlanId && !activePlan ? loadPlan(rememberedPlanId) : null)
-      .catch(notifyError)
-      .finally(pollRevision);
+    async function startUi() {
+      await initializeSignIn();
+      const link = deepLink(location.search);
+      if (link.view) history.replaceState(null, "", `${location.pathname}#${link.view}`);
+      if (link.activity) setRightbarOpen(true, false);
+      syncWorkspaceTapeMode();
+      setView(location.hash.slice(1));
+      Promise.all([loadModelCatalog(), refreshState(link.episodeId || rememberedEpisodeId), refreshJobs()])
+        .then(() => rememberedPlanId && activePlanId === rememberedPlanId && !activePlan ? loadPlan(rememberedPlanId) : null)
+        .catch(notifyError)
+        .finally(pollRevision);
+    }
+    startUi().catch(notifyError);
 
   </script>
 </body>

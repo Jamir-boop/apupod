@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   open,
   readFile,
@@ -135,6 +135,15 @@ export function assertLocalRequest(req, method) {
       throw error;
     }
   }
+}
+
+export function authorizeRequest(req, res, context) {
+  const expected = Buffer.from(`Bearer ${context.mcpToken}`);
+  const given = Buffer.from(String(req.headers.authorization || ""));
+  if (given.length === expected.length && timingSafeEqual(given, expected)) return true;
+  res.setHeader("WWW-Authenticate", 'Bearer realm="apupod"');
+  sendJson(res, 401, { error: "Sign in to apupod: run `apupod open`, or ask your agent to open the apupod UI." });
+  return false;
 }
 
 export function sendJson(res, statusCode, value) {

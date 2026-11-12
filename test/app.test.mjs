@@ -19,7 +19,7 @@ import {
 } from "../src/app.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
 import { normalizeGeneratedPlan, normalizePlannedEpisode } from "../src/plans.mjs";
-import { html, script, seedEpisode, sendJson, silentWav, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
+import { fetch, html, script, seedEpisode, sendJson, silentWav, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const speakers = DEFAULT_DATA.speakerProfiles[0].speakers;
 const execFileAsync = promisify(execFile);

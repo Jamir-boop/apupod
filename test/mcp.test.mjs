@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
+import { fetch, silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const TOOLS = ["get_workspace", "open_ui", "list_tts_options", "set_tts_models", "list_voices", "save_host_profile", "delete_host_profile", "save_episode_format", "delete_episode_format", "add_knowledge", "get_knowledge", "delete_knowledge", "save_plan", "get_plan", "delete_plan", "create_episodes", "get_episode", "get_script_rules", "save_script", "render_audio", "get_job", "list_jobs", "preview_voice", "rename_episode", "apply_latest_profiles", "delete_episode", "save_album", "get_album", "delete_album", "set_album_cover", "jev_decide"];
 const INITIALIZE = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } };
@@ -60,6 +60,24 @@ test("tools/list has every tool with annotations, and the widgets are self-conta
     assert.doesNotMatch(content.text, /<script[^>]+src=|<link\b|https?:\/\/(?!127)/, "no external resources");
     assert.deepEqual(content._meta.ui.csp, { connectDomains: [baseUrl], resourceDomains: [baseUrl] });
   }
+});
+
+test("open_ui gives a one-time sign-in link without returning the persistent token", async (t) => {
+  const { client, baseUrl, token } = await connect(t);
+  const response = await client.callTool({ name: "open_ui", arguments: { view: "tts", episodeId: "fake-episode" } });
+  assert.ok(!response.isError);
+  assert.ok(!JSON.stringify(response).includes(token), "neither text nor structured data contains the token");
+  assert.match(response.content[0].text, /signs a browser in once; expires after 10 minutes/);
+  const url = new URL(response.structuredContent.url);
+  assert.equal(url.origin, baseUrl);
+  assert.equal(url.search, "?view=tts&episode=fake-episode");
+  assert.match(url.hash, /^#login=[A-Za-z0-9_-]{43}$/);
+  assert.equal(response.structuredContent.uiUrl, `${baseUrl}/`);
+  const redeem = () => globalThis.fetch(`${baseUrl}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: url.hash.slice("#login=".length) }) });
+  const login = await redeem();
+  assert.equal(login.status, 200);
+  assert.ok((await login.json()).token === token, "the code exchanges for this daemon's token");
+  assert.equal((await redeem()).status, 401);
 });
 
 test("/mcp rejects a missing or wrong token and a foreign Origin, and answers only POST", async (t) => {
@@ -153,7 +171,7 @@ test("host profile and Episode Format tools validate, check revisions, and keep 
   await fails("delete_host_profile", { id: hostId }, /Host profile not found/);
   await fails("delete_host_profile", { id: "../x" }, /invalid/);
   const opened = await ok("open_ui", { view: "tts" });
-  assert.match(opened.url, /\/\?view=tts$/);
+  assert.match(opened.url, /\/\?view=tts#login=[A-Za-z0-9_-]{43}$/);
 });
 
 test("apply_latest_profiles refreshes an episode's host snapshot and keeps the script", async (t) => {

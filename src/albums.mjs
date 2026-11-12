@@ -42,7 +42,7 @@ export async function albumView(paths, album, extra = {}) {
   return {
     album: {
       ...album,
-      coverUrl: album.cover ? `/api/albums/${album.id}/cover` : null,
+      coverUrl: album.cover ? `/covers/${album.id}` : null,
       editions: album.editions.map((edition) => ({
         ...edition,
         languageName: LANGUAGE_OPTIONS.find((item) => item.id === edition.language)?.name || edition.language,
@@ -230,9 +230,16 @@ export async function tagEpisodeMp3(paths, episode, albums) {
   }
 }
 
-// REST: GET/POST /api/albums, GET/PUT/DELETE /api/albums/<id>, GET/PUT/DELETE /api/albums/<id>/cover.
+// REST: GET/POST /api/albums, GET/PUT/DELETE /api/albums/<id>, PUT/DELETE /api/albums/<id>/cover, GET /covers/<id>.
 export async function handleAlbumRequest(req, res, context, method, path) {
   const { paths } = context;
+  if (method === "GET" && path.startsWith("/covers/")) {
+    const albumId = path.slice("/covers/".length);
+    assertSafeId(albumId);
+    const album = findAlbum(await readAlbums(paths), albumId);
+    if (!album.cover) throw notFound("The album has no cover.");
+    return sendFile(req, res, coverPath(paths, album), album.cover.mimeType);
+  }
   if (path === "/api/albums") {
     if (method === "GET") return sendJson(res, 200, { albums: await readAlbums(paths) });
     if (method === "POST") {
@@ -253,11 +260,6 @@ export async function handleAlbumRequest(req, res, context, method, path) {
       }
       if (method === "DELETE") return sendJson(res, 200, await serializeMutation(context, () => deleteAlbum(context, albumId)));
     } else {
-      if (method === "GET") {
-        const album = findAlbum(await readAlbums(paths), albumId);
-        if (!album.cover) throw notFound("The album has no cover.");
-        return sendFile(req, res, coverPath(paths, album), album.cover.mimeType);
-      }
       if (method === "PUT") {
         const mimeType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
         const bytes = await readCoverBody(req);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // apupod CLI: `serve` runs the daemon (UI + REST + /mcp), `mcp` is the stdio bridge a harness starts,
-// `open` prints the UI URL, `--version` prints the version.
+// `open` prints a UI sign-in link, `--version` prints the version.
 import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
@@ -55,9 +55,10 @@ async function liveDaemon(configDir) {
 const older = (daemon, target) => !(compareVersions(daemon.version, target) >= 0);
 
 // Idle means no queued or running job; a failed request counts as busy.
-async function isIdle(url) {
+async function isIdle(url, configDir) {
   try {
-    const response = await fetch(`${url}/api/jobs`, { signal: AbortSignal.timeout(2_000) });
+    const token = (await readFile(join(configDir, "mcp-token"), "utf8")).trim();
+    const response = await fetch(`${url}/api/jobs`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2_000) });
     const { activeJobId, jobs } = await response.json();
     return response.ok && !activeJobId && Array.isArray(jobs) && !jobs.some((job) => ["queued", "running"].includes(job.status));
   } catch {
@@ -151,7 +152,7 @@ async function ensureDaemon(dirs) {
   const target = newestBin(dataDir).version;
   const replace = async (daemon) => {
     if (!older(daemon, target)) return false;
-    if (await isIdle(daemon.url)) return true;
+    if (await isIdle(daemon.url, configDir)) return true;
     console.error(`apupod bridge: daemon ${daemon.version || "(unknown version)"} is older than ${target}; it is busy, the upgrade waits for the next connect.`);
     return false;
   };
@@ -244,7 +245,14 @@ async function bridge() {
 async function printUrl() {
   const { configDir } = resolveDirs();
   const daemon = await liveDaemon(configDir);
-  if (daemon) return console.log(`${daemon.url}/`);
+  if (daemon) {
+    try {
+      const token = (await readFile(join(configDir, "mcp-token"), "utf8")).trim();
+      const response = await fetch(`${daemon.url}/api/sign-in-link`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2_000) });
+      if (response.ok) return console.log((await response.json()).url);
+    } catch {}
+    return console.log(`${daemon.url}/`);
+  }
   await loadEnvFile(join(configDir, ".env"));
   console.log(`http://${HOST}:${configuredPort()}/ (not running; start it with: apupod serve)`);
 }

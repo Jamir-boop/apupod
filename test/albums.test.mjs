@@ -5,7 +5,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { runProcess } from "../src/jobs.mjs";
-import { silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
+import { fetch, silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 async function connect(t, options) {
   const server = await startTestServer(t, options);
@@ -115,7 +115,9 @@ test("album covers check magic bytes and size, and serve the image", async (t) =
   const set = await ok("set_album_cover", { albumId: album.id, imageBase64: PNG.toString("base64"), mimeType: "image/png" });
   assert.deepEqual(set.album.cover, { file: "cover.png", mimeType: "image/png" });
   assert.doesNotMatch(JSON.stringify(set), new RegExp(PNG.toString("base64").slice(0, 12)), "the image data is never echoed");
-  const image = await fetch(`${baseUrl}${set.album.coverUrl}`);
+  assert.equal(set.album.coverUrl, `/covers/${album.id}`);
+  assert.equal((await api(`/api/albums/${album.id}/cover`)).status, 404, "GET moved to the capability URL");
+  const image = await globalThis.fetch(`${baseUrl}${set.album.coverUrl}`);
   assert.equal(image.headers.get("content-type"), "image/png");
   assert.deepEqual(Buffer.from(await image.arrayBuffer()), PNG);
 
@@ -124,7 +126,7 @@ test("album covers check magic bytes and size, and serve the image", async (t) =
   assert.deepEqual(Buffer.from(await (await fetch(`${baseUrl}${set.album.coverUrl}`)).arrayBuffer()), jpeg);
 
   assert.equal((await ok("set_album_cover", { albumId: album.id, remove: true })).album.cover, null);
-  assert.equal((await api(`/api/albums/${album.id}/cover`)).status, 404);
+  assert.equal((await api(`/covers/${album.id}`)).status, 404);
 });
 
 test("album changes re-tag rendered MP3s with a stream copy, and leaving the album drops the album tags", async (t) => {

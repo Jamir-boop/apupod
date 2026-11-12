@@ -11,7 +11,7 @@ import { availableModelIds } from "./providers/catalog.mjs";
 import { redactConfig, updateEnvFile } from "./config.mjs";
 import { runProcess } from "./jobs.mjs";
 import { serializeMutation, writeTextAtomic } from "./store.mjs";
-import { badRequest, conflict, environmentWithoutEnvFile, oneLine, readJsonBody, sendJson } from "./util.mjs";
+import { badRequest, conflict, environmentWithoutEnvFile, oneLine, httpError, readJsonBody, sendJson } from "./util.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
@@ -73,6 +73,22 @@ export async function writeMcpToken(path) {
   const token = randomBytes(32).toString("base64url");
   await writeTextAtomic(path, `${token}\n`, 0o600);
   return token;
+}
+
+export function signInLink(context, origin, query = "") {
+  const now = Date.now();
+  for (const [code, expiry] of context.signInCodes) if (expiry <= now) context.signInCodes.delete(code);
+  while (context.signInCodes.size >= 20) context.signInCodes.delete(context.signInCodes.keys().next().value);
+  const code = randomBytes(32).toString("base64url");
+  context.signInCodes.set(code, now + 10 * 60 * 1000);
+  return `${origin}/${query ? `?${query}` : ""}#login=${code}`;
+}
+
+export function redeemSignInCode(context, code) {
+  const expiry = context.signInCodes.get(code);
+  context.signInCodes.delete(code);
+  if (!expiry || expiry <= Date.now()) throw httpError(401, "This sign-in link is used or expired. Ask for a new one.");
+  return context.mcpToken;
 }
 
 // Each MCP initialize: the most recent per client name, at most MAX_MCP_CLIENTS names.
@@ -269,7 +285,7 @@ export async function handleSystemRequest(req, res, context, method, path, url) 
   }
   if (method === "POST" && path === "/api/system/mcp-token") {
     await serializeMutation(context, async () => { context.mcpToken = await writeMcpToken(context.paths.mcpToken); });
-    return sendJson(res, 200, { mcpToken: true });
+    return sendJson(res, 200, { mcpToken: true, token: context.mcpToken });
   }
   if (method === "POST" && path === "/api/system/update") return sendJson(res, 202, { updateJob: await startUpdate(context) });
   return sendJson(res, 404, { error: "Not found." });

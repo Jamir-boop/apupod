@@ -3,10 +3,10 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createPodcastServer, loadEnvFile, resolveDirs } from "../src/app.mjs";
+import { loadEnvFile, resolveDirs } from "../src/app.mjs";
 import { environmentWithoutEnvFile } from "../src/util.mjs";
 import { JEV_MODEL } from "../src/jev.mjs";
-import { createApi, withEnv } from "./helpers.mjs";
+import { startTestServer, withEnv } from "./helpers.mjs";
 
 async function tempDir(t, name) {
   const dir = await mkdtemp(join(tmpdir(), `apupod-${name}-`));
@@ -15,10 +15,8 @@ async function tempDir(t, name) {
 }
 
 async function startServer(t, options) {
-  const server = await createPodcastServer({ fetchImpl: async () => Response.json({ data: [] }), ...options });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  return createApi(`http://127.0.0.1:${server.address().port}`);
+  const { api } = await startTestServer(t, { fetchImpl: async () => Response.json({ data: [] }), ...options });
+  return api;
 }
 
 test("resolveDirs prefers APUPOD_* dirs, then XDG dirs, then the home fallbacks", () => {

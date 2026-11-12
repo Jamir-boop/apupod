@@ -70,6 +70,14 @@ test("two concurrent `apupod mcp` bridges start one daemon and proxy MCP over st
   assert.equal((await fetch(`${daemon.url}/api/revision`)).status, 200);
   assert.equal((await fetch(`${daemon.url}/mcp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 401);
 
+  const { execFile } = await import("node:child_process");
+  const opened = await new Promise((resolve, reject) => execFile(process.execPath, [BIN, "open"], { env, timeout: 20_000 }, (error, stdout) => error ? reject(error) : resolve(stdout.trim())));
+  assert.match(opened, new RegExp(`^${daemon.url}/#login=[A-Za-z0-9_-]{43}$`));
+  const code = new URLSearchParams(new URL(opened).hash.slice(1)).get("login");
+  const loggedIn = await fetch(`${daemon.url}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+  assert.equal(loggedIn.status, 200);
+  assert.equal((await loggedIn.json()).token, (await readFile(join(configDir, "mcp-token"), "utf8")).trim());
+
   // A later bridge reuses the running daemon.
   const third = await connect();
   assert.equal((await third.client.callTool({ name: "get_workspace", arguments: {} })).structuredContent.uiUrl, `${daemon.url}/`);
@@ -123,15 +131,16 @@ test("a running `apupod mcp` bridge keeps working after the MCP token rotates an
   const first = await daemonFile();
   pids.add(first.pid);
   assert.ok((await client.listTools()).tools.length > 0);
-  const system = await (await fetch(`${first.url}/api/system`)).json();
+  const authorization = async () => ({ Authorization: `Bearer ${(await readFile(join(configDir, "mcp-token"), "utf8")).trim()}` });
+  const system = await (await fetch(`${first.url}/api/system`, { headers: await authorization() })).json();
   assert.equal(system.mcpClients[0].name, "restart-test", "the daemon records the harness initialize sent through the bridge");
 
   const oldToken = await readFile(join(configDir, "mcp-token"), "utf8");
-  assert.equal((await fetch(`${first.url}/api/system/mcp-token`, { method: "POST" })).status, 200);
+  assert.equal((await fetch(`${first.url}/api/system/mcp-token`, { method: "POST", headers: await authorization() })).status, 200);
   assert.notEqual(await readFile(join(configDir, "mcp-token"), "utf8"), oldToken);
   assert.ok((await client.listTools()).tools.length > 0, "the bridge re-reads the token after a 401");
 
-  const changed = await fetch(`${first.url}/api/system/port`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ port: nextPort }) });
+  const changed = await fetch(`${first.url}/api/system/port`, { method: "PUT", headers: { "Content-Type": "application/json", ...await authorization() }, body: JSON.stringify({ port: nextPort }) });
   assert.equal(changed.status, 202);
   // Sent while the old daemon stops: the bridge waits for the replacement and sends again.
   const tools = await client.listTools();

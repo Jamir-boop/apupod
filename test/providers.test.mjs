@@ -5,7 +5,7 @@ import test from "node:test";
 import { createModelCatalog } from "../src/providers/catalog.mjs";
 import { synthesizeTurn, turnClipDescriptor } from "../src/providers/generate.mjs";
 import { fetchBytes, fetchJsonWithBody, providerUrl } from "../src/providers/transport.mjs";
-import { startTestServer, waitFor, withEnv } from "./helpers.mjs";
+import { fetch, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const header = (init, name) => new Headers(init.headers).get(name);
 const LANGUAGE = { id: "en-US", apiCode: "en", name: "English (United States)" };

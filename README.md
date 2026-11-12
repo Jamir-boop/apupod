@@ -33,7 +33,7 @@ claude plugin install apupod@apupod
 
 In a session, `/plugin marketplace add Jamir-boop/apupod` and `/plugin install apupod@apupod` do the same. The Claude desktop Code tab uses the same plugins.
 
-To open the UI in the Claude desktop browser pane, copy `.claude/launch.json` from this repository into your project's `.claude/` folder. Its `apupod` entry opens `http://127.0.0.1:4173` when the daemon runs. Its `apupod-serve` entry starts the daemon from a clone.
+To open the UI in the Claude desktop browser pane, copy `.claude/launch.json` from this repository into your project's `.claude/` folder. Its `apupod` entry opens `http://127.0.0.1:4173` when the daemon runs. Its `apupod-serve` entry starts the daemon from a clone. The pane shows the sign-in panel until you open a sign-in link from `apupod open` or `open_ui` in it.
 
 ### ChatGPT desktop app and Codex CLI
 
@@ -89,7 +89,7 @@ Use the UI **Settings** view to set up and update everything. Its **System** are
 
 - **Setup checklist**: the apupod version and the latest version on GitHub, the Node.js version, FFmpeg and FFprobe (with an install hint for your OS when they are missing), the data and config dirs, the daemon PID, port, and URL, which keys are saved (never their values), the number of active TTS models, and the MCP token. Each item shows OK, Missing, or Check with a one-line fix. A key item opens its Settings card.
 - **Connect harnesses**: the install commands for Claude Code, the ChatGPT desktop app and Codex CLI, and OpenCode, with copy buttons. **MCP connections** shows each client that sent an MCP `initialize` since the daemon started ("Last connected: <client> <version>, <time ago>"). `get_workspace` reports the same list.
-- **Port and MCP token**: **Change port** checks that the port (1024 to 65535) is free, writes `PORT` to the config-dir `.env`, and restarts the daemon on it; the page then opens the new address. **New MCP token** writes a new token; the old one stops working. Running bridges re-read `daemon.json` and `mcp-token` and send the request again, so harness sessions keep working.
+- **Port and MCP token**: **Change port** checks that the port (1024 to 65535) is free, writes `PORT` to the config-dir `.env`, and restarts the daemon on it; the page then opens the new address. **New MCP token** writes a new token; the old one stops working and other browsers are signed out. The browser that asked keeps working. Running bridges re-read `daemon.json` and `mcp-token` and send the request again, so harness sessions keep working.
 - **Update**: **Check for updates** asks GitHub for release tags (the answer is kept for one hour) and links to the changes. **Update apupod** installs the latest version with `npm install --prefix <data dir>/runtime --no-audit --no-fund --omit=dev github:Jamir-boop/apupod#v<latest>`, shows the npm output, and restarts the daemon on the new code. Bridges also start the newest apupod (their own or the one in `<data dir>/runtime`).
 
 apupod refuses a port change or an update while a TTS job is queued or running. A restart starts a new daemon in the background, then the old one exits. If you started `apupod serve` in a terminal, the new daemon keeps running after that terminal command ends. A `PORT` variable in the environment of the process that starts the daemon wins over the `.env` value.
@@ -128,7 +128,7 @@ An album groups episodes in track order. Each language has one edition of the sa
 | Tool | Does |
 |---|---|
 | `get_workspace` | Overview: host profiles, formats, knowledge bases, plans, episodes, TTS readiness, Jev availability, apupod version and update status, recent MCP connections, UI URL. Call it first. |
-| `open_ui` | Returns the UI URL, optionally deep-linked to a view or an episode. |
+| `open_ui` | Returns a one-time browser sign-in link, valid for 10 minutes, optionally deep-linked to a view or an episode. |
 | `list_tts_options` | Active TTS models, discovered models that can be activated, languages, cue capabilities, tuning ranges and defaults, and which providers have keys. |
 | `set_tts_models` | Activates or deactivates TTS models through the same config save as Settings > Models; refuses to deactivate a model in use. |
 | `list_voices` | Voices for a TTS provider or one active TTS model. |
@@ -165,16 +165,19 @@ Hosts that support MCP Apps show two in-chat widgets: `ui://apupod/workspace` (o
 
 ## The UI
 
-Open `http://127.0.0.1:4173` (or run `apupod open` to print the URL). The UI shows the production list, hosts, format, script editor, TTS preview and render, player, activity, and Settings (System, TTS connections, the TypeSafe key, knowledge bases). You can make light edits there. The UI refreshes by itself when the agent changes data.
+Open the sign-in link from `apupod open` or the `open_ui` tool. The UI shows the production list, hosts, format, script editor, TTS preview and render, player, activity, and Settings (System, TTS connections, the TypeSafe key, knowledge bases). You can make light edits there. The UI refreshes by itself when the agent changes data.
 
 ## Security
 
 - The daemon binds to `127.0.0.1` only and accepts only local requests with a local `Host` header.
 - `/mcp` needs `Authorization: Bearer <token>`, with the token from `mcp-token` in the config dir (mode `0600`). The stdio bridge sends it for you. `/mcp` rejects any foreign `Origin`.
-- The `/api` endpoints have no token. They rely on the loopback, `Host`, and `Origin` checks. Cross-origin writes are rejected.
+- `/api/` needs the same bearer token as `/mcp`, in addition to loopback, `Host`, and `Origin` checks. Cross-origin writes are rejected.
+- `GET /`, `GET /icon.png`, `GET /api/revision`, and `POST /api/login` stay open: the page and icon load before sign-in, old bridges find the daemon through its revision counter, and login exchanges a one-time code for the token.
+- `/artifacts/<episodeId>/episode.mp3`, `/previews/<id>.wav`, and `/covers/<albumId>` stay open as capability URLs with random IDs. Audio, images, and MCP widget iframes cannot send authorization headers.
+- Sign-in links work once and expire after 10 minutes. The browser stores its token in localStorage for that origin. Token rotation signs other browsers out; the browser that asked gets the new token.
 - If a provider address adds a new URL origin without a new API key, its saved key is removed. Enter the key again.
 - Keys stay in the daemon. API and tool results return `hasApiKey` flags, never key values.
-- The `/api/system` endpoints (port, MCP token, update) accept only local same-origin requests, and they never accept or return key values or the MCP token. They have no MCP tools.
+- The `/api/system` endpoints (port, MCP token, update) accept only local same-origin requests, and they never accept or return provider key values. Token rotation returns the new token only to the authorized caller. They have no MCP tools.
 
 OpenAI and compatible TTS voices are AI-generated. Disclose this in published episodes.
 
@@ -183,7 +186,7 @@ OpenAI and compatible TTS voices are AI-generated. Disclose this in published ep
 ```text
 apupod serve       Run the daemon (UI + REST + /mcp) in the foreground
 apupod mcp         Run the stdio bridge (harnesses start this)
-apupod open        Print the UI URL
+apupod open        Print a one-time UI sign-in link
 apupod --version   Print the version
 ```
 

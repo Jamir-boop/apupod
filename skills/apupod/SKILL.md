@@ -29,13 +29,13 @@ The order is fixed. Skip a step only when its result already exists or the user 
 6. **Script.** For each episode, call `get_script_rules`, write the script, and save it with `save_script`. Follow the `apupod-script` skill.
 7. **Render.** Queue audio with `render_audio` (or `save_script` with `render: true`). Follow progress with `get_job`, `list_jobs`, or `get_episode`.
 8. **Album (optional).** To group a series, save its episodes as an album with `save_album`: a title and one edition per language, with `episodeIds` in track order. For a translated series, create the episodes in the new language with their own Episode Format (with that `language`), write and render them, then add them as another edition of the same album (read it with `get_album`, then `save_album` with the `id`, `expectedRevision`, and the full `editions` list). Keep the same track order as the original edition. Each episode can be in only one edition. apupod writes the album tags into the MP3s; report any `warnings`. Call `set_album_cover` only when the user supplies an image (PNG or JPEG, at most 2 MB).
-9. **Listen.** When `get_episode` shows `audioUrl`, give the user the link, or open the Player with `open_ui`.
+9. **Listen.** When `get_episode` shows `audioUrl`, give the user the link, or get a one-time sign-in link to the Player with `open_ui` for the user or browser pane.
 
 After each step, tell the user what you saved and suggest the next step for the next unfinished episode.
 
 ## The UI
 
-`open_ui` returns the browser UI URL (`http://127.0.0.1:4173/` by default), optionally deep-linked with `view` (`production`, `hosts`, `format`, `script`, `tts`, `player`, `activity`, `settings`, `episode`) and `episodeId`. The UI refreshes by itself when you change data. The user can make light edits there (for example, fix a line of the script); read the data again with `get_episode` or `get_plan` before you change it.
+`open_ui` gives a one-time sign-in link for the user or browser pane. The link expires after 10 minutes. A browser that signed in once keeps working until the token changes. The link is optionally deep-linked with `view` (`production`, `hosts`, `format`, `script`, `tts`, `player`, `activity`, `settings`, `episode`) and `episodeId`. The UI refreshes by itself when you change data. The user can make light edits there (for example, fix a line of the script); read the data again with `get_episode` or `get_plan` before you change it.
 
 Some hosts show widgets in the chat for `get_workspace`, `open_ui`, `get_episode`, `save_script`, and `render_audio`. The text result is always complete, so do not depend on the widget.
 
