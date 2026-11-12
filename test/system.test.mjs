@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { REGISTRY_URL, OWN_BIN, compareVersions, newestBin } from "../src/system.mjs";
+import { TAGS_URL, OWN_BIN, compareVersions, newestBin } from "../src/system.mjs";
 import { silentWav, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -27,12 +27,14 @@ const postMcp = (baseUrl, token, body = INITIALIZE) => fetch(`${baseUrl}/mcp`, {
   body: JSON.stringify(body),
 });
 
-// Registry answers come from `registry`; every other URL answers an empty model list.
+// GitHub tag answers come from `tags`; every other URL answers an empty model list.
 function stubFetch(state) {
   return async (url, options) => {
-    if (String(url) === REGISTRY_URL) {
-      state.registryCalls = (state.registryCalls || 0) + 1;
-      return state.registry();
+    if (String(url) === TAGS_URL) {
+      assert.equal(options.headers.Accept, "application/vnd.github+json");
+      assert.equal(options.headers["User-Agent"], "apupod");
+      state.tagCalls = (state.tagCalls || 0) + 1;
+      return state.tags();
     }
     return state.other ? state.other(url, options) : Response.json({ data: [] });
   };
@@ -59,7 +61,7 @@ test("compareVersions orders releases and prereleases; newestBin prefers a newer
 
 test("GET /api/system reports the setup checklist without key values; the update check caches and tolerates offline and 404", async (t) => {
   withEnv(t, { ...NO_KEYS, ELEVENLABS_API_KEY: "secret-eleven-value", TYPESAFE_API_KEY: "secret-typesafe-value" });
-  const state = { registry: () => Response.json({ version: "99.0.0" }) };
+  const state = { tags: () => Response.json([{ name: "v99.0.0" }]) };
   const { api, baseUrl, rootDir } = await startTestServer(t, { fetchImpl: stubFetch(state), restart: () => {} });
 
   const response = await fetch(`${baseUrl}/api/system`);
@@ -95,26 +97,33 @@ test("GET /api/system reports the setup checklist without key values; the update
   }
   for (const item of system.checks) assert.ok(["ok", "missing", "warning"].includes(item.status) && item.hint, item.id);
 
-  // Cached for an hour; ?refresh=1 asks the registry again.
+  // Cached for an hour; ?refresh=1 asks GitHub again.
   assert.equal((await api("/api/system")).value.update.status, "available");
-  assert.equal(state.registryCalls, 1);
-  state.registry = () => new Response("not found", { status: 404 });
-  assert.deepEqual([(await api("/api/system?refresh=1")).value.update.status, state.registryCalls], ["not-published", 2]);
-  state.registry = () => { throw new TypeError("fetch failed"); };
+  assert.equal(state.tagCalls, 1);
+  state.tags = () => new Response("not found", { status: 404 });
+  assert.deepEqual([(await api("/api/system?refresh=1")).value.update.status, state.tagCalls], ["error", 2]);
+  assert.equal((await api("/api/system")).value.update.error, "GitHub answered 404.");
+  state.tags = () => { throw new TypeError("fetch failed"); };
   const offline = (await api("/api/system?refresh=1")).value;
   assert.equal(offline.update.status, "offline");
   assert.equal(offline.update.latest, null);
   assert.equal(offline.update.changesUrl, "https://github.com/Jamir-boop/apupod/releases");
-  state.registry = () => Response.json({ version });
+  state.tags = () => Response.json([{ name: `v${version}` }]);
   assert.equal((await api("/api/system?refresh=1")).value.update.status, "current");
-  state.registry = () => new Response("bad gateway", { status: 502 });
+  state.tags = () => Response.json([{ name: "v100.0.0-rc.1" }, { name: "v2.0" }, { name: "latest" }, { name: "99.1.0" }, { name: "v99.0.0" }, { name: "v9.0.0" }]);
+  const tags = (await api("/api/system?refresh=1")).value.update;
+  assert.deepEqual([tags.status, tags.latest], ["available", "99.0.0"]);
+  state.tags = () => Response.json([{ name: "v100.0.0-beta" }]);
+  const invalid = (await api("/api/system?refresh=1")).value.update;
+  assert.deepEqual([invalid.status, invalid.error], ["error", "GitHub returned no valid release tag."]);
+  state.tags = () => new Response("bad gateway", { status: 502 });
   assert.equal((await api("/api/system?refresh=1")).value.update.status, "error");
 });
 
 test("PUT /api/system/port validates the port, writes PORT to the config-dir .env, and restarts", async (t) => {
   withEnv(t, NO_KEYS);
   const restarts = [];
-  const { api, baseUrl, rootDir } = await startTestServer(t, { fetchImpl: stubFetch({ registry: () => Response.json({ version }) }), restart: (port) => restarts.push(port) });
+  const { api, baseUrl, rootDir } = await startTestServer(t, { fetchImpl: stubFetch({ tags: () => Response.json([{ name: `v${version}` }]) }), restart: (port) => restarts.push(port) });
   for (const port of [80, 1023, 65_536, 4173.5, "abc", null]) {
     const result = await api("/api/system/port", { port }, "PUT");
     assert.equal(result.status, 400, String(port));
@@ -143,7 +152,7 @@ test("PUT /api/system/port validates the port, writes PORT to the config-dir .en
 
 test("a new MCP token invalidates the old one; initialize is tracked in /api/system and get_workspace", async (t) => {
   withEnv(t, NO_KEYS);
-  const state = { registry: () => Response.json({ version: "99.0.0" }) };
+  const state = { tags: () => Response.json([{ name: "v99.0.0" }]) };
   const { api, baseUrl, rootDir } = await startTestServer(t, { fetchImpl: stubFetch(state), restart: () => {} });
   const tokenPath = join(rootDir, "mcp-token");
   const oldToken = (await readFile(tokenPath, "utf8")).trim();
@@ -159,7 +168,7 @@ test("a new MCP token invalidates the old one; initialize is tracked in /api/sys
   assert.equal(workspace.version, version);
   assert.equal(workspace.update.status, "available", "get_workspace reports the cached update check");
   assert.deepEqual(workspace.mcpClients.map((item) => `${item.name} ${item.version}`), ["workspace-test 4.5.6", "system-test 1.2.3"]);
-  assert.equal(state.registryCalls, 1, "get_workspace makes no registry call");
+  assert.equal(state.tagCalls, 1, "get_workspace makes no GitHub call");
 
   const rotated = await fetch(`${baseUrl}/api/system/mcp-token`, { method: "POST" });
   assert.equal(rotated.status, 200);
@@ -178,7 +187,7 @@ test("update is refused during a TTS job, runs npm install with the exact args t
   const ttsGate = new Promise((resolve) => { releaseTts = resolve; });
   t.after(() => releaseTts());
   const state = {
-    registry: () => Response.json({ version: "99.0.0" }),
+    tags: () => Response.json([{ name: "v99.0.0" }]),
     other: async (url) => {
       if (String(url).endsWith("/v1/models")) return Response.json([{ model_id: "eleven_v3", name: "Eleven v3", can_do_text_to_speech: true }]);
       if (String(url).includes("/v2/voices")) return Response.json({ voices: [{ voice_id: "voice-es", name: "Voz" }], has_more: false });
@@ -242,13 +251,13 @@ test("update is refused during a TTS job, runs npm install with the exact args t
   assert.equal(runs.length, 2);
   for (const [command, args, timeout] of runs) {
     assert.equal(command, "npm");
-    assert.deepEqual(args, ["install", "--prefix", runtime, "--no-audit", "--no-fund", "--omit=dev", "apupod@99.0.0"]);
+    assert.deepEqual(args, ["install", "--prefix", runtime, "--no-audit", "--no-fund", "--omit=dev", "github:Jamir-boop/apupod#v99.0.0"]);
     assert.ok(timeout > 0);
   }
   assert.deepEqual(restarts, [Number(new URL(baseUrl).port)]);
   assert.match((await api("/api/system/update", {}, "POST")).value.error, /already running/);
 
-  state.registry = () => Response.json({ version });
+  state.tags = () => Response.json([{ name: `v${version}` }]);
   const latest = await startTestServer(t, { fetchImpl: stubFetch(state), restart: () => {}, runCommand: () => assert.fail("no install") });
   const upToDate = await latest.api("/api/system/update", {}, "POST");
   assert.deepEqual([upToDate.status, /is the latest version/.test(upToDate.value.error)], [409, true]);

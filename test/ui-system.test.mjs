@@ -77,7 +77,7 @@ test("renderSystem shows statuses with words, card links for missing keys, the l
   context.renderSystem(sample({ checks: [], mcpClients: [], update: { current: "1.1.0", latest: null, status: "offline", error: "fetch failed", changesUrl: "https://github.com/Jamir-boop/apupod/releases" }, updateJob: { status: "failed", version: "1.2.0", error: "npm exited with code 1: <E404>", log: "$ npm install\nnpm error 404\n" } }));
   assert.equal(nodes.systemStatus.textContent, "Setup is complete.");
   assert.match(nodes.mcpClients.innerHTML, /No harness has connected since apupod started\./);
-  assert.match(nodes.updateSummary.innerHTML, /Could not reach the npm registry\. <a [^>]+>Releases<\/a><br><span class="error">[^]*Error: Update failed: npm exited with code 1: &lt;E404&gt;<\/span>/);
+  assert.match(nodes.updateSummary.innerHTML, /Could not reach GitHub\. <a [^>]+>Releases<\/a><br><span class="error">[^]*Error: Update failed: npm exited with code 1: &lt;E404&gt;<\/span>/);
   assert.equal(nodes.runUpdate.disabled, true);
   assert.deepEqual([nodes.updateLog.hidden, nodes.updateLog.textContent], [false, "$ npm install\nnpm error 404\n"]);
 

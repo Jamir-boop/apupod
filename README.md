@@ -18,7 +18,7 @@ In the Andes, an *apu* is a "lord": the spirit of a mountain that watches over t
 
 ## Install
 
-Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.4.0 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. If the running daemon is older than the bridge (for example after a plugin update) and no TTS job is queued or running, the bridge replaces it with the new version; a busy daemon is kept until a later connect. You do not need a clone or a server that you start yourself.
+Install the plugin for your harness. Each plugin starts the stdio bridge with `npx -y github:Jamir-boop/apupod#v1.4.1 mcp`, so npx downloads that apupod release from GitHub for you (no npm login or publish needed). The bridge connects to the apupod daemon, or starts it in the background if it is not running. If the running daemon is older than the bridge (for example after a plugin update) and no TTS job is queued or running, the bridge replaces it with the new version; a busy daemon is kept until a later connect. You do not need a clone or a server that you start yourself.
 
 The UI **Settings** view shows these commands with copy buttons, and shows when each harness last connected.
 
@@ -57,7 +57,7 @@ Add the MCP server to `opencode.json` (project) or `~/.config/opencode/opencode.
     "servers": {
       "apupod": {
         "type": "local",
-        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.4.0", "mcp"]
+        "command": ["npx", "-y", "github:Jamir-boop/apupod#v1.4.1", "mcp"]
       }
     }
   },
@@ -87,10 +87,10 @@ MCP tools never accept, return, or log key values. They report only `hasApiKey` 
 
 Use the UI **Settings** view to set up and update everything. Its **System** area has four parts:
 
-- **Setup checklist**: the apupod version and the latest version on npm, the Node.js version, FFmpeg and FFprobe (with an install hint for your OS when they are missing), the data and config dirs, the daemon PID, port, and URL, which keys are saved (never their values), the number of active TTS models, and the MCP token. Each item shows OK, Missing, or Check with a one-line fix. A key item opens its Settings card.
+- **Setup checklist**: the apupod version and the latest version on GitHub, the Node.js version, FFmpeg and FFprobe (with an install hint for your OS when they are missing), the data and config dirs, the daemon PID, port, and URL, which keys are saved (never their values), the number of active TTS models, and the MCP token. Each item shows OK, Missing, or Check with a one-line fix. A key item opens its Settings card.
 - **Connect harnesses**: the install commands for Claude Code, the ChatGPT desktop app and Codex CLI, and OpenCode, with copy buttons. **MCP connections** shows each client that sent an MCP `initialize` since the daemon started ("Last connected: <client> <version>, <time ago>"). `get_workspace` reports the same list.
 - **Port and MCP token**: **Change port** checks that the port (1024 to 65535) is free, writes `PORT` to the config-dir `.env`, and restarts the daemon on it; the page then opens the new address. **New MCP token** writes a new token; the old one stops working. Running bridges re-read `daemon.json` and `mcp-token` and send the request again, so harness sessions keep working.
-- **Update**: **Check for updates** asks the npm registry (the answer is kept for one hour) and links to the changes. **Update apupod** installs the latest version with `npm install --prefix <data dir>/runtime --no-audit --no-fund --omit=dev apupod@<latest>`, shows the npm output, and restarts the daemon on the new code. Bridges also start the newest apupod (their own or the one in `<data dir>/runtime`).
+- **Update**: **Check for updates** asks GitHub for release tags (the answer is kept for one hour) and links to the changes. **Update apupod** installs the latest version with `npm install --prefix <data dir>/runtime --no-audit --no-fund --omit=dev github:Jamir-boop/apupod#v<latest>`, shows the npm output, and restarts the daemon on the new code. Bridges also start the newest apupod (their own or the one in `<data dir>/runtime`).
 
 apupod refuses a port change or an update while a TTS job is queued or running. A restart starts a new daemon in the background, then the old one exits. If you started `apupod serve` in a terminal, the new daemon keeps running after that terminal command ends. A `PORT` variable in the environment of the process that starts the daemon wins over the `.env` value.
 
@@ -171,7 +171,8 @@ Open `http://127.0.0.1:4173` (or run `apupod open` to print the URL). The UI sho
 
 - The daemon binds to `127.0.0.1` only and accepts only local requests with a local `Host` header.
 - `/mcp` needs `Authorization: Bearer <token>`, with the token from `mcp-token` in the config dir (mode `0600`). The stdio bridge sends it for you. `/mcp` rejects any foreign `Origin`.
-- The REST API rejects cross-origin writes.
+- The `/api` endpoints have no token. They rely on the loopback, `Host`, and `Origin` checks. Cross-origin writes are rejected.
+- If a provider address adds a new URL origin without a new API key, its saved key is removed. Enter the key again.
 - Keys stay in the daemon. API and tool results return `hasApiKey` flags, never key values.
 - The `/api/system` endpoints (port, MCP token, update) accept only local same-origin requests, and they never accept or return key values or the MCP token. They have no MCP tools.
 

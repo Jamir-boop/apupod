@@ -16,10 +16,10 @@ import { badRequest, conflict, environmentWithoutEnvFile, oneLine, readJsonBody,
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
 export const OWN_BIN = join(ROOT, "bin", "apupod.mjs");
-export const REGISTRY_URL = "https://registry.npmjs.org/apupod/latest";
+export const TAGS_URL = "https://api.github.com/repos/Jamir-boop/apupod/tags?per_page=100";
 const REPO_URL = "https://github.com/Jamir-boop/apupod";
 const UPDATE_CACHE_MS = 60 * 60 * 1000;
-const REGISTRY_TIMEOUT_MS = 5_000;
+const TAGS_TIMEOUT_MS = 5_000;
 const NPM_TIMEOUT_MS = 5 * 60 * 1000;
 const TOOL_TIMEOUT_MS = 5_000;
 const MAX_MCP_CLIENTS = 10;
@@ -93,13 +93,13 @@ export async function checkForUpdate(context, { force = false } = {}) {
   if (!force && context.updateCheck && Date.now() - context.updateCheck.at < UPDATE_CACHE_MS) return context.updateCheck.value;
   let found;
   try {
-    const response = await context.fetchImpl(REGISTRY_URL, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS) });
-    if (response.status === 404) found = { status: "not-published", latest: null };
-    else if (!response.ok) found = { status: "error", latest: null, error: `The npm registry answered ${response.status}.` };
+    const response = await context.fetchImpl(TAGS_URL, { headers: { Accept: "application/vnd.github+json", "User-Agent": "apupod" }, signal: AbortSignal.timeout(TAGS_TIMEOUT_MS) });
+    if (!response.ok) found = { status: "error", latest: null, error: `GitHub answered ${response.status}.` };
     else {
-      const latest = (await response.json())?.version;
-      const order = compareVersions(latest, VERSION);
-      found = order === null ? { status: "error", latest: null, error: "The npm registry returned no valid version." } : { status: order > 0 ? "available" : "current", latest };
+      const tags = await response.json();
+      const versions = (Array.isArray(tags) ? tags : []).filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag?.name)).map((tag) => tag.name.slice(1));
+      const latest = versions.sort((a, b) => compareVersions(b, a))[0];
+      found = latest ? { status: compareVersions(latest, VERSION) > 0 ? "available" : "current", latest } : { status: "error", latest: null, error: "GitHub returned no valid release tag." };
     }
   } catch (error) {
     found = { status: "offline", latest: null, error: oneLine(error.message || error).slice(0, 200) };
@@ -151,7 +151,7 @@ export async function systemStatus(context, { refresh = false } = {}) {
   const mcpToken = existsSync(context.paths.mcpToken);
   const port = currentPort(context);
   const ffmpegHint = FFMPEG_HINTS[process.platform] || FFMPEG_HINTS.linux;
-  const updateHint = { available: `Version ${update.latest} is available. Click Update apupod.`, current: "apupod is up to date.", "not-published": "apupod is not published on npm yet.", offline: `Could not reach the npm registry: ${update.error}`, error: update.error }[update.status];
+  const updateHint = { available: `Version ${update.latest} is available. Click Update apupod.`, current: "apupod is up to date.", offline: `Could not reach GitHub: ${update.error}`, error: update.error }[update.status];
   const checks = [
     { id: "version", label: `apupod ${VERSION}`, status: update.status === "available" ? "warning" : "ok", hint: updateHint },
     { id: "node", label: `Node.js ${process.versions.node}`, status: Number(process.versions.node.split(".")[0]) >= 24 ? "ok" : "warning", hint: "apupod needs Node.js 24 or later." },
@@ -205,7 +205,7 @@ async function startUpdate(context) {
   assertNoActiveJob(context);
   const check = await checkForUpdate(context, { force: true });
   if (check.status !== "available") {
-    throw conflict({ current: `apupod ${VERSION} is the latest version.`, "not-published": "apupod is not published on npm yet." }[check.status] || `Could not check for updates: ${check.error}`);
+    throw conflict(check.status === "current" ? `apupod ${VERSION} is the latest version.` : `Could not check for updates: ${check.error}`);
   }
   const job = { status: "running", version: check.latest, startedAt: new Date().toISOString(), log: "", error: null };
   context.updateJob = job;
@@ -215,7 +215,7 @@ async function startUpdate(context) {
       if (packageVersion(runtimePackage(context.paths.data)) !== check.latest) {
         const runtime = runtimeDir(context.paths.data);
         await mkdir(runtime, { recursive: true });
-        const args = ["install", "--prefix", runtime, "--no-audit", "--no-fund", "--omit=dev", `apupod@${check.latest}`];
+        const args = ["install", "--prefix", runtime, "--no-audit", "--no-fund", "--omit=dev", `github:${new URL(REPO_URL).pathname.slice(1)}#v${check.latest}`];
         job.log = `$ npm ${args.join(" ")}\n`;
         console.log(`[update] npm ${args.join(" ")}`);
         job.log = `${job.log}${await context.runCommand("npm", args, NPM_TIMEOUT_MS)}`.slice(-8_000);

@@ -757,7 +757,9 @@ test("concurrent config saves receive matching nonblocking catalog snapshots", a
   const configA = structuredClone(config);
   const configB = structuredClone(config);
   configA.providers.openai.baseUrl = "http://provider-a.test/v1";
+  configA.providers.openai.apiKey = "test-openai-key";
   configB.providers.openai.baseUrl = "http://provider-b.test/v1";
+  configB.providers.openai.apiKey = "test-openai-key";
   const save = (body) => sendJson(`${baseUrl}/api/config`, body, "PUT").then((response) => response.json());
   const pendingA = save(configA);
   const pendingB = save(configB);
@@ -804,6 +806,7 @@ test("repeated manual model refreshes coalesce while config saves still force a 
 
   const config = await (await fetch(`${baseUrl}/api/config`)).json();
   config.providers.openai.baseUrl = "http://forced-refresh.test/v1";
+  config.providers.openai.apiKey = "refresh-test-key";
   const save = sendJson(`${baseUrl}/api/config`, config, "PUT");
   releaseModels();
   const saved = await save;
@@ -906,6 +909,7 @@ test("TTS jobs report progress and publish MP3", async (t) => {
 
   const config = (await (await fetch(`${baseUrl}/api/state`)).json()).config;
   config.providers.mimo.baseUrl = "https://replacement.example/v1";
+  config.providers.mimo.apiKey = "test-mimo-key";
   response = await sendJson(`${baseUrl}/api/config`, config, "PUT");
   assert.equal(response.status, 200);
   response = await fetch(`${baseUrl}/api/episodes/${episode.id}/render`, { method: "POST" });

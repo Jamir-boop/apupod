@@ -160,7 +160,7 @@ export async function saveConfigRequest(context, value, { refuseDeactivating = [
   // set_tts_models refuses to deactivate a model in use; the Settings dialog warns and saves.
   const blocked = inactiveModelWarnings(context.config, next.config, { references: dependents.references.filter((reference) => refuseDeactivating.includes(reference.modelId)), corrupt: [] });
   if (blocked.length) throw conflict(`Cannot deactivate a TTS model in use. ${blocked.join(" ")}`);
-  const warnings = inactiveModelWarnings(context.config, next.config, dependents);
+  const warnings = [...next.warnings, ...inactiveModelWarnings(context.config, next.config, dependents)];
   const retainedIds = new Set(next.config.compatibleConnections.map((connection) => connection.id));
   for (const connection of context.config.compatibleConnections) {
     if (!retainedIds.has(connection.id)) next.envPatch[connection.apiKeyEnv] = null;
@@ -192,6 +192,7 @@ function validateConfigPayload(value, current) {
   const body = value && typeof value === "object" ? value : {};
   const providers = body.providers && typeof body.providers === "object" ? body.providers : {};
   const envPatch = {};
+  const warnings = [];
   const mimoInput = providers.mimo && typeof providers.mimo === "object" ? providers.mimo : {};
   const mimoBaseUrl = requireUrl(mimoInput.baseUrl || current.providers.mimo.baseUrl, "MiMo base URL");
   applyApiKeyPatch(envPatch, "MIMO_API_KEY", mimoInput, "MiMo");
@@ -250,8 +251,13 @@ function validateConfigPayload(value, current) {
       activeModels: normalizeCapabilityMap(item.activeModels),
     };
     applyApiKeyPatch(envPatch, connection.apiKeyEnv, item, name);
+    if (existing) removeKeyForNewOrigin(envPatch, warnings, connection.apiKeyEnv, item, existing, connection, name);
     return connection;
   }) : [];
+
+  removeKeyForNewOrigin(envPatch, warnings, "MIMO_API_KEY", mimoInput, current.providers.mimo, mimo, "MiMo");
+  removeKeyForNewOrigin(envPatch, warnings, "OPENAI_API_KEY", openaiInput, currentOpenai, openai, "OpenAI");
+  removeKeyForNewOrigin(envPatch, warnings, "CHATTERBOX_API_KEY", chatterboxInput, currentChatterbox, chatterbox, "Chatterbox");
 
   const ids = new Set();
   for (const connection of compatibleConnections) {
@@ -266,11 +272,23 @@ function validateConfigPayload(value, current) {
       assistantDecision,
     },
     envPatch,
+    warnings,
   };
+}
+
+function removeKeyForNewOrigin(patch, warnings, key, input, current, next, name) {
+  const origins = (provider) => new Set([provider.baseUrl, provider.ttsBaseUrl, provider.modelsUrl].map((url) => URL.parse(url || "")?.origin).filter(Boolean));
+  const previous = origins(current);
+  if ([...origins(next)].some((origin) => !previous.has(origin)) && !(typeof input.apiKey === "string" && input.apiKey.trim()) && process.env[key]?.trim()) {
+    patch[key] = null;
+    warnings.push(`The address of ${name} changed, so its saved API key was removed. Enter the key again.`);
+  }
 }
 
 function applyApiKeyPatch(patch, key, input, label) {
   const replacement = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
+  // Refuse a key that .env cannot hold before anything is written.
+  encodeEnvValue(replacement);
   if (input.clearApiKey === true && replacement) throw badRequest(`${label} API key cannot be replaced and cleared together.`);
   if (input.clearApiKey === true) patch[key] = null;
   else if (replacement) patch[key] = replacement;
@@ -394,5 +412,9 @@ function disablesCapabilities(current, next) {
 
 function encodeEnvValue(value) {
   const text = String(value ?? "");
-  return /^[A-Za-z0-9_./:@\-]+$/.test(text) ? text : JSON.stringify(text);
+  if (/[\r\n]/.test(text)) throw badRequest("Environment values cannot contain line breaks.");
+  if (/^[A-Za-z0-9_./:@\-]+$/.test(text)) return text;
+  if (!text.includes("'")) return `'${text}'`;
+  if (!text.includes("`")) return "`" + text + "`";
+  throw badRequest("Environment values cannot contain both a single quote and a backtick.");
 }

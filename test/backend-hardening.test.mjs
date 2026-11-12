@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
+import { parseEnv } from "node:util";
+import { updateEnvFile } from "../src/config.mjs";
 import { runInNewContext } from "node:vm";
 import { writeAudioAsWav } from "../src/app.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
@@ -346,4 +348,77 @@ test("D2: the raw fetch helpers keep their timeout message", async () => {
   const hang = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
   await assert.rejects(fetchJsonWithBody(hang, "https://slow.test", {}, "Slow voices", 50), /^Error: Slow voices request timed out after 0\.05 seconds\.$/);
   await assert.rejects(fetchBytes(hang, "https://slow.test", {}, "Slow TTS", 50), /^Error: Slow TTS request timed out after 0\.05 seconds\.$/);
+});
+
+
+test("provider address changes remove saved keys before model discovery", async (t) => {
+  withEnv(t, { OPENAI_API_KEY: undefined });
+  const requests = [];
+  const { api, rootDir } = await start(t, { fetchImpl: async (url, options) => {
+    requests.push({ url: String(url), headers: new Headers(options?.headers) });
+    return Response.json({ data: [] });
+  } });
+  const save = (body) => api("/api/config", body, "PUT");
+  let response = await save({ providers: { openai: { apiKey: "fake-old-openai-key" } } });
+  assert.equal(response.status, 200);
+  requests.length = 0;
+  response = await save({ providers: { openai: { baseUrl: "https://new-openai.test/v1" } } });
+  assert.equal(response.status, 200);
+  assert.equal(response.value.config.providers.openai.hasApiKey, false);
+  assert.ok(response.value.warnings.includes("The address of OpenAI changed, so its saved API key was removed. Enter the key again."));
+  assert.ok(requests.every(({ headers }) => [...headers.values()].every((value) => !value.includes("fake-old-openai-key"))));
+  assert.equal(process.env.OPENAI_API_KEY, undefined);
+  assert.doesNotMatch(await readFile(join(rootDir, ".env"), "utf8"), /OPENAI_API_KEY=/);
+
+  response = await save({ providers: { openai: { baseUrl: "https://new-openai.test/v2", apiKey: "fake-new-openai-key" } } });
+  assert.equal(response.value.config.providers.openai.hasApiKey, true);
+  requests.length = 0;
+  response = await save({ providers: { openai: { baseUrl: "https://new-openai.test/other-path" } } });
+  assert.equal(response.value.config.providers.openai.hasApiKey, true);
+  assert.deepEqual(response.value.warnings, []);
+  assert.ok(requests.some(({ headers }) => headers.get("authorization") === "Bearer fake-new-openai-key"));
+
+  requests.length = 0;
+  response = await save({ providers: { openai: { baseUrl: "https://another-openai.test/v1", apiKey: "fake-replacement-key" } } });
+  assert.equal(response.value.config.providers.openai.hasApiKey, true);
+  assert.deepEqual(response.value.warnings, []);
+  assert.ok(requests.some(({ url, headers }) => url.startsWith("https://another-openai.test/") && headers.get("authorization") === "Bearer fake-replacement-key"));
+  assert.ok(requests.every(({ headers }) => [...headers.values()].every((value) => !value.includes("fake-new-openai-key"))));
+
+  response = await save({ compatibleConnections: [{ id: "custom-key", name: "Custom", baseUrl: "https://custom.test/v1", apiKey: "fake-compatible-key" }] });
+  const connection = response.value.config.compatibleConnections[0];
+  t.after(() => { delete process.env[connection.apiKeyEnv]; });
+  requests.length = 0;
+  response = await save({ compatibleConnections: [{ ...connection, ttsBaseUrl: "https://other-tts.test/v1" }] });
+  assert.equal(response.value.config.compatibleConnections[0].hasApiKey, false);
+  assert.ok(response.value.warnings.includes("The address of Custom changed, so its saved API key was removed. Enter the key again."));
+  assert.ok(requests.every(({ headers }) => [...headers.values()].every((value) => !value.includes("fake-compatible-key"))));
+});
+
+test("environment values round trip through node parseEnv and refused saves change nothing", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "apupod-env-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, ".env");
+  for (const value of ['ab"cd\\ef', "a'b", "a b#c", "x$y", "a\tb", `a'b"c`]) {
+    await updateEnvFile(path, { TEST_KEY: value });
+    assert.equal(parseEnv(await readFile(path, "utf8")).TEST_KEY, value);
+  }
+  const before = await readFile(path, "utf8");
+  for (const value of ["a'b`c", "a\nb", "a\rb"]) {
+    await assert.rejects(updateEnvFile(path, { FIRST: "valid", TEST_KEY: value }), { statusCode: 400 });
+    assert.equal(await readFile(path, "utf8"), before);
+  }
+  withEnv(t, { OPENAI_API_KEY: undefined });
+  const { api, rootDir } = await start(t);
+  assert.equal((await api("/api/config", { providers: { openai: { apiKey: "fake-valid-key" } } }, "PUT")).status, 200);
+  const configBefore = await readFile(join(rootDir, "config.json"), "utf8");
+  const envBefore = await readFile(join(rootDir, ".env"), "utf8");
+  // A pasted key with a line break at the end is trimmed, not refused.
+  assert.equal((await api("/api/config", { providers: { openai: { apiKey: "fake-valid-key\n" } } }, "PUT")).status, 200);
+  for (const value of ["a'b`c", "a\nb", "a\rb"]) {
+    const response = await api("/api/config", { providers: { openai: { apiKey: value } } }, "PUT");
+    assert.equal(response.status, 400);
+    assert.equal(await readFile(join(rootDir, "config.json"), "utf8"), configBefore);
+    assert.equal(await readFile(join(rootDir, ".env"), "utf8"), envBefore);
+  }
 });

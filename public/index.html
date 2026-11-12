@@ -798,7 +798,7 @@ codex plugin add apupod@apupod</code></pre>
     &quot;servers&quot;: {
       &quot;apupod&quot;: {
         &quot;type&quot;: &quot;local&quot;,
-        &quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;github:Jamir-boop/apupod#v1.4.0&quot;, &quot;mcp&quot;]
+        &quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;github:Jamir-boop/apupod#v1.4.1&quot;, &quot;mcp&quot;]
       }
     }
   }
@@ -1716,8 +1716,7 @@ codex plugin add apupod@apupod</code></pre>
       const summary = {
         available: `apupod ${update.current} is running. Version ${update.latest} is available.`,
         current: `apupod ${update.current} is the latest version.`,
-        "not-published": `apupod ${update.current} is running. apupod is not published on npm yet.`,
-        offline: `apupod ${update.current} is running. Could not reach the npm registry.`,
+        offline: `apupod ${update.current} is running. Could not reach GitHub.`,
       }[update.status] || `apupod ${update.current} is running. Could not check for updates: ${update.error}`;
       const jobText = job ? { running: `Installing apupod ${job.version}…`, restarting: `Restarting on apupod ${job.version}…`, installed: job.message, failed: `Update failed: ${job.error}` }[job.status] : "";
       const jobLine = !jobText ? "" : job.status === "failed" ? `<br><span class="error">${icon("circle-x")} Error: ${escapeHtml(jobText)}</span>` : job.status === "installed" ? `<br><span class="warning">${icon("triangle-alert")} Warning: ${escapeHtml(jobText)}</span>` : `<br>${escapeHtml(jobText)}`;
