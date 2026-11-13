@@ -4,7 +4,7 @@
     "apupod": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "github:Jamir-boop/apupod#v2.0.1", "mcp"]
+      "args": ["-y", "github:Jamir-boop/apupod#v2.1.0", "mcp"]
     }
   }
 }
