@@ -462,7 +462,7 @@ async function mediaDurationSeconds(path) {
   return seconds;
 }
 
-async function assembleMp3(clipPaths, directory, minimumSeconds, targetMinutes) {
+export async function assembleMp3(clipPaths, directory, minimumSeconds, targetMinutes) {
   if (clipPaths.length === 0) throw new Error("Transcript has no audio turns.");
   const listPath = join(directory, "concat.txt");
   const output = join(directory, "episode.mp3");
@@ -471,7 +471,20 @@ async function assembleMp3(clipPaths, directory, minimumSeconds, targetMinutes) 
   await writeFile(listPath, list, "utf8");
   await rm(temporary, { force: true });
   try {
-    await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", listPath, "-codec:a", "libmp3lame", "-b:a", "128k", temporary]);
+    const input = ["-f", "concat", "-safe", "0", "-i", listPath];
+    const loudnorm = "loudnorm=I=-16:TP=-1.5:LRA=11";
+    const { stderr } = await runProcess("ffmpeg", [
+      "-hide_banner", "-nostats", "-loglevel", "info", ...input,
+      "-af", `${loudnorm}:print_format=json`, "-f", "null", "-",
+    ], undefined, { captureStderr: true });
+    const measured = JSON.parse(stderr.match(/\{[^{}]*\}/g)?.at(-1));
+    const values = [measured.input_i, measured.input_tp, measured.input_lra, measured.input_thresh, measured.target_offset].map(Number);
+    // Silence has non-finite loudness measurements and cannot use the measured filter.
+    const filter = values.every(Number.isFinite) ? [
+      "-af", `${loudnorm}:measured_I=${values[0]}:measured_TP=${values[1]}:measured_LRA=${values[2]}:measured_thresh=${values[3]}:offset=${values[4]}:linear=true`,
+      "-ar", "24000", "-ac", "1",
+    ] : [];
+    await runProcess("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...input, ...filter, "-codec:a", "libmp3lame", "-b:a", "128k", temporary]);
     const actualSeconds = await mediaDurationSeconds(temporary);
     await rename(temporary, output);
     if (actualSeconds < minimumSeconds) {

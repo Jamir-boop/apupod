@@ -230,7 +230,7 @@ function parseByteRange(value, size) {
   return { start, end, partial: true };
 }
 
-export async function runProcess(command, args, timeoutMs = FFMPEG_TIMEOUT_MS) {
+export async function runProcess(command, args, timeoutMs = FFMPEG_TIMEOUT_MS, { captureStderr = false } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -244,7 +244,7 @@ export async function runProcess(command, args, timeoutMs = FFMPEG_TIMEOUT_MS) {
     child.on("error", (error) => { clearTimeout(timer); reject(error); });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      if (code === 0) resolvePromise(stdout);
+      if (code === 0) resolvePromise(captureStderr ? { stdout, stderr } : stdout);
       else if (timedOut) reject(new Error(`${command} timed out after ${timeoutMs} ms and was stopped with ${signal || PROCESS_KILL_SIGNAL}: ${stderr.trim()}`));
       else reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
     });

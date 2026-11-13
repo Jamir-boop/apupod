@@ -18,6 +18,7 @@ import {
   writeAudioAsWav,
 } from "../src/app.mjs";
 import { DEFAULT_DATA } from "../src/defaults.mjs";
+import { assembleMp3 } from "../src/jobs.mjs";
 import { normalizeGeneratedPlan, normalizePlannedEpisode } from "../src/plans.mjs";
 import { fetch, html, script, seedEpisode, sendJson, silentWav, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
@@ -156,6 +157,39 @@ test("ElevenLabs MP3 clips normalize to 24 kHz mono WAV", async (t) => {
   const normalized = await readFile(wavOutput);
   assert.equal(normalized.readUInt16LE(22), 1);
   assert.equal(normalized.readUInt32LE(24), 24_000);
+});
+
+test("episode MP3 assembly normalizes loudness and accepts silence", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "podcast-loudness-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const tone = join(directory, "tone.wav");
+  const silence = join(directory, "silence.wav");
+  const output = join(directory, "episode.mp3");
+  await execFileAsync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=24000",
+    "-af", "volume=-30dB", "-t", "6", "-ac", "1", "-c:a", "pcm_s16le", tone,
+  ], { windowsHide: true });
+  await writeFile(silence, silentWav(24_000, 1, 1));
+
+  assert.deepEqual(await assembleMp3([tone, silence], directory, 0, 1), {});
+  const { stderr } = await execFileAsync("ffmpeg", [
+    "-hide_banner", "-nostats", "-loglevel", "info", "-i", output,
+    "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-",
+  ], { windowsHide: true });
+  const measured = JSON.parse(stderr.match(/\{[^{}]*\}/g).at(-1));
+  assert.ok(Math.abs(Number(measured.input_i) + 16) <= 1, `Integrated loudness: ${measured.input_i} LUFS`);
+  assert.ok(Number(measured.input_tp) <= -1, `True peak: ${measured.input_tp} dBTP`);
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v", "error", "-show_entries", "stream=sample_rate,channels", "-of", "json", output,
+  ], { windowsHide: true });
+  const stream = JSON.parse(stdout).streams[0];
+  assert.equal(Number(stream.sample_rate), 24_000);
+  assert.equal(stream.channels, 1);
+
+  const silentResult = await assembleMp3([silence], directory, 60, 1);
+  assert.match(silentResult.warning, /Rendered audio too short/);
+  assert.ok((await stat(output)).size > 0);
+  assert.deepEqual((await readdir(directory)).sort(), ["episode.mp3", "silence.wav", "tone.wav"]);
 });
 
 test("ElevenLabs voices and preview use server-side key", async (t) => {
