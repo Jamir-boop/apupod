@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { createModelCatalog } from "../src/providers/catalog.mjs";
+import { defaultConfig } from "../src/config.mjs";
+import { createModelCatalog, discoveredModelLanguages, modelLanguageError, queueModelCatalogRefresh, resolveLanguage } from "../src/providers/catalog.mjs";
 import { synthesizeTurn, turnClipDescriptor } from "../src/providers/generate.mjs";
 import { fetchBytes, fetchJsonWithBody, providerUrl } from "../src/providers/transport.mjs";
-import { fetch, startTestServer, waitFor, withEnv } from "./helpers.mjs";
+import { fetch, source, startTestServer, waitFor, withEnv } from "./helpers.mjs";
 
 const header = (init, name) => new Headers(init.headers).get(name);
 const LANGUAGE = { id: "en-US", apiCode: "en", name: "English (United States)" };
@@ -139,6 +140,46 @@ test("a fetch timeout maps to the timed-out message", async () => {
   await assert.rejects(fetchBytes(hang, "https://custom.test/v1/audio/speech", { method: "POST", body: JSON.stringify({ model: "m", voice: "alloy", input: "Hi" }) }, "Custom TTS", 50, "CUSTOM_API_KEY"),
     { message: "Custom TTS request timed out after 0.05 seconds." });
   assert.ok(Date.now() - started < 2_000);
+});
+
+test("compatible model discovery honors reported languages and preserves the fallback", async (t) => {
+  withEnv(t, { MIMO_API_KEY: null, ELEVENLABS_API_KEY: null, OPENAI_API_KEY: null, CHATTERBOX_API_KEY: null });
+  const models = [
+    { id: "chatterbox-multilingual-v3", capabilities: { tts: true }, languages: ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh"] },
+    { id: "chatterbox-turbo", capabilities: { tts: true }, languages: ["en"] },
+    { id: "no-languages", capabilities: { tts: true } },
+    { id: "empty-languages", capabilities: { tts: true }, languages: [] },
+    { id: "normalized-languages", capabilities: { tts: true }, languages: [" EN ", "pt-BR", "es_419", "fil", "en-US", null, 42, "", " ", "-US"] },
+  ];
+  const { calls, fetchImpl } = recorder(() => Response.json({ data: models }));
+  const config = defaultConfig();
+  config.providers.chatterbox = { baseUrl: "https://chatterbox.test/v1", enabled: true,
+    activeModels: Object.fromEntries([...models.map((model) => model.id), "active-only"].map((id) => [id, { tts: true }])) };
+  const ctx = { config, fetchImpl, modelCatalog: createModelCatalog({}), chatterboxVoiceCache: { revision: 0 },
+    latestModelRefreshRevision: 0, modelRefreshTail: Promise.resolve() };
+  await queueModelCatalogRefresh(ctx).promise;
+  assert.deepEqual(calls.map((call) => call.url), ["https://chatterbox.test/v1/models"]);
+  const discovered = ctx.modelCatalog.providers.chatterbox.discoveredModels;
+  const turbo = discovered.find((model) => model.rawId === "chatterbox-turbo");
+  const multilingual = discovered.find((model) => model.rawId === "chatterbox-multilingual-v3");
+  assert.deepEqual(discoveredModelLanguages(ctx, turbo), ["en-US"]);
+  assert.ok(discoveredModelLanguages(ctx, multilingual).includes("es-419"));
+  assert.ok(!ctx.modelCatalog.languages.some((language) => ["he", "sw"].includes(language.apiCode)));
+  assert.deepEqual(discovered.find((model) => model.rawId === "normalized-languages").languages,
+    [{ id: "en" }, { id: "pt" }, { id: "es" }, { id: "fil" }]);
+  const english = resolveLanguage(ctx, "en-US");
+  const spanish = resolveLanguage(ctx, "es-419");
+  const uiError = new Function("modelCatalog", "discoveredModels", `${source("modelLanguageError")}; return modelLanguageError;`)(ctx.modelCatalog, () => discovered);
+  for (const check of [(id, language) => modelLanguageError(ctx, id, language), uiError]) {
+    assert.match(check(turbo.id, spanish), /does not support Spanish/);
+    assert.equal(check(turbo.id, english), "");
+    assert.equal(check(multilingual.id, spanish), "");
+    for (const rawId of ["no-languages", "empty-languages", "active-only"]) {
+      const model = discovered.find((item) => item.rawId === rawId);
+      assert.deepEqual(model.languages, []);
+      assert.equal(check(model.id, spanish), "");
+    }
+  }
 });
 
 test("model discovery does not retry", async (t) => {

@@ -1,6 +1,6 @@
 {
   "name": "apupod",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Agent-driven local podcast studio: MCP tools and skills for hosts, plans, scripts, and TTS audio, with a browser UI.",
   "keywords": [
     "podcast",

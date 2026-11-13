@@ -260,6 +260,9 @@ async function loadCompatibleModels(context, connection, provider) {
       connectionId: connection.id,
       connectionName: connection.name,
       suggested: { tts: suggestsTts(model) },
+      languages: [...new Set((Array.isArray(model.languages) ? model.languages : [])
+        .filter((language) => typeof language === "string")
+        .map((language) => language.trim().toLowerCase().split(/[-_]/)[0]).filter(Boolean))].map((id) => ({ id })),
     });
   }
   provider.discoveredModels = discoveredModels;
@@ -361,12 +364,6 @@ export function isElevenLabsModel(context, model) {
   return ELEVENLABS_MODELS.includes(model) || context.modelCatalog.providers.elevenlabs.discoveredModels.some((item) => item.id === model);
 }
 
-function isCompatibleTtsModel(context, modelId) {
-  const parsed = parseCompatibleModelId(modelId);
-  if (!parsed) return false;
-  return compatibleModelProvider(context, parsed.connectionId)?.ttsModels.some((model) => model.id === modelId) === true;
-}
-
 function compatibleModelProvider(context, connectionId) {
   return [...(context.modelCatalog.providers.compatible || []), context.modelCatalog.providers.openai, context.modelCatalog.providers.chatterbox]
     .find((provider) => provider.id === connectionId);
@@ -388,23 +385,26 @@ export function modelLanguageError(context, modelId, language) {
     return MIMO_LANGUAGE_CODES.has(language.apiCode) ? "" : `MiMo preset TTS does not support ${language.name}; choose an ElevenLabs model.`;
   }
   const parsed = parseCompatibleModelId(modelId);
+  let model;
   if (parsed) {
     const provider = compatibleModelProvider(context, parsed.connectionId);
     const connection = compatibleConnection(context, parsed.connectionId);
     if (provider?.status === "loading") return `${provider.name} models are still loading; retry shortly.`;
     if (provider?.status === "error") return `${provider.name} is unavailable${connection?.baseUrl ? ` at ${connection.baseUrl}` : ""}: ${provider.error || "connection failed"}. Start or reconnect it, then refresh models.`;
     if (provider?.status === "unconfigured") return `${provider.name} is not configured.`;
-    if (isCompatibleTtsModel(context, modelId)) return "";
+    model = provider?.ttsModels.find((item) => item.id === modelId);
+    if (!model) return `Unknown TTS model "${modelId}".`;
+  } else {
+    if (!isElevenLabsModel(context, modelId)) return `Unknown TTS model "${modelId}".`;
+    const provider = context.modelCatalog.providers.elevenlabs;
+    const discovered = provider.discoveredModels.find((item) => item.id === modelId);
+    if (discovered?.supported === false) return discovered.unsupportedReason;
+    model = provider.ttsModels.find((item) => item.id === modelId);
+    if (!model) return provider.status === "loading"
+      ? "ElevenLabs models are still loading; retry shortly."
+      : provider.status === "error" ? `ElevenLabs is unavailable: ${provider.error || "connection failed"}.`
+        : provider.status === "unconfigured" ? "ElevenLabs is not configured." : `TTS model "${modelId}" is not active.`;
   }
-  if (!isElevenLabsModel(context, modelId)) return `Unknown TTS model "${modelId}".`;
-  const provider = context.modelCatalog.providers.elevenlabs;
-  const discovered = provider.discoveredModels.find((item) => item.id === modelId);
-  if (discovered?.supported === false) return discovered.unsupportedReason;
-  const model = provider.ttsModels.find((item) => item.id === modelId);
-  if (!model) return provider.status === "loading"
-    ? "ElevenLabs models are still loading; retry shortly."
-    : provider.status === "error" ? `ElevenLabs is unavailable: ${provider.error || "connection failed"}.`
-      : provider.status === "unconfigured" ? "ElevenLabs is not configured." : `TTS model "${modelId}" is not active.`;
   if (model?.languages?.length && !model.languages.some((item) => item.id === language.apiCode)) {
     return `${model.name || modelId} does not support ${language.name}.`;
   }

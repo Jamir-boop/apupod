@@ -804,7 +804,7 @@ codex plugin add apupod@apupod</code></pre>
     &quot;servers&quot;: {
       &quot;apupod&quot;: {
         &quot;type&quot;: &quot;local&quot;,
-        &quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;github:Jamir-boop/apupod#v2.0.0&quot;, &quot;mcp&quot;]
+        &quot;command&quot;: [&quot;npx&quot;, &quot;-y&quot;, &quot;github:Jamir-boop/apupod#v2.0.1&quot;, &quot;mcp&quot;]
       }
     }
   }
@@ -1223,8 +1223,7 @@ codex plugin add apupod@apupod</code></pre>
         if (provider?.status === "unconfigured") return `${name} is not configured.`;
         return `TTS model "${modelId}" is unavailable. Refresh models or select an active model.`;
       }
-      if (model?.provider === "compatible") return "";
-      if (model?.provider === "elevenlabs" && model.languages?.length && !model.languages.some((item) => item.id === language.apiCode)) return `${model.name} does not support ${language.name}.`;
+      if (model.languages?.length && !model.languages.some((item) => item.id === language.apiCode)) return `${model.name || modelId} does not support ${language.name}.`;
       return "";
     }
 
